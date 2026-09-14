@@ -11,9 +11,11 @@ import 'package:share_plus/share_plus.dart';
 
 import '../api/hub_client.dart';
 import '../api/models.dart';
+import '../config/hub_config.dart';
 import '../services/audio_service.dart';
 import '../services/backup_service.dart';
 import '../services/haptics_service.dart';
+import '../services/hub_discovery.dart';
 import '../storage/character_store.dart';
 import '../theme/app_theme.dart';
 
@@ -34,6 +36,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _checking = false;
   bool _backupBusy = false;
   String? _backupMsg;
+  bool _discovering = false;
+  List<DiscoveredHub> _discovered = [];
+  String? _discoverMsg;
 
   @override
   void initState() {
@@ -110,6 +115,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 : const Icon(Icons.wifi_tethering),
             label: const Text('Save & test connection'),
           ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: (_checking || _discovering) ? null : _discover,
+            icon: _discovering
+                ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.radar),
+            label: const Text('Find hub automatically'),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'No typing needed: the laptop announces itself on Wi-Fi. '
+            'Also tries the laptop-hotspot gateway automatically.',
+            style: TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+          if (_discoverMsg != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(_discoverMsg!, style: const TextStyle(fontSize: 13)),
+            ),
+          for (final hub in _discovered)
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.dns, color: PathfinderTheme.gold),
+                title: Text(hub.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text(hub.detail),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () {
+                  _url.text = hub.baseUrl;
+                  _saveAndCheck();
+                },
+              ),
+            ),
           const SizedBox(height: 20),
           if (_error != null)
             Card(
@@ -200,6 +237,55 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _discover() async {
+    setState(() { _discovering = true; _discoverMsg = null; _discovered = []; });
+    try {
+      final discovery = HubDiscovery();
+      final mdns = await discovery.discoverMdns();
+      final candidates = [
+        ...mdns,
+        ...discovery.staticCandidates(savedBaseUrl: widget.client.config.baseUrl),
+      ];
+      // Dedupe by baseUrl, probe in parallel, keep reachable hubs.
+      final seen = <String>{};
+      final unique = candidates.where((h) => seen.add(h.baseUrl)).toList();
+      final probed = await Future.wait(unique.map((hub) async {
+        try {
+          final client = HubClient(HubConfig(hub.baseUrl));
+          try {
+            final health = await client.health();
+            return (hub: hub, health: health);
+          } finally {
+            client.close();
+          }
+        } catch (_) {
+          return null;
+        }
+      }));
+      final healthy = probed.whereType<({DiscoveredHub hub, HubHealth health})>().toList();
+      if (!mounted) return;
+      setState(() {
+        _discovered = healthy
+            .map((e) => DiscoveredHub(
+                  name: e.hub.name,
+                  host: e.hub.host,
+                  port: e.hub.port,
+                  version: e.health.version,
+                  model: e.health.ollamaModel,
+                  viaMdns: e.hub.viaMdns,
+                ))
+            .toList();
+        _discoverMsg = healthy.isEmpty
+            ? 'No hub found. Start the hub on the laptop (Command Center → Start Hub), join the same Wi-Fi or the laptop hotspot, then try again.'
+            : 'Found ${healthy.length} hub(s) — tap one to connect.';
+      });
+    } catch (e) {
+      if (mounted) setState(() => _discoverMsg = 'Discovery failed: $e');
+    } finally {
+      if (mounted) setState(() => _discovering = false);
+    }
   }
 
   Widget _healthCard(HubHealth h) {

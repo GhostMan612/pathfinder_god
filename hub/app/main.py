@@ -25,8 +25,12 @@ from app.api.monitoring import MetricsMiddleware
 async def lifespan(app: FastAPI):
     # Startup: initialize database
     CampaignRepository(str(settings.data_dir / "campaign.db"))
+    # Zero-config LAN discovery for the phone (no-op if zeroconf missing)
+    from app.discovery import start_advertisement, stop_advertisement
+    start_advertisement(settings.port, settings.version, settings.ollama_model)
     yield
     # Shutdown: cleanup if needed
+    stop_advertisement()
 
 
 def create_app() -> FastAPI:
