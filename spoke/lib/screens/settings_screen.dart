@@ -164,12 +164,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
           SwitchListTile(
             secondary: const Icon(Icons.music_note),
             title: const Text('Background music'),
-            subtitle: const Text('Quiet tavern ambience, loops offline'),
+            subtitle: const Text('Royalty-free loops, plays offline'),
             value: AudioService.instance.musicEnabled,
             onChanged: (v) {
               AudioService.instance.setMusicEnabled(v);
               setState(() {});
             },
+          ),
+          ListTile(
+            leading: const Icon(Icons.queue_music),
+            title: const Text('Music track'),
+            trailing: DropdownButton<int>(
+              value: AudioService.instance.musicTrack,
+              items: [
+                for (var i = 0; i < AudioService.tracks.length; i++)
+                  DropdownMenuItem(value: i, child: Text(AudioService.tracks[i])),
+              ],
+              onChanged: (v) {
+                if (v == null) return;
+                AudioService.instance.setMusicTrack(v);
+                setState(() {});
+              },
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.attribution),
+            title: const Text('Audio credits'),
+            subtitle: const Text('Royalty-free artists (tap to view)'),
+            onTap: () => showDialog<void>(
+              context: context,
+              builder: (_) => AlertDialog(
+                title: const Text('Audio credits'),
+                content: const SingleChildScrollView(child: Text(kAudioCredits)),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Close'),
+                  ),
+                ],
+              ),
+            ),
           ),
           SwitchListTile(
             secondary: const Icon(Icons.volume_up),

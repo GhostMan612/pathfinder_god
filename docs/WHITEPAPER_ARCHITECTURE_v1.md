@@ -32,9 +32,9 @@
 
 ---
 
-## Addendum — v0.6.1/v0.6.2 (2026-09-14)
+## Addendum — v0.6.1–v0.6.3 (2026-09-14)
 
-Supersedes these [v1.0] figures: DB is **43,884 rows** (1E 22,131 / 2E 21,753),
+Supersedes these [v1.0] figures: DB is **44,620 rows** (1E 22,131 / 2E 22,489) as of v0.6.3 (jrmiller82 OGL YAML folded in); royalty-free BGM/SFX shipped (see `audio-credits.md`);
 57 MB live / 20 MB gzipped asset (`bundleVersion` 2); app is **5 tabs**
 (Rules/Bestiary merged into one Rules tab); search is **exact-name →
 FTS5-known-source → FTS5-Unknown** on hub and phone; categories are canonical

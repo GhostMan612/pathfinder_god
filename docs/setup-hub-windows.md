@@ -28,7 +28,7 @@ Sanity check: `ollama run phi4-mini "Say hello as a Pathfinder GM."`
 
 ## 2. Rules database (already warm)
 
-`data/pathfinder_rag.db` (43,884 FTS5 rows) lives **only on the laptop** and is
+`data/pathfinder_rag.db` (44,620 FTS5 rows) lives **only on the laptop** and is
 git-ignored. A fresh clone won't have it — either copy it from your machine or
 rebuild from open sources:
 

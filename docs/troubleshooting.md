@@ -26,7 +26,7 @@ should return JSON.
 
 ## 4. Rules show "Offline book unavailable"
 
-The bundled database extracts on first launch (20MB → 57MB, ~30 seconds, spinner
+The bundled database extracts on first launch (20MB → 58MB, ~30 seconds, spinner
 in the Rules tab). If it fails: force-stop the app, clear storage, relaunch on
 good Wi-Fi (extraction is local, but first launch shouldn't be interrupted).
 Developers: extraction logs come over `flutter logs` (`RulebookDb:` lines).

@@ -1,6 +1,6 @@
 # Rules database
 
-One FTS5 table, two editions, 43,884 rows. The laptop owns the master copy;
+One FTS5 table, two editions, 44,620 rows. The laptop owns the master copy;
 the phone ships a gzip of it inside the APK.
 
 ## Shape
@@ -10,8 +10,8 @@ category, source_book`). Full column contract: [`../data/SCHEMA.md`](../data/SCH
 
 | Fact (2026-09-14) | Value |
 |---|---|
-| Rows | 43,884 (1E 22,131 · 2E 21,753) |
-| Size | 57MB (phone asset: 20MB gzip) |
+| Rows | 44,620 (1E 22,131 · 2E 22,489) |
+| Size | 58MB (phone asset: 20MB gzip) |
 | `system` | `1E`/`2E` UPPERCASE everywhere |
 | Categories | canonical lowercase (`feat`, `spell`, `equipment`, `bestiary`, `action`, …) — never book names |
 | `Unknown Source` rows | 8,926 legacy (ranked last, shrinking per import) |

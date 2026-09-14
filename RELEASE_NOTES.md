@@ -1,5 +1,22 @@
 # Pathfinder God — Release Notes
 
+## v0.6.3 "Real Audio + Fuller Library" — 2026-09-14
+
+### Highlights
+- **Royalty-free audio**: real tavern/inn ambient loops (CC0 + CC-BY) replace the
+  synth BGM, with a track picker in Settings; real dice/coin/UI SFX replace the
+  synth blips. Full credits in-app (**Setup → Audio credits**) and
+  `docs/audio-credits.md`. Command Center dice/Guide replies play sounds too.
+- **44,620 rules** (was 43,884): +736/+110 from jrmiller82's OGL 2e YAML
+  (spells, feats, monsters with `Core Rulebook p.X` citations); APG 1e confirmed
+  in-tree (1,853 rows). Phone bundle re-generated (20MB, `bundleVersion` 2).
+
+### Spoke
+- `AudioService` track preference (`music_track`); `flutter analyze` clean,
+  `flutter test` 21/21.
+
+---
+
 ## v0.6.2 "Zero-Config" — 2026-09-14
 
 ### Highlights
@@ -95,7 +112,7 @@ Manual fallback: hub URL is `http://<laptop-lan-ip>:8000`
 ## Data Layer
 | Asset | Location | Size | Notes |
 |-------|----------|------|-------|
-| `pathfinder_rag.db` | `data/` (laptop, git-ignored) | 57MB | 43,884 FTS5 rows (1E 22,131 + 2E 21,753) |
+| `pathfinder_rag.db` | `data/` (laptop, git-ignored) | 58MB | 44,620 FTS5 rows (1E 22,131 + 2E 22,489) |
 | `pathfinder_rag.db.gz` | `spoke/assets/rules/` (Git LFS) | 20MB | Bundled in APK, extracted on first launch |
 | `campaign.db` | `data/` (git-ignored) | 114KB | Campaigns/sessions/NPCs/locations/quests |
 

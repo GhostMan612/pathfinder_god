@@ -18,6 +18,9 @@ datas_list = []
 chat_hist = SPEC_DIR / "chat_history.json"
 if chat_hist.exists():
     datas_list.append((str(chat_hist), "."))
+sounds_dir = SPEC_DIR / "sounds"
+if sounds_dir.exists():
+    datas_list.append((str(sounds_dir), "sounds"))
 
 a = Analysis(
     ['main.py'],
@@ -45,6 +48,7 @@ a = Analysis(
         'pathlib',
         'services',
         'hub_api',
+        'sfx',
     ],
     hookspath=[],
     hooksconfig={},

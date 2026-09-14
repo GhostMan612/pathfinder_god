@@ -53,7 +53,7 @@ that's Ollama, and you'll get a confusing 404.
 |---|---|
 | Dice (degrees of success, animated die, SFX/haptics) | No — fully offline |
 | Character sheet (view/edit/save, export/import) | No — stored on the phone |
-| Rules search + browse + Guide chatbot | No — 43,884 entries on-device |
+| Rules search + browse + Guide chatbot | No — 44,620 entries on-device |
 | "Forge with the God", GM chat, generators | Yes |
 
 ## For developers

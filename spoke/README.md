@@ -2,7 +2,7 @@
 
 The player's companion app: an offline **dice roller**, a **character sheet**
 (with "forge a full bio with the God"), **live GM chat** streamed from the hub,
-and a **rules browser** with 43,884 entries on-device. A thin client — the laptop
+and a **rules browser** with 44,620 entries on-device. A thin client — the laptop
 hub does the LLM + RAG work.
 
 Package: `com.pathfindergod` · 5 tabs: Dice, God, Hero, Rules, Setup.

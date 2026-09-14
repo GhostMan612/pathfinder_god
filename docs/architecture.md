@@ -26,7 +26,7 @@
 
 ## Why two languages (and why that's correct here)
 
-The hub does all the heavy lifting — LLM inference and retrieval over 43,884 rules — so the
+The hub does all the heavy lifting — LLM inference and retrieval over 44,620 rules — so the
 phone can stay a thin, fast client. Because of that split, the two halves share almost no
 logic: only a small JSON contract ([`../shared/openapi.yaml`](../shared/openapi.yaml)) and the
 dice math. That makes "one language for both" a cost with no benefit, so each side uses the
@@ -55,7 +55,7 @@ fallback (Ollama → raw excerpts). The two halves share almost no logic beyond 
 ## The rules-database problem
 
 - The `.db` files live **only on the laptop**, are **git-ignored**, and are **never** committed
-  to git. The phone carries its own copy: a 20MB gzip of the 57MB FTS5 database (43,884 rows)
+  to git. The phone carries its own copy: a 20MB gzip of the 58MB FTS5 database (44,620 rows)
   ships inside the APK via Git LFS (`spoke/assets/rules/`) and is extracted on first launch
   (`RulebookDb`, read-only).
 - **Extraction:** Native Kotlin `MainActivity` streams via `AssetManager→GZIPInputStream` 8KB chunks → `FileOutputStream` → `fd.sync()` → ext4 atomic `renameTo` (peak 8KB). Dart `MethodChannel('com.pathfindergod/rulebook')` tries native first; `Isolate.run(gzip.decode)` fallback for non-Android/tests. `getApplicationDocumentsDirectory()/rulebook` is the writable target. A static `Future` lock prevents double decode; `addPostFrameCallback` defers until after first frame. Play Asset Delivery `install-time` raw pack remains the Play Store option (future).
@@ -82,7 +82,7 @@ WebSocket resilience: `HubClient.stream` `IOWebSocketChannel(pingInterval:15s)` 
 | Device | Role | Notes |
 |---|---|---|
 | Dell Latitude 5400 (i5, CPU-only) | Hub | `phi4-mini` default (5–7 tok/s) or `qwen2.5:3b Q4_K_M` (8–11 tok/s) for ReAct tool-calling; `nomic-embed-text`; `rag_limit 4`, `num_predict 700`, `temperature 0.6`. |
-| Moto G 5G (2025) | Spoke | UI only; local dice + 8KB-streamed 43,884-row rule DB; no LLM. |
+| Moto G 5G (2025) | Spoke | UI only; local dice + 8KB-streamed 44,620-row rule DB; no LLM. |
 
 ## Discovery (zero-config LAN)
 

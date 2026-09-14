@@ -32,7 +32,7 @@ class LocalRuleHit {
 /// Offline Pathfinder rulebook backed by the bundled FTS5 database.
 ///
 /// First launch: loads the gzip asset (~48MB) out of the APK and
-/// decompresses it into app storage (~132MB). Every launch after that
+/// decompresses it into app storage (~58MB). Every launch after that
 /// opens the extracted file read-only — zero network, zero hub.
 class RulebookDb {
   static const _assetPath = 'assets/rules/pathfinder_rag.db.gz';

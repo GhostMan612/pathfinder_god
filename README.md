@@ -3,7 +3,7 @@
 A hub-and-spoke Pathfinder (1e/2e) table companion:
 
 - **Hub** — a Python service on your Windows laptop. FastAPI + local LLM (Ollama) +
-  RAG over **43,884** FTS5-indexed rules. Answers questions, generates characters/NPCs/
+  RAG over **44,620** FTS5-indexed rules. Answers questions, generates characters/NPCs/
   encounters, keeps campaign memory. No cloud required.
 - **Spoke** — a Flutter Android app. Dice, character sheet, live God chat, and a full
   **offline rulebook** (the database ships inside the app — the laptop can stay off).
@@ -12,7 +12,7 @@ A hub-and-spoke Pathfinder (1e/2e) table companion:
 ┌────────────────────────────┐         Same Wi-Fi (or laptop hotspot)          ┌──────────────────┐
 │  HUB  ·  laptop (Python)   │  ◀──────────  HTTP + WebSocket  ──────────▶     │  SPOKE · Android │
 │  FastAPI + Ollama + RAG    │      auto-discovery, no IP typing needed        │  Flutter app     │
-│  43,884 rules (local)      │                                                 │  dice · sheet    │
+│  44,620 rules (local)      │                                                 │  dice · sheet    │
 └────────────────────────────┘                                                 └──────────────────┘
 ```
 
@@ -27,7 +27,7 @@ No typing IP addresses: the hub announces itself on the LAN and the app's
 | Dice | PF2e engine (degrees of success, advantage, hero points) + animated 3D die, SFX + haptics | No — fully offline |
 | God | Live GM chat, streaming markdown with source citations | Yes |
 | Hero | Full PF2e character sheet (9 tabs), derived stats auto-recalc, local SQLite | No (except "Forge with the God") |
-| Rules | Offline rulebook: search + browse chips + Guide chatbot, hub fallback | No — 43,884 entries on-device |
+| Rules | Offline rulebook: search + browse chips + Guide chatbot, hub fallback | No — 44,620 entries on-device |
 | Setup | Hub connection (auto-discover), sound/haptics toggles, backup/restore | — |
 
 Backup/restore (Settings): characters + campaign export as JSON/JSONL via the system
@@ -70,7 +70,7 @@ browse models, search rules, run generators, roll dice, chat with the God, watch
 
 ## Data & licensing
 
-- Rules DB: 43,884 rows built from open sources (Paizo PRD text via OGL, Pf2ools
+- Rules DB: 44,620 rows built from open sources (Paizo PRD text via OGL, Pf2ools
   MIT/CUP JSON, Community Use scrapes). Build scripts + source registry live in
   `hub/scripts/`; the `.db` files themselves are git-ignored and reproducible.
   Details: [`docs/database.md`](docs/database.md).
@@ -90,7 +90,7 @@ git clone https://github.com/GhostMan612/pathfinder_god.git
 
 ## Status
 
-v0.6.2 — `flutter analyze`: clean · `flutter test`: 21/21 · hub `py_compile`: clean.
+v0.6.3 — `flutter analyze`: clean · `flutter test`: 21/21 · hub `py_compile`: clean.
 History: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 
 ---

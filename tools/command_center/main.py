@@ -14,6 +14,7 @@ from pathlib import Path
 
 import hub_api
 import services
+import sfx
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QIcon, QAction
 from PySide6.QtWidgets import (
@@ -484,6 +485,11 @@ class DiceTab(QWidget):
         self._rolls.insert(0, line)
         self._rolls = self._rolls[:20]
         self._history.setHtml("<br>".join(self._rolls))
+        # Royalty-free roll audio (winsound, never blocks/fails the UI)
+        if len(rolls) == 1 and rolls[0] == 20 and details.get('modifier', 0) == 0:
+            sfx.crit()
+        else:
+            sfx.roll()
 
 
 class GuideTab(QWidget):
@@ -560,6 +566,7 @@ class GuideTab(QWidget):
     def _on_done(self, _):
         self._streaming = False
         self._chat.append("")
+        sfx.tap()
         # Save the assistant's response
         # The full response is in the chat widget; we need to extract it
         # For simplicity, we'll just mark that a response was completed

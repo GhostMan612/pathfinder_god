@@ -4,9 +4,9 @@
 ```
 C:\pathfinder_god\
 ├── hub/                 # Python FastAPI service (WORKING: /health /ask /stream /rules/search /generate)
-├── spoke/               # Flutter Android app, 6 tabs (BUILDS IN ANDROID STUDIO)
+├── spoke/               # Flutter Android app, 5 tabs (BUILDS IN ANDROID STUDIO)
 ├── shared/openapi.yaml  # API contract (source of truth)
-├── data/                # SQLite DBs (pathfinder_rag.db 132MB, gitignored, laptop only)
+├── data/                # SQLite DBs (pathfinder_rag.db 58MB / 44,620 rows, gitignored, laptop only)
 ├── docs/                # Setup + architecture guides
 ├── blueprints/          # Session docs + phased blueprints
 ├── tools/               # gen_audio.py (sound synth), command_center/ (PySide6 standalone exe)
