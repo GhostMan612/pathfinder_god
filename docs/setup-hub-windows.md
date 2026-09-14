@@ -1,66 +1,76 @@
-# Hub setup — the laptop (Dell Latitude 5400)
+# Hub setup — the laptop (Windows)
 
-The hub is the Python service that acts as the Pathfinder God. It runs on your laptop and
-serves the phone over your Wi-Fi.
+The hub is the Python service that acts as the Pathfinder God. It runs on your laptop
+and serves the phone over your Wi-Fi (or your laptop's hotspot).
 
-Your laptop is CPU-only (i5 8th gen, no discrete GPU), so we use **small** local models.
+Your laptop is CPU-only, so we use **small** local models.
 
-## 1. Install Ollama (the local LLM engine)
+## 0. What you need
 
-1. Install Ollama for Windows from <https://ollama.com/download>. It runs as a background
-   service at `http://localhost:11434`.
-2. Pull a small, CPU-friendly model:
+- Windows 10/11, Python environment at `C:\venv-hub`
+  (use it as-is — do **not** create a local `.venv`; install extra packages into it
+  with `C:\venv-hub\venv\Scripts\python.exe -m pip install <pkg>`).
+- Ollama for Windows: <https://ollama.com/download>.
 
-   ```powershell
-   ollama pull phi4-mini        # ~3.8B, the default
-   # optional alternative:
-   ollama pull llama3.2:3b
-   ```
-
-3. Sanity check: `ollama run phi4-mini "Say hello as a Pathfinder GM."`
-
-> On this CPU, expect a slow but usable pace. For long biographies, the local model
-> will take longer but still works — no cloud dependency.
-
-## 2. Put your rules databases in place
-
-Copy your existing `.db` files (`pathfinder_rag.db`, `pathfinder_god.db`,
-`pathfinder_1e_rag.db`, `pathfinder_2e_rag.db`) into the repo's `data/` folder — **or** point
-the hub at wherever they already live:
+## 1. Install the model (the local LLM engine)
 
 ```powershell
-$env:PFGOD_DATA_DIR = "\\wsl.localhost\Ubuntu\home\sovereign_mantle\pathfinder_ai"
+# Ollama listens on 0.0.0.0:11434; the hub talks to it on 127.0.0.1:11450
+ollama pull phi4-mini        # ~3.8B, the default (5-7 tok/s on i5)
+ollama pull qwen2.5:3b       # optional: better tool-calling (8-11 tok/s Q4)
 ```
 
-These files are git-ignored and never uploaded. See [`../data/SCHEMA.md`](../data/SCHEMA.md).
-To rebuild them from source, drop your `build_rag.py` / `build_2e_rag.py` into `hub/scripts/`
-and run `python hub/scripts/rebuild_rags.py`.
+Sanity check: `ollama run phi4-mini "Say hello as a Pathfinder GM."`
 
-> **If the databases are currently on the phone:** move them to the laptop first, e.g.
-> `adb pull /sdcard/pathfinder_rag.db data\` (or copy via Google Drive). The phone doesn't
-> need them — it asks the hub.
+> On this CPU expect a slow but usable pace. Long biographies take longer —
+> there is no cloud dependency. Switch models with `PFGOD_OLLAMA_MODEL`
+> (see `hub/.env.example`).
 
-## 3. Install and run the hub
+## 2. Rules database (already warm)
 
-Works in WSL (Ubuntu) or native Windows. Python 3.10+.
+`data/pathfinder_rag.db` (43,884 FTS5 rows) lives **only on the laptop** and is
+git-ignored. A fresh clone won't have it — either copy it from your machine or
+rebuild from open sources:
 
-```bash
-cd hub
-python -m venv .venv
-. .venv/bin/activate                 # Windows PowerShell: .venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
-
-# start the server, bound so the phone can reach it:
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+```powershell
+C:\venv-hub\venv\Scripts\python.exe hub/scripts/rebuild_rags.py
 ```
 
-Open <http://localhost:8000/docs> to try the API. `GET /health` shows the model and which
-databases were found.
+How the DB is built, where the sources come from, and licensing:
+[`database.md`](database.md). Schema: [`../data/SCHEMA.md`](../data/SCHEMA.md).
+
+## 3. Run the hub
+
+Easiest — double-click **`Start_CommandCenter.bat`** at the repo root, then
+**Services → Start Ollama → Start Hub**. Logs live in
+`tools/command_center/logs/` — check them first when something fails.
+
+Or in a terminal:
+
+```powershell
+cd C:\pathfinder_god\hub
+C:\venv-hub\venv\Scripts\python.exe -m app.main   # http://0.0.0.0:8000
+```
+
+Open <http://localhost:8000/docs> to try the API. `GET /health` shows the model
+and which databases were found. On startup the hub also announces itself over
+mDNS (`_pathfindergod._tcp`) so the phone finds it automatically.
+
+## 4. Let the phone reach it
+
+- Same Wi-Fi **or** the laptop's own hotspot both work.
+- Windows Firewall must allow inbound **TCP 8000** (and 11450 only matters
+  laptop-internally — the phone never talks to Ollama directly).
+- You do **not** need to find your LAN IP by hand: the app's
+  **Setup → Find hub automatically** lists the laptop. Manual fallback is
+  `http://<laptop-lan-ip>:8000`.
 
 ## Troubleshooting
 
-- **Phone can't connect:** confirm both devices are on the same Wi-Fi, the firewall allows
-  8000, and you started uvicorn with `--host 0.0.0.0` (not the default localhost-only).
-- **`/health` shows `databases_found: []`:** `PFGOD_DATA_DIR` is wrong, or the `.db` files
-  aren't there yet.
-- **Generations are slow:** normal on CPU. Use a smaller model, lower `PFGOD_OLLAMA_NUM_PREDICT`.
+- **Phone can't connect:** hub running? Same network? Firewall rule for 8000?
+  Started with `--host 0.0.0.0` (both launchers already do)? See
+  [`troubleshooting.md`](troubleshooting.md).
+- **`/health` shows `databases_found: []`:** the `.db` files aren't in `data/`
+  — copy or rebuild them (step 2).
+- **Generations are slow:** normal on CPU. Smaller model, or lower
+  `PFGOD_OLLAMA_NUM_PREDICT`.

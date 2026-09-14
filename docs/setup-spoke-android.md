@@ -1,74 +1,65 @@
-# Spoke setup — the Android app (Moto G 5G 2025)
+# Spoke setup — the Android app (Flutter)
 
-The spoke is the Flutter app that lives on your phone. It needs the hub running on your
-laptop (see [`setup-hub-windows.md`](setup-hub-windows.md)).
+The spoke is the Flutter app on your phone: dice, character sheet, God chat, and
+the offline rulebook. It needs the hub running on your laptop
+(see [`setup-hub-windows.md`](setup-hub-windows.md)) — but dice, characters, and
+the rulebook work fully offline.
 
-## 1. Install Flutter (on the laptop, for building)
+> Cloning? Install Git LFS **first** (`git lfs install`), or the bundled
+> rulebook arrives as a useless pointer file.
 
-Follow <https://docs.flutter.dev/get-started/install>. Verify with `flutter doctor`
-(you need the Android toolchain: Android SDK + a device or emulator).
+## 1. Build it (Android Studio — recommended)
 
-## 2. Generate the Android project and fetch packages
+1. Open the `spoke/` folder in Android Studio.
+2. Let Gradle sync, then press **Run** on your device/emulator.
 
-The `android/` folder isn't committed — Flutter generates it. From the repo:
+That's it — `android/` is committed, no `flutter create` needed (running it would
+overwrite the branded config: `com.pathfindergod`, icons, splash).
+
+## 2. Command-line alternative
 
 ```bash
 cd spoke
-flutter create --platforms=android --org com.pathfindergod --project-name pathfinder_spoke .
-git checkout -- pubspec.yaml lib test analysis_options.yaml   # in case flutter create touched them
 flutter pub get
+flutter analyze        # must be clean
+flutter test           # 21/21
+flutter run            # NOT for commits — lane ends at analyze+test
 ```
+
+Never commit APKs/AABs. If `flutter pub upgrade` wants `sqlite3_flutter_libs`
+0.6.0, refuse it — stay on `^0.5.42` (0.6.0 is end-of-life upstream).
 
 ## 3. Allow LAN plain-HTTP
 
-The hub is served over `http://` on your LAN, so enable cleartext traffic. In
-`android/app/src/main/AndroidManifest.xml`, add to the `<application ...>` tag:
-
-```xml
-<application
-    android:usesCleartextTraffic="true"
-    ... >
-```
-
-For a **release** APK, also add this permission inside `<manifest>`:
+Already configured in the committed `AndroidManifest.xml`
+(`android:usesCleartextTraffic="true"`). For a **release** build you must add:
 
 ```xml
 <uses-permission android:name="android.permission.INTERNET"/>
 ```
 
-## 4. Build and install
+## 4. Connect to the hub (no IP typing)
 
-```bash
-# quickest: run on a plugged-in phone (enable USB debugging first)
-flutter run
+Open the app → **Setup → Find hub automatically** → tap your laptop when it
+appears → green "Connected to the God" card (shows model + databases found).
 
-# or build a release APK to sideload:
-flutter build apk --release
-# -> build/app/outputs/flutter-apk/app-release.apk  (copy to the phone and install)
-```
-
-## 5. Point the app at the hub
-
-Open the app → **Setup** tab → set **Base URL** to your laptop's Wi-Fi IP, e.g.
-`http://192.168.1.42:8000` → **Save & test connection**. A green card means you're linked to
-the God (it shows the model and which databases were found).
-
-> Android emulator on the same laptop as the hub? Use `http://10.0.2.2:8000` (the emulator's
-> alias for the host machine) — this is the app's default.
+Manual fallback: **Base URL** = `http://<laptop-lan-ip>:8000`
+(emulator on the same machine: `http://10.0.2.2:8000`). **Never `:11450`** —
+that's Ollama, and you'll get a confusing 404.
 
 ## What works where
 
 | Feature | Needs the hub? |
 |---|---|
-| Dice roller (incl. advantage/disadvantage) | No — fully offline |
-| Character sheet (view/edit/save) | No — stored on the phone |
-| "Forge full bio with the God" | Yes |
-| GM chat (live streaming) | Yes |
-| Rules & bestiary search | Yes |
+| Dice (degrees of success, animated die, SFX/haptics) | No — fully offline |
+| Character sheet (view/edit/save, export/import) | No — stored on the phone |
+| Rules search + browse + Guide chatbot | No — 43,884 entries on-device |
+| "Forge with the God", GM chat, generators | Yes |
 
-## Troubleshooting
+## For developers
 
-- **"Couldn't reach the God":** check the Setup URL, that the hub is running with
-  `--host 0.0.0.0`, both devices on the same Wi-Fi, and the laptop firewall allows port 8000.
-- **Chat connects but never streams:** some networks block WebSockets between clients — try a
-  phone hotspot, or later set up Tailscale (see [`architecture.md`](architecture.md)).
+- Offline DB: `spoke/assets/rules/pathfinder_rag.db.gz` extracts on first launch
+  to app storage (read-only FTS5). After re-bundling, bump
+  `RulebookDb.bundleVersion` or devices keep the stale copy.
+- Hub address persists per-device (`hub_base_url`); discovery writes it.
+- Something broken? [`troubleshooting.md`](troubleshooting.md) first.

@@ -1,6 +1,7 @@
 # Pathfinder God — Technical Architecture Whitepaper v1.0
 
 **Date:** 2026-08-30  
+**Addendum:** 2026-09-14 (v0.6.1 database truth pass, v0.6.2 zero-config discovery) — see [Addendum](#addendum--v061v062-2026-09-14). Body below is the frozen v1.0 text; figures marked [v1.0] are superseded where the addendum says so.  
 **Status:** Working system — Hub live on :8000, Spoke builds in Android Studio, Command Center standalone exe shipped. Current focus: offline-first polish, hub-spoke resilience, dice fidelity.  
 **Authors:** Pathfinder God build team  
 **Classification:** Internal — shareable with Gemini / external reviewers for deep research help  
@@ -31,13 +32,28 @@
 
 ---
 
+## Addendum — v0.6.1/v0.6.2 (2026-09-14)
+
+Supersedes these [v1.0] figures: DB is **43,884 rows** (1E 22,131 / 2E 21,753),
+57 MB live / 20 MB gzipped asset (`bundleVersion` 2); app is **5 tabs**
+(Rules/Bestiary merged into one Rules tab); search is **exact-name →
+FTS5-known-source → FTS5-Unknown** on hub and phone; categories are canonical
+lowercase; content is plain text (HTML stripped). New: hub advertises
+`_pathfindergod._tcp` over mDNS and the app auto-discovers it
+(**Setup → Find hub automatically**, hotspot/emulator/last-known fallbacks).
+Open-data pipeline landed (`build_rag.py`, `build_2e_rag.py`, `db_normalize.py`,
+PSRD/Pf2ools importers, AoN/d20pfsrd scrapers). Current gates:
+`flutter analyze` clean, `flutter test` 21/21. Live docs:
+`../README.md`, [`database.md`](database.md), [`api.md`](api.md),
+[`troubleshooting.md`](troubleshooting.md).
+
 ## 1. Abstract
 
-Pathfinder God is a **Hub-Spoke tabletop RPG companion** for **Pathfinder 1e/2e**. The **Hub** (laptop, Python + FastAPI + Ollama + FTS5 RAG) owns all heavy work — 34k+ rule entries, retrieval, LLM generation, campaign persistence. The **Spoke** (phone, Flutter) is a thin, resilient, **offline-first** client for dice (full PF2e degrees of success), character sheet, rulebook browser, bestiary, and GM chat. A **standalone PySide6 Command Center exe** (~48 MB) lets a GM run Hut/Ollama without a venv.
+Pathfinder God is a **Hub-Spoke tabletop RPG companion** for **Pathfinder 1e/2e**. The **Hub** (laptop, Python + FastAPI + Ollama + FTS5 RAG) owns all heavy work — 43,884 rule entries [v1.0: 34k+], retrieval, LLM generation, campaign persistence. The **Spoke** (phone, Flutter) is a thin, resilient, **offline-first** client for dice (full PF2e degrees of success), character sheet, rulebook browser, and GM chat. A **standalone PySide6 Command Center exe** (~48 MB) lets a GM run Hub/Ollama without a venv.
 
-Key design constraint: **500 MB+ of ORC/OGL-derived rules** must be searchable instantly, even with the laptop off, without committing binaries to git. Solved by a 132 MB FTS5 SQLite DB on the hub + a 48 MB gzipped copy bundled in the APK and lazily extracted to app storage on first launch. All communication is `shared/openapi.yaml`-driven REST + auto-reconnecting WebSocket; generation is 2-tier (Ollama → raw FTS5 excerpts, never a dead end).
+Key design constraint: **open-licensed rules** must be searchable instantly, even with the laptop off, without committing binaries to git. Solved by a 57 MB FTS5 SQLite DB on the hub [v1.0: 132 MB] + a 20 MB gzipped copy bundled in the APK [v1.0: 48 MB] and lazily extracted to app storage on first launch. All communication is `shared/openapi.yaml`-driven REST + auto-reconnecting WebSocket; generation is 2-tier (Ollama → raw FTS5 excerpts, never a dead end).
 
-This paper documents the **as-built v0.5.x** system, exact tech choices, data flows, and the three live bugs we just fixed (offline DB path, dice animation, hub port confusion) with log evidence — so Gemini can review without guessing and propose deeper research.
+This paper documents the **as-built v0.5.x–v0.6.0** system, exact tech choices, data flows, and the live bugs fixed with log evidence — so reviewers can evaluate without guessing and propose deeper research.
 
 ---
 

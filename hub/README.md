@@ -1,35 +1,37 @@
 # Pathfinder God — Hub (Python)
 
-The "God": a FastAPI service that answers Pathfinder GM requests using retrieval over your
-local rules databases (RAG) plus a local LLM, with a graceful fallback chain.
+The "God": a FastAPI service that answers Pathfinder GM requests using retrieval
+over your local rules database (RAG) plus a local LLM — with a fallback chain
+that always returns an answer.
 
-## Backend fallback (always gives an answer)
+## Backend fallback (never a dead end)
 
-1. **DeepSeek API** — used only if `PFGOD_DEEPSEEK_API_KEY` is set (best for long bios).
-2. **Local Ollama** — the laptop's small model (`phi4-mini` by default).
-3. **Raw rule excerpts** — no LLM; hands back the retrieved rules.
+1. **Local Ollama** — the laptop's small model (`phi4-mini` by default,
+   `qwen2.5:3b` for tool-calling). RAG-grounded, citations attached.
+2. **Raw rule excerpts** — no LLM; hands back the retrieved rules directly.
 
 ## Install & run
 
-```bash
-cd hub
-python -m venv .venv && . .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
+Use the existing environment as-is — do **not** create a local `.venv`:
 
-# point at your databases if they aren't in <repo>/data:
-export PFGOD_DATA_DIR=/path/to/your/pathfinder_ai   # Windows: setx / $env:
-
-uvicorn app.main:app --host 0.0.0.0 --port 8000     # 0.0.0.0 so the phone can reach it
+```powershell
+cd C:\pathfinder_god\hub
+C:\venv-hub\venv\Scripts\python.exe -m app.main   # http://0.0.0.0:8000
 ```
 
-Open `http://localhost:8000/docs` for interactive API docs. Full setup (Ollama install,
-model pull, finding your laptop IP) is in [`../docs/setup-hub-windows.md`](../docs/setup-hub-windows.md).
+Or double-click **`Start_CommandCenter.bat`** at the repo root
+(Services → Start Ollama → Start Hub). Logs: `tools/command_center/logs/`.
+
+Open `http://localhost:8000/docs` for interactive API docs. On startup the hub
+announces `_pathfindergod._tcp` over mDNS so the phone finds it automatically
+(`app/discovery.py`; silent no-op if `zeroconf` is missing).
+
+Settings live in `hub/.env` (see `.env.example`, `PFGOD_*` keys) — never commit it.
 
 ## CLI (no phone / no server needed)
 
-```bash
-pathfinder-god "build me a level 3 rogue with a full backstory"
-pathfinder-god --edition 2e            # interactive loop
+```powershell
+C:\venv-hub\venv\Scripts\python.exe -m app.cli "build me a level 3 rogue"
 ```
 
 ## HTTP API (summary)
@@ -37,26 +39,35 @@ pathfinder-god --edition 2e            # interactive loop
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/health` | Version, model, which DBs were found. |
-| POST | `/ask` | General GM Q&A / generation (auto-detects mode). |
+| POST | `/ask` | GM Q&A / generation (auto-detects mode, RAG + citations). |
 | POST | `/generate/{kind}` | `character`·`npc`·`monster`·`boss`·`map`·`campaign`·`encounter`. |
-| GET | `/rules/search?q=&edition=` | Raw rule/bestiary lookup (no LLM). |
-| GET/POST | `/campaign`, `/campaign/note`, `/campaign/reset` | Campaign state. |
-| WS | `/stream` | Live token-by-token "God is typing" feed. |
+| GET | `/rules/search?q=&edition=&limit=` | Raw rule lookup, exact-match first (no LLM). |
+| GET/POST | `/campaign`, `/campaign/note`, `/campaign/reset` | Campaign state + continuity. |
+| GET/POST | `/campaign/export`, `/campaign/import` | Backup/restore (JSON). |
+| WS | `/stream` | Token-by-token feed (`start`→`chunk`*→`end`, plus `retrying`/`error`). |
 
-Regenerate the shared contract after any change: `python scripts/export_openapi.py`.
+Contract: [`../shared/openapi.yaml`](../shared/openapi.yaml) (v0.1.0).
+Regenerate after changes: `python scripts/export_openapi.py`.
+Full endpoint reference: [`../docs/api.md`](../docs/api.md).
 
 ## Package layout
 
 ```
 app/
-├── config.py         # env-driven settings (PFGOD_*)
-├── rag/search.py     # read-only FTS retrieval + 2e→1e fallback + shape detection
-├── llm/backends.py   # 3-tier fallback (DeepSeek → Ollama → raw excerpts), async + streaming
-├── agent/gm.py       # detect_mode + prompt building (full bios/backstories)
-├── generators/       # (mode prompts live in main.py's /generate route)
-├── state/campaign.py # party roster + GM notes (JSON)
-├── service.py        # orchestrates retrieval + prompt + LLM
-├── models.py         # pydantic wire contract (drives OpenAPI)
-├── main.py           # FastAPI app (routes + WebSocket)
-└── cli.py            # terminal access
+├── main.py            # FastAPI factory, middleware, lifespan (DB + mDNS)
+├── config.py          # PFGOD_* settings (pydantic-settings)
+├── discovery.py       # mDNS advertisement (_pathfindergod._tcp)
+├── api/               # health, ask (+/stream WS), generate, rules,
+│                      # campaign (+export/import), monitoring, security
+├── rag/               # retriever.py (exact→FTS5→Unknown tiers, 2e→1e),
+│                      # raw_fallback.py, search.py (legacy shape detection)
+├── llm/               # orchestrator.py (2-tier + qwen ReAct loop),
+│                      # ollama_client.py (generate/stream/chat/embeddings)
+├── agents/            # rules_lawyer.py (deterministic LEVEL_DC/ACTION_SKILL),
+│                      # npc_compiler.py, continuity.py
+├── db/repository.py   # campaign SQLite (9 tables)
+└── cli.py             # terminal access
 ```
+
+Rules data: [`../docs/database.md`](../docs/database.md) ·
+schema [`../data/SCHEMA.md`](../data/SCHEMA.md).

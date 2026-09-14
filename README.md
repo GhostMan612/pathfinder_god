@@ -1,60 +1,97 @@
-# Pathfinder God 🐉
+# Pathfinder God
 
-A hub-and-spoke Pathfinder RPG system:
+A hub-and-spoke Pathfinder (1e/2e) table companion:
 
-- **Hub** — a Python service that runs on your Windows laptop (WSL or native) and acts as a
-  full Pathfinder "God" / Game Master. It answers rules questions, and builds characters,
-  NPCs, monsters, bosses, maps, and campaigns — each with full biographies and backstories —
-  using a local LLM (via [Ollama](https://ollama.com)) grounded in your Pathfinder rules
-  databases (RAG).
-- **Spoke** — a [Flutter](https://flutter.dev) Android app that is *your character*: dice
-  roller, character sheet, live chat with the God, and a rules/bestiary browser.
+- **Hub** — a Python service on your Windows laptop. FastAPI + local LLM (Ollama) +
+  RAG over **43,884** FTS5-indexed rules. Answers questions, generates characters/NPCs/
+  encounters, keeps campaign memory. No cloud required.
+- **Spoke** — a Flutter Android app. Dice, character sheet, live God chat, and a full
+  **offline rulebook** (the database ships inside the app — the laptop can stay off).
 
 ```
-┌────────────────────────────┐         Wi-Fi / LAN (later: Tailscale)         ┌──────────────────┐
-│  HUB  ·  laptop (Python)   │  ◀──────────  HTTP + WebSocket  ──────────▶    │  SPOKE · Android │
-│  FastAPI + Ollama + RAG    │                                                 │  Flutter app     │
-│  500MB+ rules .db (local)  │                                                 │  dice · sheet    │
+┌────────────────────────────┐         Same Wi-Fi (or laptop hotspot)          ┌──────────────────┐
+│  HUB  ·  laptop (Python)   │  ◀──────────  HTTP + WebSocket  ──────────▶     │  SPOKE · Android │
+│  FastAPI + Ollama + RAG    │      auto-discovery, no IP typing needed        │  Flutter app     │
+│  43,884 rules (local)      │                                                 │  dice · sheet    │
 └────────────────────────────┘                                                 └──────────────────┘
 ```
 
-## Why this shape?
+No typing IP addresses: the hub announces itself on the LAN and the app's
+**Setup → Find hub automatically** connects with one tap. Details in
+[`docs/troubleshooting.md`](docs/troubleshooting.md).
 
-The hub does all the heavy lifting (LLM inference + retrieval over 500MB+ of rules), so the
-phone stays a thin, fast client. That split means:
+## Spoke features (5 tabs)
 
-- The **500MB+ databases never touch GitHub or the phone** — they live only on the laptop,
-  reproducible from the builder scripts in `hub/scripts/`. See [`data/SCHEMA.md`](data/SCHEMA.md).
-- The laptop (a CPU-only i5) runs **small local models** (`phi4-mini`, `llama3.2:3b`) with a
-  **2-tier fallback**: local Ollama → raw rule excerpts (always an answer).
-- Each half uses the best tool for its job (Python for AI, Flutter for a native themed UI),
-  connected by one small [OpenAPI contract](shared/openapi.yaml).
+| Tab | What | Needs the hub? |
+|---|---|---|
+| Dice | PF2e engine (degrees of success, advantage, hero points) + animated 3D die, SFX + haptics | No — fully offline |
+| God | Live GM chat, streaming markdown with source citations | Yes |
+| Hero | Full PF2e character sheet (9 tabs), derived stats auto-recalc, local SQLite | No (except "Forge with the God") |
+| Rules | Offline rulebook: search + browse chips + Guide chatbot, hub fallback | No — 43,884 entries on-device |
+| Setup | Hub connection (auto-discover), sound/haptics toggles, backup/restore | — |
+
+Backup/restore (Settings): characters + campaign export as JSON/JSONL via the system
+share sheet — no storage permissions needed.
+
+## Quick start
+
+### 1. Laptop (Hub)
+```bat
+:: Easiest: double-click Start_CommandCenter.bat, then Services → Start Ollama → Start Hub
+:: Or classic:
+cd C:\pathfinder_god\hub
+C:\venv-hub\venv\Scripts\python.exe -m app.main   :: serves http://0.0.0.0:8000
+```
+Full guide (Ollama models, firewall, LAN IP): [`docs/setup-hub-windows.md`](docs/setup-hub-windows.md).
+
+### 2. Phone (Spoke)
+1. Open `spoke/` in Android Studio, press Run on your device.
+2. **Setup → Find hub automatically** → tap your laptop → green "Connected to the God".
+
+No Android Studio? See [`docs/setup-spoke-android.md`](docs/setup-spoke-android.md) for
+`flutter` CLI notes. (Contributors: never commit APKs; the lane ends at
+`flutter analyze` + `flutter test`.)
+
+### 3. Command Center (Windows GM console, optional)
+`Start_CommandCenter.bat` launches the standalone console: start/stop Ollama + Hub,
+browse models, search rules, run generators, roll dice, chat with the God, watch logs.
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `hub/` | Python + FastAPI service (the God). See [`hub/README.md`](hub/README.md). |
-| `spoke/` | Flutter Android app (your character). See [`spoke/README.md`](spoke/README.md). |
-| `shared/openapi.yaml` | The API contract both sides build against. |
-| `data/` | Where the big `.db` files live on the laptop (git-ignored). |
-| `tools/` | Sound synth (`gen_audio.py`), Windows Command Center (prototype). |
-| `docs/` | Setup + architecture guides. |
+| `hub/` | Python FastAPI service. See [`hub/README.md`](hub/README.md). |
+| `spoke/` | Flutter Android app (`com.pathfindergod`). See [`spoke/README.md`](spoke/README.md). |
+| `shared/openapi.yaml` | The API contract both sides build against (v0.1.0). |
+| `data/` | Laptop-only `.db` files (git-ignored). Schema: [`data/SCHEMA.md`](data/SCHEMA.md). |
+| `tools/` | Sound synth (`gen_audio.py`), Command Center source (PySide6). |
+| `tools/command_center/dist/` | Standalone `.exe` (git-ignored, built via PyInstaller). |
+| `docs/` | Guides: [`architecture`](docs/architecture.md) · [`database`](docs/database.md) · [`api`](docs/api.md) · [`troubleshooting`](docs/troubleshooting.md) · setup hub/spoke. |
 
-## Spoke features
+## Data & licensing
 
-- **Works offline** (laptop off): dice with PF2e degrees of success + 8π animated 3D die, the full 34k-entry
-  rulebook via **native 8KB MethodChannel streaming** (Kotlin `AssetManager→GZIP`), the Pathfinder Guide chatbot
-  (scripted intents + real rulebook retrieval), sound FX + ambient BGM, character storage.
-- **Online extras**: live LLM generation via the hub (characters, NPCs, bosses, campaigns)
-  with WebSocket `pingInterval:15s` + history rehydration and 3× auto-reconnect; hub auto-selects `phi4-mini` (fast) or `qwen2.5:3b` ReAct tool loop.
+- Rules DB: 43,884 rows built from open sources (Paizo PRD text via OGL, Pf2ools
+  MIT/CUP JSON, Community Use scrapes). Build scripts + source registry live in
+  `hub/scripts/`; the `.db` files themselves are git-ignored and reproducible.
+  Details: [`docs/database.md`](docs/database.md).
+- Personal use is fine. **Commercial redistribution rights for the bundled rules
+  DB are unverified** — resolve before any public release. Adventure-path prose
+  (Product Identity) is deliberately *not* scraped.
 
-## Current status (2026-08-30 v0.6.0)
+## Cloning
 
-`flutter analyze` **No issues**, `flutter test` **18/18**, hub deterministic Rules Lawyer (`LEVEL_DC`/`ACTION_SKILL` never LLM), 2-tier + citation fidelity `[Source - Rule]` ≤3 sentences, Command Center `dist/PathfinderGodCommandCenter.exe` ~48MB standalone. See `docs/WHITEPAPER_ARCHITECTURE_v1.md` for deep dive and `blueprints/CURRENT_STATE.md` for gate status.
+The offline rulebook asset is stored with Git LFS — install it once
+(`git lfs install`), otherwise you'll get a pointer file instead of the database:
 
-## Quick start
+```bash
+git lfs install
+git clone https://github.com/GhostMan612/pathfinder_god.git
+```
 
-1. **Hub** — [`docs/setup-hub-windows.md`](docs/setup-hub-windows.md)
-2. **Spoke** — [`docs/setup-spoke-android.md`](docs/setup-spoke-android.md)
-3. **How it fits together** — [`docs/architecture.md`](docs/architecture.md)
+## Status
+
+v0.6.2 — `flutter analyze`: clean · `flutter test`: 21/21 · hub `py_compile`: clean.
+History: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
+
+---
+*As Above, So Below. As Within, So Without. The Future Dictates the Past and the Past is Always Present.*

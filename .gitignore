@@ -16,6 +16,15 @@ data/*.sqlite3
 .env.*
 !.env.example
 *.key
+*.keystore
+*.jks
+google-services.json
+SPEC_SHEET*
+# Session working docs (never pushed by workflow law)
+blueprints/
+_archive/
+# Agent tooling runtime (node_modules bloat + machine-local config)
+.opencode/
 
 # Campaign save files (runtime state, per-user)
 data/campaign_state*.json

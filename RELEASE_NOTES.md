@@ -1,113 +1,121 @@
 # Pathfinder God — Release Notes
 
-## v0.5.1 "Command Center Standalone" — 2026-08-29
+## v0.6.2 "Zero-Config" — 2026-09-14
 
 ### Highlights
-- **Standalone Command Center executable** — `tools/command_center/dist/PathfinderGodCommandCenter.exe` (~48MB). No Python venv required. Double-click to launch.
-- **System tray integration** — Minimize to tray, right-click for Show/Quit, single-click to toggle window.
-- **Window icon** — Branded Pathfinder God icon on taskbar and tray.
-- **Static LAN IP documented** — Hub accessible at `http://192.168.4.144:8000` for real-device play.
+- **Hub auto-discovery** — the laptop announces `_pathfindergod._tcp` over mDNS; the
+  app's **Setup → Find hub automatically** lists reachable hubs, tap to connect. Falls
+  back to laptop-hotspot gateway (`192.168.137.1:8000`), emulator (`10.0.2.2:8000`),
+  and last-known URL. No IP typing, no SSH involved.
+- **One Rules tab** — the duplicate Rules/Bestiary tabs are merged; `RulebookScreen`
+  (search + browse chips + Guide) owns Rules. App is 5 tabs now.
+- Commit author is GhostMan612; the 20MB offline-rulebook asset moved to Git LFS
+  (`git lfs install` before cloning).
+
+### Hub
+- mDNS advertisement on startup (`hub/app/discovery.py`, `zeroconf` dep, silent
+  no-op if missing); TXT carries version + model.
+
+### Spoke
+- `HubDiscovery` service (`multicast_dns`) + parallel `/health` probing in Settings.
+- `flutter analyze`: clean · `flutter test`: 21/21 (new discovery tests).
+
+---
+
+## v0.6.1 "Database Truth Pass" — 2026-09-14
+
+### Highlights
+- **43,884 rules** (was 34,554): 1e 9,899 → **22,131** from official Paizo PRD JSON;
+  2e +127 sourced rows (backgrounds/conditions/skills, Player's Guides).
+- **Exact-match ranking everywhere** (hub + phone): `flanking` → *Flanking · Core
+  Rulebook*, `fireball` → *Fireball · Core Rulebook*. Known sources outrank
+  `Unknown Source` (16,295 → 8,926).
+- Categories canonicalized (92 messy → clean set; `Waterskin x36` 1e dupes collapsed);
+  raw HTML stripped to plain text.
+- Phone bundle 50MB → **20MB** (`bundleVersion` 2 forces re-extract).
+- Reproducible builders: `hub/scripts/{build_rag,build_2e_rag,db_normalize}.py`,
+  3 importers (PSRD-Parser data, Pf2ools, pfsqlite-YAML), 3 rate-limited scrapers
+  (AoN 2e/1e, d20pfsrd). `rebuild_rags.py` validates, keeps `.bak`, swaps, vacuums.
+
+---
+
+## v0.6.0 "Deep Research" — 2026-08-30
+
+- Native 8KB rulebook streaming on Android (Kotlin `AssetManager→GZIP`), isolate
+  fallback, static open-lock — Moto G OOM/`Skipped 227 frames` fixed.
+- ReAct agentic tool loop for `qwen2.5:3b`; deterministic Rules Lawyer
+  (`LEVEL_DC`/`ACTION_SKILL`, never LLM); citation fidelity
+  (`[Source Book - Rule Name]`, ≤3 sentences).
+- WebSocket heartbeat (15s ping) + chat-history rehydration across reconnects.
+- Export/import: characters + campaign as JSON/JSONL via system share sheet.
+
+---
+
+## v0.5.1 "Command Center Standalone" — 2026-08-29
+
+- Standalone `PathfinderGodCommandCenter.exe` (~48MB, PyInstaller, no venv):
+  Services, Models, Rules, Generators, Dice, Guide tabs; system tray + icon.
+  Launch with `Start_CommandCenter.bat`.
 
 ---
 
 ## v0.5.0 "Full PF2e Character & Offline Spoke" — 2026-08-24
 
-### Spoke (Flutter/Android) — Complete Offline Play
-- **Full PF2e Character Sheet** (9 tabs): Basics, Abilities, Proficiencies (31), Feats, Spells, Equipment, Derived Stats, Conditions, Notes
-- **Derived stats auto-recalc** — HP, AC, Saves, Perception, DCs, Speed, Bulk, Initiative from PF2e Remaster rules
-- **Dice Engine** — NdM±mod, kh/kl, Adv/Dis, PF2e degrees of success (crit bands, nat-20/1 bump, fortune/misfortune, hero points) — 10 unit tests
-- **Offline Rulebook** — 48MB gzipped FTS5 DB (34,554 entries) bundled in APK, extracted on first launch
-- **Guide Chatbot** — Scripted intents + real offline FTS5 retrieval with cited excerpts (gold Chip pills)
-- **Bestiary** — Local FTS5 tier 1, Hub fallback tier 2, offline badge
-- **Audio** — 6 original synthesized sounds (dice, nat-20 fanfare, nat-1 fail, error, UI tap, 24s tavern loop)
-- **Haptics** — Vibration on rolls with Settings toggle, persisted
-- **WebSocket Auto-reconnect** — 3 retries with backoff, `retrying`/`error` frames
-- **Android Identity** — `com.pathfindergod`, "Pathfinder God" label, circular branded launcher icons
-- **Build Verified** — `flutter analyze` 0 errors, `flutter test` 15/15 pass, builds in Android Studio
-
-### Hub (Python/FastAPI) — Working Service
-- **Endpoints**: `/health`, `/ask`, `/stream` (WS), `/rules/search`, `/generate/{kind}` (7 kinds), `/campaign` CRUD
-- **3-Tier Fallback**: DeepSeek (cloud) → Ollama `phi4-mini` (local) → Raw FTS5 excerpts (always works)
-- **Generate Fixed** — Explicit `GenerateResponse` mapping (answer, backend, mode, edition, sources)
-- **Citations Live** — `sources[]` on `/generate/*` + WS `end` frames → Spoke renders gold pills
-- **Continuity Keeper** — JSON decode try/except fallbacks, log noise silenced
-- **Export/Import** — `/campaign/export`, `/campaign/import`, `/campaign/backup` (JSON/JSONL)
-- **Health Split** — `/health` (liveness) + `/ready` (readiness) + `/metrics` (Prometheus)
-- **pytest** — 5/5 critical passing, 9/13 total (4 require running Ollama)
-
-### Command Center (Windows/PySide6)
-- **6 Tabs**: Services (Ollama/Hub control), Models (list/pull), Rules (FTS5 search), Generators (all 7 kinds), Dice (kh/kl/Adv/Dis parity), Guide (streaming chat with history)
-- **Chat History Persists** — `tools/command_center/chat_history.json`
-- **Managed Subprocesses** — Ollama + Hub start/stop windowless (`CREATE_NO_WINDOW`)
-- **Health Polling** — Every 5s, shows model + DB status
-
-### Infrastructure
-- **Docker/Compose** — `docker-compose.yml` + multi-stage `Dockerfile`s + `.env.example`
-- **CI/CD** — `.github/workflows/ci.yml` (Spoke analyze/test, Hub pytest, Docker build/push, deploy)
-- **OpenAPI → Dart** — Manual mirror stable; automation at `spoke/generate_models.dart`
+- **Spoke**: 9-tab PF2e character sheet with derived-stat recalc; dice engine
+  (NdM±mod, kh/kl, Adv/Dis, degrees of success, fortune/misfortune, hero points);
+  offline FTS5 rulebook bundled in APK; Guide chatbot with cited excerpts; 6
+  synthesized sounds + looping tavern BGM; haptics; WebSocket auto-reconnect;
+  `com.pathfindergod` identity + branded icons.
+- **Hub**: `/health`, `/ask`, `/stream` (WS), `/rules/search`, `/generate/*`
+  (7 kinds), `/campaign` CRUD; 2-tier fallback (Ollama → raw excerpts).
+- Command Center (PySide6) first shipped; CI workflow; OpenAPI contract v0.1.0.
 
 ---
 
 ## Quick Start
 
 ### Laptop (Hub)
-```bash
-# 1. Start Ollama
-ollama serve  # listens on 0.0.0.0:11434
-
-# 2. Start Hub (uses C:\venv-hub)
+```bat
+:: Option A (easiest): double-click Start_CommandCenter.bat
+::   Services tab → Start Ollama → Start Hub
+:: Option B (terminal):
 cd C:\pathfinder_god\hub
-python -m app.main  # serves on 0.0.0.0:8000
+C:\venv-hub\venv\Scripts\python.exe -m app.main   :: http://0.0.0.0:8000
 ```
 
 ### Phone (Spoke) — Android Studio
-1. Open `spoke/` in Android Studio
-2. Run ▶️ 'app' on device/emulator
-3. Settings → Hub URL → `http://192.168.4.144:8000` (real device) or `http://10.0.2.2:8000` (emulator)
+1. Open `spoke/`, press Run on your device.
+2. **Setup → Find hub automatically** → tap your laptop → green card.
 
-### Command Center (Windows GM Console)
-```bat
-# Double-click or run:
-Start_CommandCenter.bat
-# Launches tools/command_center/dist/PathfinderGodCommandCenter.exe
-# Services tab → Start Ollama → Start Hub
-```
+Manual fallback: hub URL is `http://<laptop-lan-ip>:8000`
+(emulator: `http://10.0.2.2:8000`). Never use `:11450` — that's Ollama.
 
 ---
 
 ## Data Layer
 | Asset | Location | Size | Notes |
 |-------|----------|------|-------|
-| `pathfinder_rag.db` | `data/` (laptop) | 132MB | 34,554 FTS5 rows (1E+2E) |
-| `pathfinder_rag.db.gz` | `spoke/assets/rules/` | 48MB | Bundled in APK, extracted on first launch |
-| `campaign.db` | `data/` | 114KB | 9 tables, campaigns/sessions/NPCs/locations/quests |
+| `pathfinder_rag.db` | `data/` (laptop, git-ignored) | 57MB | 43,884 FTS5 rows (1E 22,131 + 2E 21,753) |
+| `pathfinder_rag.db.gz` | `spoke/assets/rules/` (Git LFS) | 20MB | Bundled in APK, extracted on first launch |
+| `campaign.db` | `data/` (git-ignored) | 114KB | Campaigns/sessions/NPCs/locations/quests |
+
+Rebuild: `C:\venv-hub\venv\Scripts\python.exe hub/scripts/rebuild_rags.py`
+(see [`docs/database.md`](docs/database.md)).
 
 ---
 
-## Known Issues / Tech Debt
-1. **DB licensing** — Commercial redistribution rights unverified (personal use fine)
-2. **OpenAPI → Dart** — Manual mirror; automation script exists but not wired to CI
-3. **Hub pytest** — 4/13 tests fail when Ollama not running (expected)
-4. **No Spoke widget tests** — Only dice/character derived tests exist
-
----
-
-## Next Phase (Post-MVP)
-- Rules Lawyer Agent (`qwen2.5:14b` for `validate_action`, `calculate_dc`)
-- NPC Compiler Agent (`create_npc(concept)` → legal ABC stat block)
-- Foundry VTT JSON export
-- Tailscale overlay for remote play
-- Voice I/O (STT/TTS)
-- Multiplayer sync (WebSocket broadcast)
+## Known Issues
+1. **DB licensing** — commercial redistribution unverified (personal use fine).
+2. 8,926 legacy rows still lack a source book (ranked last, shrinking per import).
+3. Adventure-path prose (Product Identity) deliberately excluded — mechanics only.
 
 ---
 
 ## Credits
-- **Rules Data** — Pathfinder 2e SRD (Paizo, OGL)
-- **LLM** — Ollama `phi4-mini` (Microsoft), `nomic-embed-text`
-- **Framework** — Flutter 3.24, FastAPI, PySide6, SQLite/FTS5
-- **Audio** — Synthesized via `tools/gen_audio.py` (original, royalty-free)
+- **Rules data** — Paizo PRD text (OGL), Pf2ools (MIT/CUP), Community Use Policy sources.
+- **LLM** — Ollama `phi4-mini` (default), `qwen2.5:3b`, `nomic-embed-text`.
+- **Frameworks** — Flutter, FastAPI, PySide6, SQLite/FTS5.
+- **Audio** — synthesized via `tools/gen_audio.py` (original, royalty-free).
 
 ---
-
 *As Above, So Below. As Within, So Without. The Future Dictates the Past and the Past is Always Present.*
