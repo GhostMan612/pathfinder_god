@@ -1,0 +1,210 @@
+# ============================================================
+# Data Source Configuration for Pathfinder RAG Database
+# ============================================================
+
+sources:
+  # ============================================================
+  # PF2e PRIMARY SOURCES (highest priority - official/OGL)
+  # ============================================================
+  
+  pf2ools:
+    name: "Pf2ools Data Repository"
+    edition: "2e"
+    type: "json_local"
+    priority: 1
+    license: "MIT"
+    description: "Comprehensive PF2e game data in JSON - all rules, feats, spells, items, monsters, ancestries, classes, archetypes"
+    source_url: "https://github.com/Pf2ools/pf2ools-data"
+    local_path: "external/pf2ools-data"
+    data_dirs:
+      - "data"
+      - "bundles"
+    category_mapping:
+      ancestry: "ancestry"
+      background: "background"
+      class: "class"
+      archetype: "archetype"
+      feat: "feat"
+      spell: "spell"
+      item: "equipment"
+      weapon: "equipment"
+      armor: "equipment"
+      shield: "equipment"
+      condition: "condition"
+      action: "action"
+      hazard: "hazard"
+      creature: "bestiary"
+      deity: "deity"
+      disease: "disease"
+      poison: "poison"
+      ritual: "ritual"
+      spell: "spell"
+      skill: "skill"
+      classfeature: "classfeature"
+      ancestryfeature: "ancestryfeature"
+
+  pathfinder_2_sqlite:
+    name: "Pathfinder 2 SQLite (jrmiller82)"
+    edition: "2e"
+    type: "yaml_local"
+    priority: 2
+    license: "OGL/Community Use"
+    description: "OGL/Community Use PF2 data in YAML with Python generation scripts"
+    source_url: "https://github.com/jrmiller82/pathfinder-2-sqlite"
+    local_path: "external/pathfinder-2-sqlite"
+    data_dirs:
+      - "data/yaml"
+    category_mapping:
+      class: "class"
+      ancestry: "ancestry"
+      background: "background"
+      feat: "feat"
+      spell: "spell"
+      item: "equipment"
+      creature: "bestiary"
+      condition: "condition"
+      action: "action"
+      deity: "deity"
+
+  aon_2e:
+    name: "Archives of Nethys 2e (aonprd.com)"
+    edition: "2e"
+    type: "web_scraper"
+    priority: 3
+    license: "Paizo Community Use"
+    description: "Official PF2e rules database - spells, feats, items, monsters, ancestries, classes"
+    source_url: "https://2e.aonprd.com"
+    base_urls:
+      spells: "https://2e.aonprd.com/Spells.aspx"
+      feats: "https://2e.aonprd.com/Feats.aspx"
+      items: "https://2e.aonprd.com/Items.aspx"
+      equipment: "https://2e.aonprd.com/Equipment.aspx"
+      weapons: "https://2e.aonprd.com/Weapons.aspx"
+      armor: "https://2e.aonprd.com/Armor.aspx"
+      monsters: "https://2e.aonprd.com/Monsters.aspx"
+      ancestries: "https://2e.aonprd.com/Ancestries.aspx"
+      classes: "https://2e.aonprd.com/Classes.aspx"
+      backgrounds: "https://2e.aonprd.com/Backgrounds.aspx"
+      conditions: "https://2e.aonprd.com/Conditions.aspx"
+      actions: "https://2e.aonprd.com/Actions.aspx"
+      skills: "https://2e.aonprd.com/Skills.aspx"
+      deities: "https://2e.aonprd.com/Deities.aspx"
+      rituals: "https://2e.aonprd.com/Rituals.aspx"
+      archetypes: "https://2e.aonprd.com/Archetypes.aspx"
+    rate_limit: 1.0  # seconds between requests
+
+  aon_1e:
+    name: "Archives of Nethys 1e (aonprd.com)"
+    edition: "1e"
+    type: "web_scraper"
+    priority: 4
+    license: "Paizo Community Use"
+    description: "Official PF1e rules database"
+    source_url: "https://www.aonprd.com"
+    base_urls:
+      spells: "https://www.aonprd.com/SpellDisplay.aspx"
+      feats: "https://www.aonprd.com/Feats.aspx"
+      items: "https://www.aonprd.com/MagicItems.aspx"
+      equipment: "https://www.aonprd.com/Equipment.aspx"
+      weapons: "https://www.aonprd.com/Weapons.aspx"
+      armor: "https://www.aonprd.com/Armor.aspx"
+      monsters: "https://www.aonprd.com/Monsters.aspx"
+      races: "https://www.aonprd.com/Races.aspx"
+      classes: "https://www.aonprd.com/Classes.aspx"
+      prestige_classes: "https://www.aonprd.com/PrestigeClasses.aspx"
+      archetypes: "https://www.aonprd.com/Archetypes.aspx"
+      conditions: "https://www.aonprd.com/Conditions.aspx"
+      skills: "https://www.aonprd.com/Skills.aspx"
+      deities: "https://www.aonprd.com/Deities.aspx"
+      traits: "https://www.aonprd.com/Traits.aspx"
+    rate_limit: 1.0
+
+  d20pfsrd:
+    name: "d20pfsrd.com (Community 1e)"
+    edition: "1e"
+    type: "web_scraper"
+    priority: 5
+    license: "OGL/Community Use"
+    description: "Community-maintained Pathfinder 1e SRD with extensive community content"
+    source_url: "https://www.d20pfsrd.com"
+    base_urls:
+      spells: "https://www.d20pfsrd.com/magic/spell-lists-and-domains/spell-lists"
+      feats: "https://www.d20pfsrd.com/feats"
+      items: "https://www.d20pfsrd.com/magic-items"
+      equipment: "https://www.d20pfsrd.com/equipment"
+      weapons: "https://www.d20pfsrd.com/equipment/weapons"
+      armor: "https://www.d20pfsrd.com/equipment/armor"
+      monsters: "https://www.d20pfsrd.com/bestiary"
+      races: "https://www.d20pfsrd.com/races"
+      classes: "https://www.d20pfsrd.com/classes"
+      prestige_classes: "https://www.d20pfsrd.com/classes/prestige-classes"
+      archetypes: "https://www.d20pfsrd.com/classes/archetypes"
+      conditions: "https://www.d20pfsrd.com/conditions"
+      skills: "https://www.d20pfsrd.com/skills"
+      traits: "https://www.d20pfsrd.com/traits"
+      deities: "https://www.d20pfsrd.com/deities"
+      rules: "https://www.d20pfsrd.com/basics-ability-scores"
+    rate_limit: 2.0  # Be respectful to community site
+
+  psrd_parser:
+    name: "PSRD-Parser (Paizo PRD)"
+    edition: "both"
+    type: "parser_local"
+    priority: 6
+    license: "GPL-3.0"
+    description: "Parser for Paizo Pathfinder Reference Document - converts PRD to JSON/SQLite"
+    source_url: "https://github.com/devonjones/PSRD-Parser"
+    local_path: "external/PSRD-Parser"
+    data_dirs:
+      - "data"
+      - "output"
+
+# ============================================================
+# Output Configuration
+# ============================================================
+output:
+  unified_db: "pathfinder_rag.db"
+  edition_1e_db: "pathfinder_1e_rag.db"
+  edition_2e_db: "pathfinder_2e_rag.db"
+  combined_db: "pathfinder_god.db"
+  schema_version: 1
+
+# ============================================================
+# Schema Configuration
+# ============================================================
+schema:
+  table_name: "rules"
+  fts5: true
+  columns:
+    - name: "system"
+      type: "TEXT"
+      description: "Edition - '1e' or '2e'"
+    - name: "category"
+      type: "TEXT"
+      description: "Category (spell, feat, monster, class, equipment, etc.)"
+    - name: "name"
+      type: "TEXT"
+      description: "Entry name"
+    - name: "source_book"
+      type: "TEXT"
+      description: "Source book/product name"
+    - name: "raw_content"
+      type: "TEXT"
+      description: "Full text content for FTS5 search"
+  indexes:
+    - name: "idx_system_category"
+      columns: ["system", "category"]
+    - name: "idx_name"
+      columns: ["name"]
+
+# ============================================================
+# Processing Options
+# ============================================================
+processing:
+  deduplicate: true
+  deduplication_key: ["system", "name", "source_book"]
+  chunk_size: 1000
+  max_content_length: 50000
+  validate_fts5: true
+  vacuum_after_build: true
+  analyze_after_build: true

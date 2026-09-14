@@ -1,0 +1,188 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ─── Spoke (Flutter) ───
+  spoke-analyze:
+    name: Spoke - Analyze
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.12.2'
+          channel: 'stable'
+      - name: Install dependencies
+        working-directory: spoke
+        run: flutter pub get
+      - name: Analyze
+        working-directory: spoke
+        run: flutter analyze
+      - name: Test
+        working-directory: spoke
+        run: flutter test
+
+  spoke-build:
+    name: Spoke - Build Android
+    runs-on: ubuntu-latest
+    needs: spoke-analyze
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.12.2'
+          channel: 'stable'
+      - name: Install dependencies
+        working-directory: spoke
+        run: flutter pub get
+      - name: Build APK
+        working-directory: spoke
+        run: flutter build apk --release
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pathfinder-god-apk
+          path: spoke/build/app/outputs/flutter-apk/app-release.apk
+
+  # ─── Hub (Python) ───
+  hub-test:
+    name: Hub - Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: 'pip'
+      - name: Install dependencies
+        working-directory: hub
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio httpx
+      - name: Run tests
+        working-directory: hub
+        run: pytest tests/ -v --tb=short
+
+  hub-lint:
+    name: Hub - Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: 'pip'
+      - name: Install dependencies
+        working-directory: hub
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff
+      - name: Lint
+        working-directory: hub
+        run: ruff check app/ tests/
+
+  # ─── Docker Build & Push ───
+  docker-build:
+    name: Docker Build & Push
+    runs-on: ubuntu-latest
+    needs: [spoke-analyze, hub-test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract metadata for Hub
+        id: meta-hub
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-hub
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Build and push Hub image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./hub
+          push: true
+          tags: ${{ steps.meta-hub.outputs.tags }}
+          labels: ${{ steps.meta-hub.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Extract metadata for Spoke
+        id: meta-spoke
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-spoke
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Build and push Spoke image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./spoke
+          push: true
+          tags: ${{ steps.meta-spoke.outputs.tags }}
+          labels: ${{ steps.meta-spoke.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ─── Deploy to Server (optional) ───
+  deploy:
+    name: Deploy to Server
+    runs-on: ubuntu-latest
+    needs: docker-build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: production
+    steps:
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            cd /opt/pathfinder-god
+            docker compose pull
+            docker compose up -d
+            docker image prune -f
+
+  # ─── Notify (optional) ───
+  notify:
+    name: Notify on Failure
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Discord
+        if: ${{ secrets.DISCORD_WEBHOOK != '' }}
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK }}
+          title: "Pathfinder God CI Failed"
+          description: "Workflow ${{ github.workflow }} failed on ${{ github.repository }}"
+          color: 15548997

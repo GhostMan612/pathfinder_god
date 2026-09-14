@@ -1,0 +1,64 @@
+# ─── Pathfinder God: keep the big data + secrets out of git ───────────────
+
+# The 500MB+ rules databases live ONLY on the laptop hub. Never commit them.
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+*.db
+*.db.bak
+*.sqlite
+*.sqlite3
+# ...but DO keep the schema doc and any tiny test fixtures we ship on purpose
+!hub/tests/fixtures/*.db
+
+# Secrets / local config
+.env
+.env.*
+!.env.example
+*.key
+
+# Campaign save files (runtime state, per-user)
+data/campaign_state*.json
+
+# Command Center runtime logs
+tools/command_center/logs/
+tools/command_center/chat_history.json
+
+# Fetched upstream data (large, reproducible via hub/scripts builders)
+hub/scripts/external/
+# ─── Python (hub) ─────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+
+# ─── Flutter / Dart (spoke) ───────────────────────────────────────────────
+spoke/.dart_tool/
+spoke/.flutter-plugins
+spoke/.flutter-plugins-dependencies
+spoke/.packages
+spoke/build/
+spoke/.pub-cache/
+spoke/.pub/
+spoke/android/.gradle/
+spoke/android/app/build/
+spoke/android/local.properties
+spoke/android/key.properties
+spoke/*.iml
+spoke/ios/Pods/
+spoke/ios/.symlinks/
+
+# ─── Editors / OS ─────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
