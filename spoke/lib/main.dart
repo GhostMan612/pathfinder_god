@@ -3,8 +3,11 @@
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'api/hub_client.dart';
 import 'config/hub_config.dart';
@@ -16,6 +19,7 @@ import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await _reclaimPartialDownloads();
   try {
     await FlutterGemma.initialize();
   } catch (_) {}
@@ -23,6 +27,23 @@ Future<void> main() async {
   await AudioService.instance.init();
   await HapticsService.init();
   runApp(PathfinderSpokeApp(config: config));
+}
+
+Future<void> _reclaimPartialDownloads() async {
+  try {
+    final dir = await getApplicationDocumentsDirectory();
+    var freed = 0;
+    await for (final e in dir.list(recursive: true, followLinks: false)) {
+      try {
+        if (e is! File) continue;
+        final p = e.path.toLowerCase();
+        if (!p.endsWith('.temp') && !p.endsWith('.part')) continue;
+        freed += await e.length();
+        await e.delete();
+      } catch (_) {}
+    }
+    if (freed > 0) debugPrint('Startup: reclaimed $freed partial bytes');
+  } catch (_) {}
 }
 
 class PathfinderSpokeApp extends StatelessWidget {

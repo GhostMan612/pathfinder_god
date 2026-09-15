@@ -48,7 +48,7 @@ class AudioService {
       _musicEnabled = prefs.getBool(_keyMusic) ?? true;
       _track = (prefs.getInt(_keyTrack) ?? 0).clamp(0, tracks.length - 1);
 
-      for (var i = 0; i < 3; i++) {
+      for (var i = 0; i < 4; i++) {
         final p = AudioPlayer();
         await p.setReleaseMode(ReleaseMode.stop);
         try {
@@ -94,6 +94,10 @@ class AudioService {
       _music = null;
       await startMusic();
     }
+  }
+
+  Future<void> nextTrack() async {
+    await setMusicTrack((_track + 1) % tracks.length);
   }
 
   Future<void> stopMusic() async {

@@ -94,6 +94,7 @@ class _CharacterListScreenState extends State<CharacterListScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: null,
         onPressed: () => _open(null),
         icon: const Icon(Icons.add),
         label: const Text('New'),

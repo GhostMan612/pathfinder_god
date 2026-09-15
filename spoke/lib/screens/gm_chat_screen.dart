@@ -261,6 +261,7 @@ class _GmChatScreenState extends State<GmChatScreen> {
             ),
             const SizedBox(width: 8),
             FloatingActionButton.small(
+              heroTag: null,
               onPressed: _busy ? null : _send,
               child: _busy
                   ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))

@@ -192,10 +192,20 @@ class _RulebookScreenState extends State<RulebookScreen>
   }
 
   void _openEntry(RuleEntry entry) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    const darkBg = Color(0xFF1A1412);
+    const darkTxt = Color(0xFFD6C8B8);
+    final bgColor = isDark ? darkBg : PathfinderTheme.parchmentDeep;
+    final txtColor = isDark ? darkTxt : PathfinderTheme.ink;
+    final titleColor =
+        isDark ? PathfinderTheme.gold : PathfinderTheme.crimson;
+    final linkColor =
+        isDark ? PathfinderTheme.gold : PathfinderTheme.crimson;
+    final codeBg = isDark ? const Color(0xFF2A2220) : PathfinderTheme.parchment;
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: PathfinderTheme.parchmentDeep,
+      backgroundColor: bgColor,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -217,7 +227,7 @@ class _RulebookScreenState extends State<RulebookScreen>
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
-                        color: PathfinderTheme.crimson,
+                        color: titleColor,
                       ),
                     ),
                   ),
@@ -242,26 +252,25 @@ class _RulebookScreenState extends State<RulebookScreen>
                 controller: scroll,
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                 styleSheet: MarkdownStyleSheet(
-                  p: const TextStyle(color: PathfinderTheme.ink, height: 1.4),
-                  h1: const TextStyle(
-                      color: PathfinderTheme.ink, fontWeight: FontWeight.bold),
-                  h2: const TextStyle(
-                      color: PathfinderTheme.ink, fontWeight: FontWeight.bold),
-                  h3: const TextStyle(
-                      color: PathfinderTheme.ink, fontWeight: FontWeight.bold),
-                  em: const TextStyle(
-                      color: PathfinderTheme.ink, fontStyle: FontStyle.italic),
-                  strong: const TextStyle(
-                      color: PathfinderTheme.ink, fontWeight: FontWeight.bold),
-                  del: const TextStyle(color: PathfinderTheme.ink),
-                  blockquote: const TextStyle(color: PathfinderTheme.ink),
-                  listBullet: const TextStyle(color: PathfinderTheme.ink),
-                  a: const TextStyle(
-                      color: PathfinderTheme.crimson,
+                  p: TextStyle(color: txtColor, height: 1.4),
+                  h1: TextStyle(
+                      color: txtColor, fontWeight: FontWeight.bold),
+                  h2: TextStyle(
+                      color: txtColor, fontWeight: FontWeight.bold),
+                  h3: TextStyle(
+                      color: txtColor, fontWeight: FontWeight.bold),
+                  em: TextStyle(
+                      color: txtColor, fontStyle: FontStyle.italic),
+                  strong: TextStyle(
+                      color: txtColor, fontWeight: FontWeight.bold),
+                  del: TextStyle(color: txtColor),
+                  blockquote: TextStyle(color: txtColor),
+                  listBullet: TextStyle(color: txtColor),
+                  a: TextStyle(
+                      color: linkColor,
                       decoration: TextDecoration.underline),
-                  code: const TextStyle(
-                      color: PathfinderTheme.ink,
-                      backgroundColor: PathfinderTheme.parchment),
+                  code: TextStyle(
+                      color: txtColor, backgroundColor: codeBg),
                 ),
               ),
             ),
