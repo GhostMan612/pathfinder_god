@@ -218,6 +218,18 @@ class HubClient {
     return (jsonDecode(resp.body) as Map<String, dynamic>)['queued'] as int? ?? 0;
   }
 
+  /// Build a character via LLM + Rules Lawyer validation.
+  /// Returns the validated character JSON or errors.
+  Future<Map<String, dynamic>> buildCharacter(String prompt) async {
+    final resp = await _http.post(
+      config.httpUri('/generate/character'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'prompt': prompt}),
+    );
+    _ensureOk(resp);
+    return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
+
   void _ensureOk(http.Response resp) {
     if (resp.statusCode < 200 || resp.statusCode >= 300) {
       throw HubException('Hub returned ${resp.statusCode}: ${resp.body}');

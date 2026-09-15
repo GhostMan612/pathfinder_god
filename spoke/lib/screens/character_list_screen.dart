@@ -14,6 +14,7 @@ import '../models/character.dart';
 import '../services/backup_service.dart';
 import '../storage/character_store.dart';
 import '../theme/app_theme.dart';
+import 'character_builder_screen.dart';
 import 'character_sheet_screen.dart';
 
 /// Lists the player's saved characters (stored locally on the phone).
@@ -95,14 +96,37 @@ class _CharacterListScreenState extends State<CharacterListScreen> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         heroTag: null,
-        onPressed: () => _open(null),
-        icon: const Icon(Icons.add),
-        label: const Text('New'),
+        onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => CharacterBuilderScreen(
+            client: widget.client,
+            store: widget.store,
+          ),
+        )),
+        icon: const Icon(Icons.auto_fix_high),
+        label: const Text('Forge'),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _characters.isEmpty
-              ? const Center(child: Text('No characters yet. Tap "New" to forge one.'))
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('No heroes yet.'),
+                      const SizedBox(height: 12),
+                      FilledButton.icon(
+                        onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                          builder: (_) => CharacterBuilderScreen(
+                            client: widget.client,
+                            store: widget.store,
+                          ),
+                        )),
+                        icon: const Icon(Icons.auto_fix_high),
+                        label: const Text('Forge Your First Hero'),
+                      ),
+                    ],
+                  ),
+                )
               : ListView.separated(
                   itemCount: _characters.length,
                   separatorBuilder: (_, _) => const Divider(height: 1),

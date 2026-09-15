@@ -13,8 +13,22 @@ from pydantic import BaseModel
 from app.api.deps import get_repo
 from app.db.repository import CampaignRepository
 from app.llm.orchestrator import LLMOrchestrator
+from app.agents.character_builder import CharacterBuilderAgent, BuildResult
+from app.agents.rules_lawyer import RulesLawyerAgent
+from app.llm.ollama_client import OllamaClient
+from app.config import get_settings
 
 router = APIRouter(prefix="/generate", tags=["gm"])
+
+
+class BuildCharacterRequest(BaseModel):
+    prompt: str
+
+
+class BuildCharacterResponse(BaseModel):
+    valid: bool
+    character: dict | None = None
+    errors: list[str] = []
 
 
 class GenerateRequest(BaseModel):
@@ -39,6 +53,28 @@ VALID_KINDS = {
     "campaign",
     "encounter",
 }
+
+
+# ──────────────────────────────────────────────────────────────
+# Character Builder endpoint (LLM + Rules Lawyer validation)
+# ──────────────────────────────────────────────────────────────
+
+@router.post("/character", response_model=BuildCharacterResponse)
+async def build_character_endpoint(
+    request: BuildCharacterRequest,
+    repo: CampaignRepository = Depends(get_repo),
+) -> BuildCharacterResponse:
+    settings = get_settings()
+    llm = OllamaClient(settings.ollama_host)
+    lawyer = RulesLawyerAgent(repo)
+    agent = CharacterBuilderAgent(llm, lawyer)
+    result: BuildResult = await agent.build(request.prompt)
+    await llm.close()
+    return BuildCharacterResponse(
+        valid=result.valid,
+        character=result.character.model_dump(mode="python") if result.character else None,
+        errors=result.errors,
+    )
 
 
 # ──────────────────────────────────────────────────────────────
