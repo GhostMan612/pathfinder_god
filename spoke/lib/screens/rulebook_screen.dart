@@ -241,6 +241,28 @@ class _RulebookScreenState extends State<RulebookScreen>
                 data: entry.content,
                 controller: scroll,
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                styleSheet: MarkdownStyleSheet(
+                  p: const TextStyle(color: PathfinderTheme.ink, height: 1.4),
+                  h1: const TextStyle(
+                      color: PathfinderTheme.ink, fontWeight: FontWeight.bold),
+                  h2: const TextStyle(
+                      color: PathfinderTheme.ink, fontWeight: FontWeight.bold),
+                  h3: const TextStyle(
+                      color: PathfinderTheme.ink, fontWeight: FontWeight.bold),
+                  em: const TextStyle(
+                      color: PathfinderTheme.ink, fontStyle: FontStyle.italic),
+                  strong: const TextStyle(
+                      color: PathfinderTheme.ink, fontWeight: FontWeight.bold),
+                  del: const TextStyle(color: PathfinderTheme.ink),
+                  blockquote: const TextStyle(color: PathfinderTheme.ink),
+                  listBullet: const TextStyle(color: PathfinderTheme.ink),
+                  a: const TextStyle(
+                      color: PathfinderTheme.crimson,
+                      decoration: TextDecoration.underline),
+                  code: const TextStyle(
+                      color: PathfinderTheme.ink,
+                      backgroundColor: PathfinderTheme.parchment),
+                ),
               ),
             ),
           ],

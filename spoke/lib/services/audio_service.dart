@@ -51,6 +51,18 @@ class AudioService {
       for (var i = 0; i < 3; i++) {
         final p = AudioPlayer();
         await p.setReleaseMode(ReleaseMode.stop);
+        try {
+          await p.setPlayerMode(PlayerMode.lowLatency);
+          await p.setAudioContext(
+            AudioContext(
+              android: const AudioContextAndroid(
+                contentType: AndroidContentType.sonification,
+                usageType: AndroidUsageType.game,
+                audioFocus: AndroidAudioFocus.none,
+              ),
+            ),
+          );
+        } catch (_) {}
         _sfxPool.add(p);
       }
 

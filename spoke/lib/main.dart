@@ -4,6 +4,7 @@
 // ============================================================
 
 import 'package:flutter/material.dart';
+import 'package:flutter_gemma/flutter_gemma.dart';
 
 import 'api/hub_client.dart';
 import 'config/hub_config.dart';
@@ -15,6 +16,9 @@ import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await FlutterGemma.initialize();
+  } catch (_) {}
   final config = await HubConfig.load();
   await AudioService.instance.init();
   await HapticsService.init();
