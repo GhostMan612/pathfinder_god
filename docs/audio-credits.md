@@ -30,3 +30,9 @@ above. The generator stays in the repo for offline regeneration if needed.
 - CC0: <https://creativecommons.org/publicdomain/zero/1.0/>
 - CC BY 4.0: <https://creativecommons.org/licenses/by/4.0/>
 - CC BY 3.0: <https://creativecommons.org/licenses/by/3.0/>
+
+- Dungeon ambience - source: Pixabay (CC0), search "dungeon ambient"
+- Combat tension - source: Pixabay (CC0), search "battle music"
+- Eerie atmosphere - source: Pixabay (CC0), search "creepy ambient"
+- Heavy dice impact - source: Freesound (CC0), search "heavy dice"
+- Glass dice clink - source: Freesound (CC0), search "glass clink"
