@@ -11,9 +11,15 @@ import 'package:flutter/material.dart';
 import 'dice_impact.dart';
 
 class AnimatedDiceRoller {
+  static const double finalTumbleX = 4 * pi;
+  static const double finalTumbleY = 8 * pi;
+  static const double finalSpinZ = 4 * pi;
+
   final TickerProvider _vsync;
   late final AnimationController _controller;
-  late final Animation<double> _rotationAnimation;
+  late final Animation<double> _tumbleXAnimation;
+  late final Animation<double> _tumbleYAnimation;
+  late final Animation<double> _spinAnimation;
   late final Animation<double> _bounceAnimation;
   late final Animation<double> _scaleAnimation;
 
@@ -30,10 +36,22 @@ class AnimatedDiceRoller {
       vsync: _vsync,
     );
 
-    _rotationAnimation = TweenSequence<double>([
-      TweenSequenceItem(tween: Tween(begin: 0.0, end: 8 * pi), weight: 55),
-      TweenSequenceItem(tween: Tween(begin: 8 * pi, end: 9 * pi), weight: 25),
-      TweenSequenceItem(tween: Tween(begin: 9 * pi, end: 9.3 * pi), weight: 20),
+    _tumbleXAnimation = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween(begin: 0.0, end: 2.6 * pi), weight: 55),
+      TweenSequenceItem(tween: Tween(begin: 2.6 * pi, end: 3.7 * pi), weight: 25),
+      TweenSequenceItem(tween: Tween(begin: 3.7 * pi, end: finalTumbleX), weight: 20),
+    ]).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
+
+    _tumbleYAnimation = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween(begin: 0.0, end: 6 * pi), weight: 55),
+      TweenSequenceItem(tween: Tween(begin: 6 * pi, end: 7.6 * pi), weight: 25),
+      TweenSequenceItem(tween: Tween(begin: 7.6 * pi, end: finalTumbleY), weight: 20),
+    ]).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
+
+    _spinAnimation = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween(begin: 0.0, end: 3 * pi), weight: 55),
+      TweenSequenceItem(tween: Tween(begin: 3 * pi, end: 3.8 * pi), weight: 25),
+      TweenSequenceItem(tween: Tween(begin: 3.8 * pi, end: finalSpinZ), weight: 20),
     ]).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
 
     _bounceAnimation = TweenSequence<double>([
@@ -95,7 +113,9 @@ class AnimatedDiceRoller {
 
   bool get isRolling => _isRolling;
 
-  Animation<double> get rotation => _rotationAnimation;
+  Animation<double> get spin => _spinAnimation;
+  Animation<double> get tumbleX => _tumbleXAnimation;
+  Animation<double> get tumbleY => _tumbleYAnimation;
   Animation<double> get bounce => _bounceAnimation;
   Animation<double> get scale => _scaleAnimation;
   int get currentValue => _currentValue;
@@ -110,7 +130,9 @@ class AnimatedDie extends AnimatedWidget {
 
   @override
   Widget build(BuildContext context) {
-    final rotation = roller._rotationAnimation.value;
+    final tx = roller._tumbleXAnimation.value;
+    final ty = roller._tumbleYAnimation.value;
+    final sz = roller._spinAnimation.value;
     final bounce = roller._bounceAnimation.value;
     final scale = roller._scaleAnimation.value;
 
@@ -122,9 +144,9 @@ class AnimatedDie extends AnimatedWidget {
           alignment: Alignment.center,
           transform: Matrix4.identity()
             ..setEntry(3, 2, 0.002)
-            ..rotateX(rotation * 0.5)
-            ..rotateY(rotation)
-            ..rotateZ(rotation * 0.35),
+            ..rotateX(tx)
+            ..rotateY(ty)
+            ..rotateZ(sz),
           child: _buildDieFace(context, roller, skin),
         ),
       ),

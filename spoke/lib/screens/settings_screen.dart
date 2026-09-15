@@ -65,7 +65,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.dispose();
   }
 
-  Future<void> _refreshSlm() async {
+  Future<void> _refreshSlm({bool preserveStatus = false}) async {
     try {
       final slm = SlmGuideService.instance;
       final enabled = await slm.enabled;
@@ -81,9 +81,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _slmSideInfo = sideCheck.exists
             ? 'Side-load file: ${SlmGuideService.formatBytes(sideCheck.sizeBytes)}${sideCheck.looksValid ? '' : ' (too small — expected ~2GB)'}'
             : 'No side-load file yet.';
-        _slmStatus = installed
-            ? 'Ready — Guide answers on-device, fully offline.'
-            : 'Not downloaded (~2GB, Wi-Fi recommended). Guide uses excerpts until then.';
+        if (!preserveStatus) {
+          _slmStatus = installed
+              ? 'Ready — Guide answers on-device, fully offline.'
+              : 'Not downloaded (~2GB, Wi-Fi recommended). Guide uses excerpts until then.';
+        }
       });
     } catch (_) {}
   }
@@ -107,11 +109,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _slmProgress = 0;
       _slmStatus = 'Downloading brain… keep the app open on Wi-Fi.';
     });
+    var ok = false;
     try {
       final slm = SlmGuideService.instance;
       await slm.setToken(_hfToken.text);
       if (await slm.installSideLoaded()) {
         if (!mounted) return;
+        ok = true;
         setState(() => _slmStatus = 'Ready — installed from side-load, fully offline.');
         return;
       }
@@ -125,6 +129,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         });
       }
       if (!mounted) return;
+      ok = true;
       setState(() => _slmStatus = 'Ready — Guide answers on-device, fully offline.');
     } catch (e) {
       if (mounted) setState(() => _slmStatus = '$e');
@@ -134,7 +139,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _slmBusy = false;
           _slmProgress = null;
         });
-        _refreshSlm();
+        _refreshSlm(preserveStatus: !ok);
       }
     }
   }

@@ -397,7 +397,7 @@ class _DiceScreenState extends State<DiceScreen> with TickerProviderStateMixin {
           mainAxisSize: MainAxisSize.min,
           children: [
             AnimatedBuilder(
-              animation: _animatedRoller.rotation,
+              animation: _animatedRoller.spin,
               builder: (_, _) => Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [

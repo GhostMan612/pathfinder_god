@@ -3,8 +3,11 @@
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
 
+import 'dart:math';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pathfinder_god/dice/dice_impact.dart';
+import 'package:pathfinder_god/dice/dice_physics.dart';
 import 'package:pathfinder_god/services/audio_service.dart';
 
 void main() {
@@ -45,6 +48,18 @@ void main() {
       expect(DiceSkin.byKind(DiceSkinKind.blood).label, 'Blood');
       expect(DiceSkin.byKind(DiceSkinKind.arcane).label, 'Arcane');
       expect(DiceSkin.byKind(DiceSkinKind.obsidian).label, 'Obsidian');
+    });
+  });
+
+  group('Dice settle flatness', () {
+    test('final axis angles land on multiples of 2pi', () {
+      const twoPi = 2 * pi;
+      expect(
+          AnimatedDiceRoller.finalTumbleX % twoPi, closeTo(0, 1e-9));
+      expect(
+          AnimatedDiceRoller.finalTumbleY % twoPi, closeTo(0, 1e-9));
+      expect(
+          AnimatedDiceRoller.finalSpinZ % twoPi, closeTo(0, 1e-9));
     });
   });
 }
