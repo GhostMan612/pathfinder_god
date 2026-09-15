@@ -119,14 +119,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
         setState(() => _slmStatus = 'Ready — installed from side-load, fully offline.');
         return;
       }
+      int lastPercent = -1;
       await for (final p in slm.downloadWithProgress()) {
         if (!mounted) return;
-        setState(() {
-          _slmProgress = p / 100.0;
-          _slmStatus = p >= 100
-              ? 'Finalizing brain…'
-              : 'Downloading brain… $p% — keep the app open.';
-        });
+        final currentPercent = (p * 100).toInt();
+        if (currentPercent != lastPercent) {
+          lastPercent = currentPercent;
+          setState(() {
+            _slmProgress = p / 100.0;
+            _slmStatus = p >= 100
+                ? 'Finalizing brain…'
+                : 'Downloading brain… $p% — keep the app open.';
+          });
+        }
       }
       if (!mounted) return;
       ok = true;

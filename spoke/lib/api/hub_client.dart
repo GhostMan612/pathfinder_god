@@ -113,7 +113,11 @@ class HubClient {
   WebSocketChannel _connectWs(Uri uri) {
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS || Platform.isMacOS || Platform.isLinux || Platform.isWindows)) {
       try {
-        return IOWebSocketChannel.connect(uri, pingInterval: const Duration(seconds: 15));
+        return IOWebSocketChannel.connect(
+          uri,
+          pingInterval: const Duration(seconds: 15),
+          headers: {'Origin': 'http://localhost'},
+        );
       } catch (_) {
         // Fallback if platform channel fails
       }

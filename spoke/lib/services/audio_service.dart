@@ -136,7 +136,9 @@ class AudioService {
     };
     final player = _sfxPool[_next];
     _next = (_next + 1) % _sfxPool.length;
-    unawaited(player.play(AssetSource(asset), volume: volume).catchError((_) {}));
+    unawaited(player.stop().then((_) {
+      return player.play(AssetSource(asset), volume: volume);
+    }).catchError((_) {}));
   }
 }
 

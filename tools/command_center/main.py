@@ -358,6 +358,9 @@ def parse_dice_notation(notation: str) -> dict:
     Supports: NdM, NdMkhN, NdMklN, NdMkh (keep highest 1), NdMkl (keep lowest 1)
     Returns dict with: count, sides, keep_highest, keep_lowest, modifier
     """
+    # Strip trailing text like " (Adv)" before parsing
+    notation = notation.split(" ")[0].strip()
+    
     # Handle modifiers (+N, -N)
     modifier = 0
     # Split on + or - that are not part of kh/kl
