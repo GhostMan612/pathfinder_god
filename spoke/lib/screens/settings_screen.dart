@@ -16,6 +16,7 @@ import '../services/audio_service.dart';
 import '../services/backup_service.dart';
 import '../services/haptics_service.dart';
 import '../services/hub_discovery.dart';
+import '../services/slm_guide.dart';
 import '../storage/character_store.dart';
 import '../theme/app_theme.dart';
 
@@ -39,17 +40,74 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _discovering = false;
   List<DiscoveredHub> _discovered = [];
   String? _discoverMsg;
+  bool _slmBusy = false;
+  bool _slmEnabled = false;
+  bool _slmInstalled = false;
+  String? _slmStatus;
+  late final TextEditingController _hfToken;
 
   @override
   void initState() {
     super.initState();
     _url = TextEditingController(text: widget.client.config.baseUrl);
+    _hfToken = TextEditingController();
+    _refreshSlm();
   }
 
   @override
   void dispose() {
     _url.dispose();
+    _hfToken.dispose();
     super.dispose();
+  }
+
+  Future<void> _refreshSlm() async {
+    try {
+      final slm = SlmGuideService.instance;
+      final enabled = await slm.enabled;
+      final installed = await slm.isInstalled();
+      _hfToken.text = await slm.token ?? '';
+      if (!mounted) return;
+      setState(() {
+        _slmEnabled = enabled;
+        _slmInstalled = installed;
+        _slmStatus = installed
+            ? 'Ready — Guide answers on-device, fully offline.'
+            : 'Not downloaded (~2GB, Wi-Fi recommended). Guide uses excerpts until then.';
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _downloadSlm() async {
+    setState(() { _slmBusy = true; _slmStatus = 'Downloading brain… keep the app open.'; });
+    try {
+      final slm = SlmGuideService.instance;
+      await slm.setToken(_hfToken.text);
+      if (!await slm.installSideLoaded()) {
+        await slm.download();
+      }
+      if (!mounted) return;
+      setState(() => _slmStatus = 'Ready — Guide answers on-device, fully offline.');
+    } catch (e) {
+      if (mounted) setState(() => _slmStatus = 'Download failed: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _slmBusy = false);
+        _refreshSlm();
+      }
+    }
+  }
+
+  Future<void> _deleteSlm() async {
+    setState(() => _slmBusy = true);
+    try {
+      await SlmGuideService.instance.deleteModel();
+    } finally {
+      if (mounted) {
+        setState(() => _slmBusy = false);
+        _refreshSlm();
+      }
+    }
   }
 
   Future<void> _saveAndCheck() async {
@@ -261,6 +319,55 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: Padding(padding: const EdgeInsets.all(12), child: Text(_backupMsg!, style: const TextStyle(fontSize: 13))),
               ),
             ),
+          const SizedBox(height: 12),
+          const Divider(),
+          Text('Offline brain (SLM)', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 4),
+          const Text(
+            'A small on-device model that turns rulebook excerpts into real answers — '
+            'no network at all. One-time ~2GB download (HuggingFace gated repo: accept '
+            'the Gemma license, paste a token). Or side-load guide_model.task into app files.',
+          ),
+          const SizedBox(height: 8),
+          if (_slmStatus != null) Text(_slmStatus!, style: const TextStyle(fontSize: 13)),
+          SwitchListTile(
+            secondary: const Icon(Icons.psychology),
+            title: const Text('Use offline brain'),
+            subtitle: const Text('Falls back to excerpts when off or missing'),
+            value: _slmEnabled,
+            onChanged: (v) async {
+              await SlmGuideService.instance.setEnabled(v);
+              if (mounted) setState(() => _slmEnabled = v);
+            },
+          ),
+          TextField(
+            controller: _hfToken,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: 'HuggingFace token (for download only)',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: _slmBusy ? null : _downloadSlm,
+                icon: const Icon(Icons.download),
+                label: Text(_slmInstalled ? 'Re-download' : 'Download brain'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: (_slmBusy || !_slmInstalled) ? null : _deleteSlm,
+                icon: const Icon(Icons.delete_outline),
+                label: const Text('Delete'),
+              ),
+            ),
+          ]),
+          if (_slmBusy) const Padding(padding: EdgeInsets.only(top: 8), child: LinearProgressIndicator()),
           const SizedBox(height: 12),
           const Divider(),
           const ListTile(

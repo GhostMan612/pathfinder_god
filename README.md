@@ -90,7 +90,7 @@ git clone https://github.com/GhostMan612/pathfinder_god.git
 
 ## Status
 
-v0.6.3 — `flutter analyze`: clean · `flutter test`: 21/21 · hub `py_compile`: clean.
+v0.6.4 — `flutter analyze`: clean · `flutter test`: 25/25 · hub `py_compile`: clean.
 History: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 
 ---

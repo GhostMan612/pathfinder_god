@@ -1,5 +1,26 @@
 # Pathfinder God — Release Notes
 
+## v0.6.4 "Self-Improving Library + Offline Brain" — 2026-09-14
+
+### Highlights
+- **Ask → scraped → permanent**: empty rulebook searches offer "Fetch from the web"
+  (`POST /rules/fetch` scrapes the exact 1e term live via the polite fleet and stores
+  it); misses queue offline and drain to the hub (`POST /rules/missed` →
+  `data/misses.jsonl`) for chunked backfill. Every miss makes the DB better.
+- **On-device SLM Guide** (opt-in): Gemma 3n via MediaPipe answers from offline
+  excerpts with zero network. One-time ~2GB model download in
+  **Setup → Offline brain** (HuggingFace token needed, gated repo) or side-load
+  `guide_model.task`. Scripted excerpts remain the fallback.
+- **Polite fleet**: rotating user-agents, probed limits (0.5s interval, ≤4 rps —
+  measured, no throttling seen), Retry-After backoff, checkpoints + chunked
+  `--offset/--limit/--resume` runs across all three scrapers.
+
+### Spoke
+- `MissQueue`, `SlmGuideService`, Guide-chat SLM tier, `HubClient.fetchRule`.
+- `flutter analyze`: clean · `flutter test`: 25/25.
+
+---
+
 ## v0.6.3 "Real Audio + Fuller Library" — 2026-09-14
 
 ### Highlights

@@ -183,6 +183,37 @@ class HubClient {
     }
   }
 
+  /// On-demand fetch: ask the hub to scrape one missing term into the
+  /// database permanently. Throws [HubException] (404) when not fetchable —
+  /// the query is then queued for the chunked backfill instead.
+  Future<RuleHit> fetchRule(
+    String query, {
+    String edition = 'both',
+  }) async {
+    final resp = await _http.post(
+      config.httpUri('/rules/fetch'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'q': query, 'edition': edition}),
+    );
+    _ensureOk(resp);
+    return RuleHit.fromJson(jsonDecode(resp.body) as Map<String, dynamic>);
+  }
+
+  /// Drain the offline miss queue into the hub's backfill list.
+  /// Returns the number the hub accepted.
+  Future<int> reportMisses(List<Map<String, String>> queries) async {
+    final resp = await _http.post(
+      config.httpUri('/rules/missed'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'queries':
+            queries.map((m) => {'q': m['q'] ?? '', 'edition': m['edition'] ?? 'both'}).toList(),
+      }),
+    );
+    _ensureOk(resp);
+    return (jsonDecode(resp.body) as Map<String, dynamic>)['queued'] as int? ?? 0;
+  }
+
   void _ensureOk(http.Response resp) {
     if (resp.statusCode < 200 || resp.statusCode >= 300) {
       throw HubException('Hub returned ${resp.statusCode}: ${resp.body}');

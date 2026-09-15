@@ -17,6 +17,7 @@ library;
 import 'dart:async';
 
 import 'rulebook_db.dart';
+import 'slm_guide.dart';
 
 /// Intent types the bot understands.
 enum BotIntent {
@@ -271,7 +272,13 @@ class RulebookChatbot {
         _provider.isReady) {
       final hits = await _provider.search(_extractQuery(text));
       if (hits.isNotEmpty) {
-        _addBotMessage(_formatHits(hits), intent: intent);
+        // On-device SLM brain when downloaded+enabled; excerpts otherwise.
+        final slmAnswer = await _askSlm(text, hits);
+        if (slmAnswer != null) {
+          _addBotMessage(slmAnswer, intent: intent);
+        } else {
+          _addBotMessage(_formatHits(hits), intent: intent);
+        }
       } else {
         _addBotMessage(
           "I couldn't find that in the offline book. Try a shorter query like "
@@ -283,6 +290,25 @@ class RulebookChatbot {
     }
 
     _addBotMessage(_brain.respond(intent), intent: intent);
+  }
+
+  /// Returns the SLM answer, or null when the offline brain is off,
+  /// missing, or errored (caller falls back to cited excerpts).
+  Future<String?> _askSlm(String text, List<LocalRuleHit> hits) async {
+    try {
+      final slm = SlmGuideService.instance;
+      if (!await slm.enabled) return null;
+      if (!await slm.isInstalled()) return null;
+      final buf = StringBuffer();
+      await for (final token in slm.ask(text, hits)) {
+        buf.write(token);
+      }
+      final answer = buf.toString().trim();
+      if (answer.isEmpty) return null;
+      return '$answer\n\n_(answered offline by the on-device brain)_';
+    } catch (_) {
+      return null;
+    }
   }
 
   String _extractQuery(String text) {

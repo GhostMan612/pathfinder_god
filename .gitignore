@@ -35,6 +35,8 @@ tools/command_center/chat_history.json
 
 # Fetched upstream data (large, reproducible via hub/scripts builders)
 hub/scripts/external/
+# Scraper resume checkpoints + probe measurements (local tuning state)
+hub/scripts/checkpoints/
 # ─── Python (hub) ─────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]

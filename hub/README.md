@@ -45,6 +45,8 @@ C:\venv-hub\venv\Scripts\python.exe -m app.cli "build me a level 3 rogue"
 | GET/POST | `/campaign`, `/campaign/note`, `/campaign/reset` | Campaign state + continuity. |
 | GET/POST | `/campaign/export`, `/campaign/import` | Backup/restore (JSON). |
 | WS | `/stream` | Token-by-token feed (`start`→`chunk`*→`end`, plus `retrying`/`error`). |
+| POST | `/rules/fetch` | Scrape one missing 1e term into the DB permanently (else 404+queue). |
+| POST/GET | `/rules/missed` | Offline miss queue in/out (`data/misses.jsonl` backfill feed). |
 
 Contract: [`../shared/openapi.yaml`](../shared/openapi.yaml) (v0.1.0).
 Regenerate after changes: `python scripts/export_openapi.py`.

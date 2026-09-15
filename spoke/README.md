@@ -41,6 +41,11 @@ and last-known URL. Manual entry: `http://<laptop-lan-ip>:8000`
 Offline DB: `assets/rules/pathfinder_rag.db.gz` (Git LFS) extracts on first
 launch to app storage, read-only. After re-bundling, bump
 `RulebookDb.bundleVersion` or devices keep the stale copy.
+Empty searches queue locally (`MissQueue`) and offer one-tap web fetch.
+
+Optional offline brain: **Setup → Offline brain** downloads a Gemma 3n SLM
+(~2GB, HuggingFace token) so the Guide answers from excerpts with zero
+network. See `lib/services/slm_guide.dart` (verify `modelUrl` first).
 
 ## Layout
 

@@ -32,7 +32,7 @@
 
 ---
 
-## Addendum — v0.6.1–v0.6.3 (2026-09-14)
+## Addendum — v0.6.1–v0.6.4 (2026-09-14)
 
 Supersedes these [v1.0] figures: DB is **44,620 rows** (1E 22,131 / 2E 22,489) as of v0.6.3 (jrmiller82 OGL YAML folded in); royalty-free BGM/SFX shipped (see `audio-credits.md`);
 57 MB live / 20 MB gzipped asset (`bundleVersion` 2); app is **5 tabs**

@@ -16,6 +16,9 @@ Interactive playground (hub running): `http://localhost:8000/docs`.
 | POST | `/campaign/reset` | — | Fresh state |
 | GET | `/campaign/export?campaign_id=` | — | Full dump (campaigns, sessions, npcs, locations, items, quests, decisions, party) |
 | POST | `/campaign/import` | Export payload | Merged state |
+| POST | `/rules/fetch` | `{q, edition}` | Scrape one missing term into the DB permanently (1e live; else 404 + queued) |
+| POST | `/rules/missed` | `{queries: [{q, edition}]}` | Queue offline misses for backfill |
+| GET | `/rules/missed?limit=` | — | Queued misses (backfill feed) |
 
 `RuleHit = {name, content, system, category, source_book}`.
 `backend` is `ollama` or `raw-excerpts` (LLM down — excerpts still answer).

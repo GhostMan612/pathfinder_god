@@ -18,6 +18,12 @@ from dataclasses import dataclass
 import aiohttp
 from bs4 import BeautifulSoup
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from fleet import Checkpoint, DomainLimiter
+from fleet import fetch as fleet_fetch
+from fleet import FetchError
+
 
 @dataclass
 class ScrapedEntry:
@@ -44,7 +50,8 @@ class Aon2eScraper:
             "errors": 0,
             "by_category": {}
         }
-        self._last_request_time = 0
+        self._limiter = DomainLimiter()
+        self._ckpt: Checkpoint | None = None
 
         # Category URLs from sources.yaml
         self.category_urls = {
@@ -81,25 +88,12 @@ class Aon2eScraper:
             self.conn.close()
             self.conn = None
 
-    async def _rate_limit(self):
-        """Enforce rate limiting between requests."""
-        elapsed = time.time() - self._last_request_time
-        if elapsed < self.rate_limit:
-            await asyncio.sleep(self.rate_limit - elapsed)
-        self._last_request_time = time.time()
-
     async def _fetch(self, url: str) -> Optional[str]:
-        """Fetch a URL with rate limiting and error handling."""
-        await self._rate_limit()
+        """Fetch via the fleet (rotating UA, probed rate limits, backoff)."""
         try:
-            async with self.session.get(url) as response:
-                if response.status == 200:
-                    return await response.text()
-                else:
-                    print(f"HTTP {response.status} for {url}")
-                    return None
-        except Exception as e:
-            print(f"Error fetching {url}: {e}")
+            return await fleet_fetch(self.session, url, limiter=self._limiter)
+        except FetchError as e:
+            print(f"fleet fetch failed: {e}")
             return None
 
     def _clean_html(self, html: str) -> str:
@@ -220,25 +214,30 @@ class Aon2eScraper:
         text = re.sub(r'\s+', ' ', text)
         return text.strip()
 
-    async def scrape_category(self, category: str, max_pages: Optional[int] = None) -> int:
-        """Scrape a single category."""
+    async def scrape_category(
+        self, category: str, max_pages: Optional[int] = None, offset: int = 0
+    ) -> int:
+        """Scrape a single category (chunk: entries[offset:offset+max_pages])."""
         url = self.category_urls.get(category)
         if not url:
             print(f"Unknown category: {category}")
             return 0
 
-        print(f"Scraping {category} from {url}")
+        print(f"Scraping {category} from {url} (offset={offset}, limit={max_pages})")
         html = await self._fetch(url)
         if not html:
             return 0
 
         entries = self._parse_list_page(html, url, category)
         print(f"Found {len(entries)} entries for {category}")
+        queue = entries[offset:(offset + max_pages) if max_pages else None]
 
         imported = 0
-        for i, entry in enumerate(entries):
-            if max_pages and i >= max_pages:
-                break
+        for entry in queue:
+            if self._ckpt is not None and self._ckpt.has(entry["url"]):
+                self.stats["skipped"] += 1
+                continue
+            self.stats["total"] += 1
 
             try:
                 detail_text = await self._fetch_detail_page(entry["url"])
@@ -268,6 +267,8 @@ class Aon2eScraper:
                     imported += 1
                 else:
                     self.stats["skipped"] += 1
+                if self._ckpt is not None:
+                    self._ckpt.mark(entry["url"])
 
             except Exception as e:
                 print(f"Error processing {entry['name']}: {e}")
@@ -293,18 +294,28 @@ class Aon2eScraper:
         self.conn.commit()
         return True
 
-    async def scrape_all(self, max_per_category: Optional[int] = None):
+    async def scrape_all(
+        self,
+        max_per_category: Optional[int] = None,
+        offset: int = 0,
+        categories: Optional[list] = None,
+        resume: bool = False,
+    ):
         self.conn = sqlite3.connect(self.db_path)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
 
         self.session = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=30),
-            headers={"User-Agent": "PathfinderGod/1.0 (Educational/Research)"}
+            headers={"User-Agent": "PathfinderGod/1.0"},
         )
+        if resume:
+            ckpt_path = Path(__file__).resolve().parent.parent / "checkpoints" / "aon_2e.json"
+            self._ckpt = Checkpoint(ckpt_path)
+            print(f"Resuming from checkpoint ({len(self._ckpt.done)} done)")
 
         total_imported = 0
-        for category in self.category_urls.keys():
+        for category in categories or list(self.category_urls.keys()):
             self.stats["total"] = 0
             self.stats["imported"] = 0
             self.stats["skipped"] = 0
@@ -312,7 +323,7 @@ class Aon2eScraper:
             self.stats["by_category"] = {}
 
             try:
-                await self.scrape_category(category, max_pages=max_per_category)
+                await self.scrape_category(category, max_pages=max_per_category, offset=offset)
                 print(f"\n=== {category} Complete ===")
                 print(f"Total: {self.stats['total']}, Imported: {self.stats['imported']}, Skipped: {self.stats['skipped']}, Errors: {self.stats['errors']}")
                 total_imported += self.stats["imported"]
@@ -320,6 +331,8 @@ class Aon2eScraper:
                 print(f"Error scraping {category}: {e}")
                 self.stats["errors"] += 1
 
+        if self._ckpt is not None:
+            self._ckpt.save(force=True)
         print(f"\n=== AoN 2e Scraping Complete ===")
         print(f"Total Imported: {total_imported}")
         await self.session.close()
@@ -328,16 +341,24 @@ class Aon2eScraper:
 
 async def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Scrape Archives of Nethys 2e")
+    parser = argparse.ArgumentParser(description="Scrape Archives of Nethys 2e (fleet chunk)")
     parser.add_argument("--db-path", required=True, help="Path to output SQLite database")
-    parser.add_argument("--max-per-category", type=int, help="Max entries per category (for testing)")
+    parser.add_argument("--max-per-category", type=int, help="Max entries per category (chunk size)")
+    parser.add_argument("--offset", type=int, default=0, help="Start offset within each category")
+    parser.add_argument("--categories", nargs="*", help="Subset of categories (default: all)")
+    parser.add_argument("--resume", action="store_true", help="Resume from checkpoint file")
     args = parser.parse_args()
 
     db_path = Path(args.db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     scraper = Aon2eScraper(db_path)
-    await scraper.scrape_all(max_per_category=args.max_per_category)
+    await scraper.scrape_all(
+        max_per_category=args.max_per_category,
+        offset=args.offset,
+        categories=args.categories,
+        resume=args.resume,
+    )
 
 
 if __name__ == "__main__":

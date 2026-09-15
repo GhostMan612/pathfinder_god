@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 import '../api/hub_client.dart';
+import '../services/miss_queue.dart';
 import '../services/rulebook_db.dart';
 import '../theme/app_theme.dart';
 import 'rulebook_chat_screen.dart';
@@ -56,6 +57,8 @@ class _RulebookScreenState extends State<RulebookScreen>
   String _edition = '2e';
   List<RuleEntry> _results = [];
   bool _loading = false;
+  bool _fetching = false;
+  String? _missQuery; // last query with zero hits anywhere — offers web fetch
   String? _status; // first-run extraction / offline status line
   bool get _offlineReady => _rulebookDb.isReady;
 
@@ -94,6 +97,7 @@ class _RulebookScreenState extends State<RulebookScreen>
     setState(() {
       _loading = true;
       _results = [];
+      _missQuery = null;
     });
 
     // Tier 1: bundled offline database.
@@ -101,7 +105,7 @@ class _RulebookScreenState extends State<RulebookScreen>
       try {
         final hits =
             await _rulebookDb.search(q, edition: _edition, limit: 25);
-        if (mounted) {
+        if (hits.isNotEmpty && mounted) {
           setState(() {
             _results = hits.map(RuleEntry.fromLocal).toList();
             _loading = false;
@@ -114,7 +118,8 @@ class _RulebookScreenState extends State<RulebookScreen>
     // Tier 2: laptop hub.
     try {
       final hits = await widget.client.searchRules(q, edition: _edition);
-      if (mounted) {
+      if (!mounted) return;
+      if (hits.isNotEmpty) {
         setState(() {
           _results = hits
               .map((h) => RuleEntry(
@@ -127,14 +132,62 @@ class _RulebookScreenState extends State<RulebookScreen>
               .toList();
           _loading = false;
         });
+        // Hub is reachable — drain any queued misses in the background.
+        MissQueue.drain(widget.client);
+        return;
       }
-    } catch (e) {
+      // Empty everywhere: remember the miss and offer a live web fetch.
+      await MissQueue.queue(q, edition: _edition);
       if (mounted) {
         setState(() {
+          _missQuery = q;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      await MissQueue.queue(q, edition: _edition);
+      if (mounted) {
+        setState(() {
+          _missQuery = q;
           _status = 'No results — hub unreachable and offline search failed.';
           _loading = false;
         });
       }
+    }
+  }
+
+  /// Tier 3: ask the hub to scrape this exact term now and keep it forever.
+  Future<void> _fetchMissing() async {
+    final q = _missQuery;
+    if (q == null || q.isEmpty || _fetching) return;
+    setState(() {
+      _fetching = true;
+      _status = 'Asking the hub to fetch "$q" from the web…';
+    });
+    try {
+      final hit = await widget.client.fetchRule(q, edition: _edition);
+      if (!mounted) return;
+      setState(() {
+        _results = [
+          RuleEntry(
+            name: hit.name,
+            category: hit.category,
+            content: hit.content,
+            sourceBook: hit.sourceBook,
+            system: hit.system,
+          ),
+        ];
+        _missQuery = null;
+        _status = 'Fetched live and saved permanently — it will be here next time.';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _status = 'Could not fetch "$q" right now — it stays queued for backfill. ($e)';
+      });
+    } finally {
+      if (mounted) setState(() => _fetching = false);
     }
   }
 
@@ -394,11 +447,41 @@ class _RulebookScreenState extends State<RulebookScreen>
     }
     if (_results.isEmpty) {
       return Center(
-        child: Text(
-          _offlineReady
-              ? 'Search your offline rulebook.'
-              : 'Search rules via the hub.',
-          style: TextStyle(color: Colors.grey[600]),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _missQuery == null
+                    ? (_offlineReady
+                        ? 'Search your offline rulebook.'
+                        : 'Search rules via the hub.')
+                    : 'No entry for "$_missQuery" anywhere yet.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey[600]),
+              ),
+              if (_missQuery != null) ...[
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  onPressed: _fetching ? null : _fetchMissing,
+                  icon: _fetching
+                      ? const SizedBox(
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.cloud_download),
+                  label: Text(_fetching ? 'Fetching…' : 'Fetch "$_missQuery" from the web'),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Saved permanently when found — even offline next time.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                ),
+              ],
+            ],
+          ),
         ),
       );
     }

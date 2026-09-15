@@ -18,6 +18,12 @@ from urllib.parse import urljoin
 import aiohttp
 from bs4 import BeautifulSoup
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from fleet import Checkpoint, DomainLimiter
+from fleet import fetch as fleet_fetch
+from fleet import FetchError
+
 
 @dataclass
 class ScrapedEntry:
@@ -44,7 +50,8 @@ class D20PFSRDScraper:
             "errors": 0,
             "by_category": {}
         }
-        self._last_request_time = 0
+        self._limiter = DomainLimiter()
+        self._ckpt: Checkpoint | None = None
 
         self.category_urls = {
             "spell": "https://www.d20pfsrd.com/magic/spell-lists-and-domains/spell-lists",
@@ -79,23 +86,12 @@ class D20PFSRDScraper:
             self.conn.close()
             self.conn = None
 
-    async def _rate_limit(self):
-        elapsed = time.time() - self._last_request_time
-        if elapsed < self.rate_limit:
-            await asyncio.sleep(self.rate_limit - elapsed)
-        self._last_request_time = time.time()
-
     async def _fetch(self, url: str) -> Optional[str]:
-        await self._rate_limit()
+        """Fetch via the fleet (rotating UA, probed rate limits, backoff)."""
         try:
-            async with self.session.get(url) as response:
-                if response.status == 200:
-                    return await response.text()
-                else:
-                    print(f"HTTP {response.status} for {url}")
-                    return None
-        except Exception as e:
-            print(f"Error fetching {url}: {e}")
+            return await fleet_fetch(self.session, url, limiter=self._limiter)
+        except FetchError as e:
+            print(f"fleet fetch failed: {e}")
             return None
 
     def _clean_html(self, html: str) -> str:
@@ -151,23 +147,21 @@ class D20PFSRDScraper:
         return unique[:100]  # Limit for testing
 
     async def _fetch_detail_page(self, url: str) -> Optional[str]:
-        await self._rate_limit()
+        html = await self._fetch(url)
+        if not html:
+            return None
         try:
-            async with self.session.get(url) as response:
-                if response.status == 200:
-                    html = await response.text()
-                    soup = BeautifulSoup(html, "html.parser")
+            soup = BeautifulSoup(html, "html.parser")
 
-                    main = soup.find("main") or soup.find("div", id="main-content") or soup.find("div", id="content") or soup.body
-                    for tag in main(["script", "style", "nav", "footer", "header", "aside", "form", "iframe"]):
-                        tag.decompose()
+            main = soup.find("main") or soup.find("div", id="main-content") or soup.find("div", id="content") or soup.body
+            for tag in main(["script", "style", "nav", "footer", "header", "aside", "form", "iframe"]):
+                tag.decompose()
 
-                    text = main.get_text(separator="\n", strip=True)
-                    text = re.sub(r'\n{3,}', '\n\n', text)
-                    return text.strip()
-                return None
+            text = main.get_text(separator="\n", strip=True)
+            text = re.sub(r'\n{3,}', '\n\n', text)
+            return text.strip()
         except Exception as e:
-            print(f"Error fetching {url}: {e}")
+            print(f"Error parsing {url}: {e}")
             return None
 
     def _clean_text(self, text: str) -> str:
@@ -189,12 +183,14 @@ class D20PFSRDScraper:
                 parts.append(clean_text.strip())
         return "\n\n".join(parts)
 
-    async def scrape_category(self, category: str, max_pages: Optional[int] = None) -> int:
+    async def scrape_category(
+        self, category: str, max_pages: Optional[int] = None, offset: int = 0
+    ) -> int:
         url = self.category_urls.get(category)
         if not url:
             return 0
 
-        print(f"Scraping {category} from {url}")
+        print(f"Scraping {category} from {url} (offset={offset}, limit={max_pages})")
         html = await self._fetch(url)
         if not html:
             return 0
@@ -221,11 +217,14 @@ class D20PFSRDScraper:
                 unique.append(e)
 
         print(f"Found {len(unique)} entries for {category}")
+        queue = unique[offset:(offset + max_pages) if max_pages else None]
 
         imported = 0
-        for i, entry in enumerate(unique):
-            if max_pages and i >= max_pages:
-                break
+        for entry in queue:
+            if self._ckpt is not None and self._ckpt.has(entry["url"]):
+                self.stats["skipped"] += 1
+                continue
+            self.stats["total"] += 1
 
             try:
                 detail_text = await self._fetch_detail_page(entry["url"])
@@ -250,6 +249,8 @@ class D20PFSRDScraper:
                     imported += 1
                 else:
                     self.stats["skipped"] += 1
+                if self._ckpt is not None:
+                    self._ckpt.mark(entry["url"])
 
             except Exception as e:
                 print(f"Error processing {entry['name']}: {e}")
@@ -274,18 +275,28 @@ class D20PFSRDScraper:
         self.conn.commit()
         return True
 
-    async def scrape_all(self, max_per_category: Optional[int] = None):
+    async def scrape_all(
+        self,
+        max_per_category: Optional[int] = None,
+        offset: int = 0,
+        categories: Optional[list] = None,
+        resume: bool = False,
+    ):
         self.conn = sqlite3.connect(self.db_path)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
 
         self.session = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=30),
-            headers={"User-Agent": "PathfinderGod/1.0 (Educational/Research)"}
+            headers={"User-Agent": "PathfinderGod/1.0"},
         )
+        if resume:
+            ckpt_path = Path(__file__).resolve().parent.parent / "checkpoints" / "d20pfsrd.json"
+            self._ckpt = Checkpoint(ckpt_path)
+            print(f"Resuming from checkpoint ({len(self._ckpt.done)} done)")
 
         total_imported = 0
-        for category in list(self.category_urls.keys())[:5]:  # Limit for testing
+        for category in categories or list(self.category_urls.keys()):
             self.stats["total"] = 0
             self.stats["imported"] = 0
             self.stats["skipped"] = 0
@@ -293,7 +304,7 @@ class D20PFSRDScraper:
             self.stats["by_category"] = {}
 
             try:
-                await self.scrape_category(category, max_pages=max_per_category)
+                await self.scrape_category(category, max_pages=max_per_category, offset=offset)
                 print(f"\n=== {category} Complete ===")
                 print(f"Total: {self.stats['total']}, Imported: {self.stats['imported']}, Skipped: {self.stats['skipped']}, Errors: {self.stats['errors']}")
                 total_imported += self.stats["imported"]
@@ -301,6 +312,8 @@ class D20PFSRDScraper:
                 print(f"Error scraping {category}: {e}")
                 self.stats["errors"] += 1
 
+        if self._ckpt is not None:
+            self._ckpt.save(force=True)
         print(f"\n=== d20pfsrd Scraping Complete ===")
         print(f"Total Imported: {total_imported}")
         await self.session.close()
@@ -309,16 +322,24 @@ class D20PFSRDScraper:
 
 async def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Scrape d20pfsrd.com")
+    parser = argparse.ArgumentParser(description="Scrape d20pfsrd.com (fleet chunk)")
     parser.add_argument("--db-path", required=True, help="Path to output SQLite database")
-    parser.add_argument("--max-per-category", type=int, help="Max entries per category")
+    parser.add_argument("--max-per-category", type=int, help="Max entries per category (chunk size)")
+    parser.add_argument("--offset", type=int, default=0, help="Start offset within each category")
+    parser.add_argument("--categories", nargs="*", help="Subset of categories (default: all)")
+    parser.add_argument("--resume", action="store_true", help="Resume from checkpoint file")
     args = parser.parse_args()
 
     db_path = Path(args.db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     scraper = D20PFSRDScraper(db_path)
-    await scraper.scrape_all(max_per_category=args.max_per_category)
+    await scraper.scrape_all(
+        max_per_category=args.max_per_category,
+        offset=args.offset,
+        categories=args.categories,
+        resume=args.resume,
+    )
 
 
 if __name__ == "__main__":

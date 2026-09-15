@@ -60,6 +60,22 @@ C:\venv-hub\venv\Scripts\python.exe hub/scripts/rebuild_rags.py
 
 Builders accept `--pf2ools PATH` / `--yaml PATH` to fold open data in.
 
+## Self-improvement loop (misses → fleet → permanent)
+
+1. A search that finds nothing queues the query — on the phone
+   (`MissQueue`, offline-safe) and on the hub (`data/misses.jsonl`).
+2. `POST /rules/fetch` tries immediately for 1e terms (AoN 1e search, PRD
+   spell-slug fallback) and stores hits; 2e misses stay queued.
+3. `hub/scripts/probe_limits.py` measures each domain's safe speed first
+   (current: 0.5s interval, ≤4 rps, no throttling seen; robots respected).
+4. `hub/scripts/scrapers/*` share the fleet transport (`fleet.py`: rotating
+   user-agents, per-domain throttle, Retry-After backoff) and run chunked:
+   `--categories … --offset N --max-per-category M --resume` with
+   `hub/scripts/checkpoints/` so a full site becomes many polite sittings.
+
+In the app, an empty Rules result offers **Fetch from the web** — found entries
+are saved permanently, including offline next time.
+
 ## Phone bundling
 
 ```powershell

@@ -1,0 +1,56 @@
+{
+  "domains": {
+    "2e.aonprd.com": {
+      "safe_interval": 0.5,
+      "max_ok_rps": 4.0,
+      "stopped": "completed all phases",
+      "p50_latency": 0.08
+    },
+    "www.aonprd.com": {
+      "safe_interval": 0.5,
+      "max_ok_rps": 4.0,
+      "stopped": "completed all phases",
+      "p50_latency": 0.06
+    },
+    "www.d20pfsrd.com": {
+      "safe_interval": 0.5,
+      "max_ok_rps": 4.0,
+      "stopped": "completed all phases",
+      "p50_latency": 1.0
+    }
+  },
+  "robots": {
+    "2e.aonprd.com": {
+      "domain": "2e.aonprd.com",
+      "status": 404,
+      "rules": []
+    },
+    "www.aonprd.com": {
+      "domain": "www.aonprd.com",
+      "status": 404,
+      "rules": []
+    },
+    "www.d20pfsrd.com": {
+      "domain": "www.d20pfsrd.com",
+      "status": 200,
+      "rules": [
+        "User-agent: *",
+        "Disallow: /wp-json/",
+        "Disallow: /wp-admin/",
+        "Allow: /wp-admin/admin-ajax.php",
+        "Disallow: /wp-includes/",
+        "Allow: /wp-includes/js/",
+        "Allow: /wp-includes/images/",
+        "Disallow: /trackback/",
+        "Disallow: /wp-login.php",
+        "Disallow: /wp-register.php",
+        "Disallow: /staging/",
+        "Disallow: /staging__trashed/",
+        "Allow: /sitemap*.xml",
+        "Allow: /sitemap*.xml.gz",
+        "crawl-delay: 0",
+        "Sitemap: /sitemap.xml.gz"
+      ]
+    }
+  }
+}

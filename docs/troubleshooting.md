@@ -37,7 +37,14 @@ Android Doze kills idle sockets. The app auto-reconnects (3 tries, `retrying`
 notice, history re-sent). If it keeps failing, the hub probably restarted —
 reopen the chat and resend.
 
-## 6. Emulator vs real device
+## 6. "No entry" for something that should exist
+
+Tap **Fetch from the web** under the empty result (needs the hub online once).
+The hub scrapes that exact term into the database permanently — it works
+offline afterwards. If fetch fails, the query stays queued and a later
+backfill run picks it up.
+
+## 7. Emulator vs real device
 
 - Emulator on the same machine as the hub: `http://10.0.2.2:8000` (default).
 - Real device: auto-discovery, or the laptop's LAN/hotspot IP with `:8000`.
