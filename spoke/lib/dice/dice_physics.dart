@@ -3,29 +3,33 @@
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
 
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
 
-/// Simple animated dice roller with physics-inspired animation.
-/// No Flame dependency - uses Flutter's built-in animation system.
+import 'dice_impact.dart';
+
 class AnimatedDiceRoller {
   final TickerProvider _vsync;
   late final AnimationController _controller;
   late final Animation<double> _rotationAnimation;
   late final Animation<double> _bounceAnimation;
   late final Animation<double> _scaleAnimation;
-  
+
   int _currentValue = 1;
   bool _isRolling = false;
   final Function(int) _onComplete;
+  void Function(int impactIndex)? onImpact;
+  int _rollId = 0;
+  bool _disposed = false;
 
-  AnimatedDiceRoller(this._vsync, this._onComplete) {
+  AnimatedDiceRoller(this._vsync, this._onComplete, {this.onImpact}) {
     _controller = AnimationController(
       duration: const Duration(milliseconds: 1200),
       vsync: _vsync,
     );
-    
+
     _rotationAnimation = TweenSequence<double>([
       TweenSequenceItem(tween: Tween(begin: 0.0, end: 8 * pi), weight: 55),
       TweenSequenceItem(tween: Tween(begin: 8 * pi, end: 9 * pi), weight: 25),
@@ -48,7 +52,7 @@ class AnimatedDiceRoller {
       TweenSequenceItem(tween: Tween(begin: 1.12, end: 0.97), weight: 16),
       TweenSequenceItem(tween: Tween(begin: 0.97, end: 1.0), weight: 32),
     ]).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
-    
+
     _controller.addStatusListener((status) {
       if (status == AnimationStatus.completed) {
         _isRolling = false;
@@ -58,23 +62,35 @@ class AnimatedDiceRoller {
   }
 
   void dispose() {
+    _disposed = true;
+    _rollId++;
     _controller.dispose();
   }
 
   void roll() {
     if (_isRolling) {
-      debugPrint('AnimatedDiceRoller: already rolling, ignoring');
       return;
     }
     _isRolling = true;
     _currentValue = Random().nextInt(20) + 1;
-    debugPrint('AnimatedDiceRoller: roll -> $_currentValue');
-    // Ensure controller is not already animating (e.g. hot reload).
     if (_controller.isAnimating) _controller.stop();
+    final id = ++_rollId;
+    _scheduleImpacts(id);
     _controller.forward(from: 0).catchError((e) {
-      debugPrint('AnimatedDiceRoller: forward error $e');
       _isRolling = false;
     });
+  }
+
+  void _scheduleImpacts(int id) {
+    final cb = onImpact;
+    if (cb == null) return;
+    const timings = [300, 620, 920];
+    for (var i = 0; i < timings.length; i++) {
+      Future.delayed(Duration(milliseconds: timings[i]), () {
+        if (_disposed || id != _rollId || !_isRolling) return;
+        cb(i);
+      });
+    }
   }
 
   bool get isRolling => _isRolling;
@@ -85,18 +101,19 @@ class AnimatedDiceRoller {
   int get currentValue => _currentValue;
 }
 
-/// Animated die widget with 3D-like rotation and bounce
 class AnimatedDie extends AnimatedWidget {
   final AnimatedDiceRoller roller;
-  
-  AnimatedDie({super.key, required this.roller}) : super(listenable: roller._controller);
+  final DiceSkin skin;
+
+  AnimatedDie({super.key, required this.roller, this.skin = DiceSkin.obsidian})
+      : super(listenable: roller._controller);
 
   @override
   Widget build(BuildContext context) {
     final rotation = roller._rotationAnimation.value;
     final bounce = roller._bounceAnimation.value;
     final scale = roller._scaleAnimation.value;
-    
+
     return Transform.translate(
       offset: Offset(0, -bounce * 95),
       child: Transform.scale(
@@ -108,25 +125,41 @@ class AnimatedDie extends AnimatedWidget {
             ..rotateX(rotation * 0.5)
             ..rotateY(rotation)
             ..rotateZ(rotation * 0.35),
-          child: _buildDieFace(context, roller),
+          child: _buildDieFace(context, roller, skin),
         ),
       ),
     );
   }
 
-  Widget _buildDieFace(BuildContext context, AnimatedDiceRoller roller) {
+  Widget _buildDieFace(
+      BuildContext context, AnimatedDiceRoller roller, DiceSkin skin) {
     final showResult = !roller._isRolling && roller._currentValue > 0;
-    
+    final v = roller._currentValue;
+    final isCrit = showResult && v == 20;
+    final isFumble = showResult && v == 1;
+    final edge =
+        isCrit ? const Color(0xFFFF2D2D) : (isFumble ? Colors.grey : skin.edge);
+    final glowOpacity = isCrit ? 0.85 : (isFumble ? 0.0 : 0.35);
+
     return Container(
       width: 100,
       height: 100,
       decoration: BoxDecoration(
-        color: const Color(0xFFF5A623),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: skin.gradient,
+        ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF3E2723), width: 3),
+        border: Border.all(color: edge, width: isCrit ? 4 : 2.5),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.3),
+            color: skin.glow.withValues(alpha: glowOpacity),
+            blurRadius: isCrit ? 28 : 12,
+            spreadRadius: isCrit ? 4 : 1,
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.45),
             blurRadius: 10,
             offset: const Offset(0, 5),
           ),
@@ -134,14 +167,14 @@ class AnimatedDie extends AnimatedWidget {
       ),
       child: Center(
         child: Text(
-          showResult ? '${roller._currentValue}' : '?',
+          showResult ? '$v' : '?',
           style: TextStyle(
             fontSize: showResult ? 48 : 36,
             fontWeight: FontWeight.bold,
-            color: Colors.white,
+            color: skin.face,
             shadows: [
               Shadow(
-                color: Colors.black.withValues(alpha: 0.5),
+                color: Colors.black.withValues(alpha: 0.6),
                 offset: const Offset(2, 2),
                 blurRadius: 4,
               ),
@@ -153,25 +186,26 @@ class AnimatedDie extends AnimatedWidget {
   }
 }
 
-/// Widget that manages the animated dice roller. Tap the die to roll, or pass
-/// an externally-owned [roller] to render (the screen then drives it).
 class DiceAnimationWidget extends StatefulWidget {
   final AnimatedDiceRoller? roller;
   final Function(int) onResult;
   final bool enabled;
+  final DiceSkin skin;
 
   const DiceAnimationWidget({
     super.key,
     this.roller,
     required this.onResult,
     this.enabled = true,
+    this.skin = DiceSkin.obsidian,
   });
 
   @override
   State<DiceAnimationWidget> createState() => _DiceAnimationWidgetState();
 }
 
-class _DiceAnimationWidgetState extends State<DiceAnimationWidget> with SingleTickerProviderStateMixin {
+class _DiceAnimationWidgetState extends State<DiceAnimationWidget>
+    with SingleTickerProviderStateMixin {
   late final AnimatedDiceRoller _roller;
   bool get _ownsRoller => widget.roller == null;
 
@@ -197,13 +231,10 @@ class _DiceAnimationWidgetState extends State<DiceAnimationWidget> with SingleTi
   Widget build(BuildContext context) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () {
-        debugPrint('DiceAnimationWidget: tapped');
-        _roll();
-      },
+      onTap: _roll,
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: AnimatedDie(roller: _roller),
+        child: AnimatedDie(roller: _roller, skin: widget.skin),
       ),
     );
   }

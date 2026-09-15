@@ -3,13 +3,14 @@
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
 
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/core/domain/model_source.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-import 'dart:io';
 
 import 'rulebook_db.dart';
 
@@ -68,7 +69,6 @@ class SlmGuideService {
     }
   }
 
-  /// Download the model (Wi-Fi recommended, ~2GB, resumable). Throws on error.
   Future<void> download({String? token}) async {
     final t = (token ?? await this.token ?? '').trim();
     try {
@@ -77,8 +77,105 @@ class SlmGuideService {
         token: t.isEmpty ? null : t,
       );
     } catch (e) {
-      throw SlmException('Download failed: $e');
+      throw SlmException(friendlyDownloadError(e));
     }
+  }
+
+  Stream<int> downloadWithProgress({String? token}) async* {
+    final t = (token ?? await this.token ?? '').trim();
+    final spec = _spec(token: t.isEmpty ? null : t);
+    try {
+      await for (final p in FlutterGemmaPlugin.instance.modelManager
+          .downloadModelWithProgress(
+        spec,
+        token: t.isEmpty ? null : t,
+      )) {
+        yield p.overallProgress.clamp(0, 100);
+      }
+    } catch (e) {
+      throw SlmException(friendlyDownloadError(e));
+    }
+  }
+
+  Future<SlmUrlCheck> verifyModelUrl({String? token}) async {
+    final t = (token ?? await this.token ?? '').trim();
+    final client = HttpClient();
+    client.connectionTimeout = const Duration(seconds: 15);
+    try {
+      final uri = Uri.parse(modelUrl);
+      final req = await client.openUrl('HEAD', uri);
+      if (t.isNotEmpty) req.headers.set('Authorization', 'Bearer $t');
+      req.followRedirects = true;
+      final res = await req.close().timeout(const Duration(seconds: 20));
+      await res.drain<void>();
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        return SlmUrlCheck(SlmUrlStatus.ok, res.statusCode, '');
+      }
+      if (res.statusCode == 401 || res.statusCode == 403) {
+        return SlmUrlCheck(SlmUrlStatus.needsToken, res.statusCode, '');
+      }
+      if (res.statusCode == 404) {
+        return SlmUrlCheck(SlmUrlStatus.notFound, res.statusCode, '');
+      }
+      return SlmUrlCheck(SlmUrlStatus.unknown, res.statusCode, '');
+    } on SocketException {
+      return const SlmUrlCheck(SlmUrlStatus.networkFail, -1, '');
+    } on TimeoutException {
+      return const SlmUrlCheck(SlmUrlStatus.networkFail, -1, '');
+    } catch (_) {
+      return const SlmUrlCheck(SlmUrlStatus.unknown, -1, '');
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<String> sideLoadExpectedPath() async {
+    final dir = await getApplicationDocumentsDirectory();
+    return '${dir.path}/$sideLoadName';
+  }
+
+  Future<SlmSideLoadCheck> validateSideLoad() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/$sideLoadName');
+      if (!await file.exists()) {
+        return const SlmSideLoadCheck(false, 0, false);
+      }
+      final len = await file.length();
+      return SlmSideLoadCheck(true, len, len > 100 * 1024 * 1024);
+    } catch (_) {
+      return const SlmSideLoadCheck(false, 0, false);
+    }
+  }
+
+  static String formatBytes(int bytes) {
+    if (bytes <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    var v = bytes.toDouble();
+    var i = 0;
+    while (v >= 1024 && i < units.length - 1) {
+      v /= 1024;
+      i++;
+    }
+    final s = v >= 100 ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
+    return '$s ${units[i]}';
+  }
+
+  static String friendlyDownloadError(Object e) {
+    final s = '$e';
+    if (s.contains('401') || s.contains('403')) {
+      return 'Download needs a HuggingFace token (gated Gemma repo). Accept the license on huggingface.co, paste a token in Setup, then retry. Detail: $e';
+    }
+    if (s.contains('404')) {
+      return 'Model file not found (Google renamed it). Verify the URL in a browser, update SlmGuideService.modelUrl, then retry. Detail: $e';
+    }
+    if (s.contains('SocketException') ||
+        s.contains('Connection') ||
+        s.contains('Timeout') ||
+        s.contains('timed out')) {
+      return 'Network failed during download (resumable — retry on Wi-Fi). Detail: $e';
+    }
+    return 'Download failed: $e';
   }
 
   /// Use a manually placed `guide_model.task` from app documents instead.
@@ -220,4 +317,37 @@ class SlmException implements Exception {
   SlmException(this.message);
   @override
   String toString() => message;
+}
+
+enum SlmUrlStatus { ok, needsToken, notFound, networkFail, unknown }
+
+class SlmUrlCheck {
+  final SlmUrlStatus status;
+  final int statusCode;
+  final String detail;
+  const SlmUrlCheck(this.status, this.statusCode, this.detail);
+
+  String get label {
+    switch (status) {
+      case SlmUrlStatus.ok:
+        return 'Model URL OK ($statusCode) — safe to download.';
+      case SlmUrlStatus.needsToken:
+        return 'Model URL needs a HuggingFace token ($statusCode). Accept the Gemma license, paste a token, then retry.';
+      case SlmUrlStatus.notFound:
+        return 'Model URL 404 — Google renamed the file. Open the URL in a browser, find the new .task name, update SlmGuideService.modelUrl.';
+      case SlmUrlStatus.networkFail:
+        return 'No network to HuggingFace. Check Wi-Fi, then retry.';
+      case SlmUrlStatus.unknown:
+        return statusCode > 0
+            ? 'HuggingFace returned $statusCode. Open the URL in a browser to inspect.'
+            : 'Could not reach HuggingFace. Retry on Wi-Fi.';
+    }
+  }
+}
+
+class SlmSideLoadCheck {
+  final bool exists;
+  final int sizeBytes;
+  final bool looksValid;
+  const SlmSideLoadCheck(this.exists, this.sizeBytes, this.looksValid);
 }

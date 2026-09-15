@@ -46,4 +46,37 @@ void main() {
       expect(prompt.length, lessThan(600 + 300));
     });
   });
+
+  group('SlmGuideService pipeline helpers (pure)', () {
+    test('formatBytes renders B/KB/MB/GB', () {
+      expect(SlmGuideService.formatBytes(0), '0 B');
+      expect(SlmGuideService.formatBytes(512), contains('B'));
+      expect(SlmGuideService.formatBytes(2048), contains('KB'));
+      expect(SlmGuideService.formatBytes(2 * 1024 * 1024), contains('MB'));
+      expect(
+          SlmGuideService.formatBytes(2 * 1024 * 1024 * 1024), contains('GB'));
+    });
+
+    test('friendlyDownloadError maps 401/404/network', () {
+      expect(SlmGuideService.friendlyDownloadError('401 Unauthorized'),
+          contains('HuggingFace token'));
+      expect(SlmGuideService.friendlyDownloadError('404 Not Found'),
+          contains('renamed'));
+      expect(
+          SlmGuideService.friendlyDownloadError(
+              'SocketException: Failed host lookup'),
+          contains('Network failed'));
+    });
+
+    test('SlmUrlCheck.label covers all states', () {
+      expect(
+          const SlmUrlCheck(SlmUrlStatus.ok, 200, '').label, contains('OK'));
+      expect(const SlmUrlCheck(SlmUrlStatus.needsToken, 401, '').label,
+          contains('token'));
+      expect(const SlmUrlCheck(SlmUrlStatus.notFound, 404, '').label,
+          contains('404'));
+      expect(const SlmUrlCheck(SlmUrlStatus.networkFail, -1, '').label,
+          contains('No network'));
+    });
+  });
 }

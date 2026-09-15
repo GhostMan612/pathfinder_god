@@ -44,6 +44,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _slmEnabled = false;
   bool _slmInstalled = false;
   String? _slmStatus;
+  double? _slmProgress;
+  String? _slmVerify;
+  String? _slmSidePath;
+  String? _slmSideInfo;
   late final TextEditingController _hfToken;
 
   @override
@@ -67,10 +71,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final enabled = await slm.enabled;
       final installed = await slm.isInstalled();
       _hfToken.text = await slm.token ?? '';
+      final sidePath = await slm.sideLoadExpectedPath();
+      final sideCheck = await slm.validateSideLoad();
       if (!mounted) return;
       setState(() {
         _slmEnabled = enabled;
         _slmInstalled = installed;
+        _slmSidePath = sidePath;
+        _slmSideInfo = sideCheck.exists
+            ? 'Side-load file: ${SlmGuideService.formatBytes(sideCheck.sizeBytes)}${sideCheck.looksValid ? '' : ' (too small — expected ~2GB)'}'
+            : 'No side-load file yet.';
         _slmStatus = installed
             ? 'Ready — Guide answers on-device, fully offline.'
             : 'Not downloaded (~2GB, Wi-Fi recommended). Guide uses excerpts until then.';
@@ -78,21 +88,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (_) {}
   }
 
-  Future<void> _downloadSlm() async {
-    setState(() { _slmBusy = true; _slmStatus = 'Downloading brain… keep the app open.'; });
+  Future<void> _verifySlmUrl() async {
+    setState(() => _slmVerify = 'Checking model URL…');
     try {
       final slm = SlmGuideService.instance;
       await slm.setToken(_hfToken.text);
-      if (!await slm.installSideLoaded()) {
-        await slm.download();
+      final check = await slm.verifyModelUrl();
+      if (!mounted) return;
+      setState(() => _slmVerify = check.label);
+    } catch (e) {
+      if (mounted) setState(() => _slmVerify = 'Verify failed: $e');
+    }
+  }
+
+  Future<void> _downloadSlm() async {
+    setState(() {
+      _slmBusy = true;
+      _slmProgress = 0;
+      _slmStatus = 'Downloading brain… keep the app open on Wi-Fi.';
+    });
+    try {
+      final slm = SlmGuideService.instance;
+      await slm.setToken(_hfToken.text);
+      if (await slm.installSideLoaded()) {
+        if (!mounted) return;
+        setState(() => _slmStatus = 'Ready — installed from side-load, fully offline.');
+        return;
+      }
+      await for (final p in slm.downloadWithProgress()) {
+        if (!mounted) return;
+        setState(() {
+          _slmProgress = p / 100.0;
+          _slmStatus = p >= 100
+              ? 'Finalizing brain…'
+              : 'Downloading brain… $p% — keep the app open.';
+        });
       }
       if (!mounted) return;
       setState(() => _slmStatus = 'Ready — Guide answers on-device, fully offline.');
     } catch (e) {
-      if (mounted) setState(() => _slmStatus = 'Download failed: $e');
+      if (mounted) setState(() => _slmStatus = '$e');
     } finally {
       if (mounted) {
-        setState(() => _slmBusy = false);
+        setState(() {
+          _slmBusy = false;
+          _slmProgress = null;
+        });
         _refreshSlm();
       }
     }
@@ -350,6 +391,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 8),
+          if (_slmSidePath != null)
+            SelectableText(
+              'Side-load here: $_slmSidePath',
+              style: const TextStyle(fontSize: 11, color: Colors.grey),
+            ),
+          if (_slmSideInfo != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(_slmSideInfo!, style: const TextStyle(fontSize: 12)),
+            ),
+          const SizedBox(height: 8),
           Row(children: [
             Expanded(
               child: FilledButton.icon(
@@ -367,7 +419,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
           ]),
-          if (_slmBusy) const Padding(padding: EdgeInsets.only(top: 8), child: LinearProgressIndicator()),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _slmBusy ? null : _verifySlmUrl,
+            icon: const Icon(Icons.link),
+            label: const Text('Verify model URL first'),
+          ),
+          if (_slmVerify != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(_slmVerify!, style: const TextStyle(fontSize: 13)),
+            ),
+          if (_slmBusy)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: _slmProgress == null
+                  ? const LinearProgressIndicator()
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        LinearProgressIndicator(value: _slmProgress),
+                        const SizedBox(height: 4),
+                        Text('${((_slmProgress ?? 0) * 100).round()}% — resumable, keep app open',
+                            style: const TextStyle(fontSize: 12)),
+                      ],
+                    ),
+            ),
           const SizedBox(height: 12),
           const Divider(),
           const ListTile(
