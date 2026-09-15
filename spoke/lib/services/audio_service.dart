@@ -8,7 +8,15 @@ import 'dart:async';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-enum Sfx { dice, crit, fail, error, tap }
+enum Sfx {
+  dice,
+  diceHeavy,
+  diceGlass,
+  crit,
+  fail,
+  error,
+  tap,
+}
 
 /// App-wide sound service: pooled SFX players + looping background music.
 /// Preferences persist via shared_preferences; every call is fail-safe so
@@ -21,10 +29,19 @@ class AudioService {
   static const _keyMusic = 'music_enabled';
   static const _keyTrack = 'music_track';
 
-  static const List<String> tracks = ['Tavern', 'Inn'];
+  static const List<String> tracks = [
+    'Tavern',
+    'Inn',
+    'Dungeon',
+    'Combat',
+    'Eerie',
+  ];
   static const List<String> _trackAssets = [
     'audio/bgm_tavern.mp3',
     'audio/bgm_inn.mp3',
+    'audio/bgm_dungeon.mp3',
+    'audio/bgm_combat.mp3',
+    'audio/bgm_eerie.mp3',
   ];
 
   final List<AudioPlayer> _sfxPool = [];
@@ -129,6 +146,8 @@ class AudioService {
     if (!_ready || !_sfxEnabled || _sfxPool.isEmpty) return;
     final (asset, volume) = switch (sfx) {
       Sfx.dice => ('audio/dice_roll.ogg', 0.9),
+      Sfx.diceHeavy => ('audio/dice_heavy.ogg', 1.0),
+      Sfx.diceGlass => ('audio/dice_glass.ogg', 0.85),
       Sfx.crit => ('audio/dice_crit.wav', 0.95),
       Sfx.fail => ('audio/dice_fail.ogg', 0.85),
       Sfx.error => ('audio/error.ogg', 0.6),
@@ -148,8 +167,10 @@ const kAudioCredits = '''
 Background music
 - "The Old Tower Inn" by RandomMind (CC0) — Tavern track
 - "Inn Music" by tcarisland (CC BY 4.0) — Inn track
+- Dungeon, Combat, Eerie — placeholder tracks (replace with CC0/CC-BY assets)
 
 Sound effects
 - Dice rattle, fail yelp, error thud — 80 CC0 RPG SFX + 100 CC0 SFX (CC0, via OpenGameArt.org)
 - Crit coin, UI tap, CC dice/tap — "RPG Sound Pack" by Tuomo Untinen (CC BY 3.0, Heroes of Hawks Haven)
+- Heavy dice, Glass dice — placeholder SFX (replace with CC0/CC-BY assets)
 ''';

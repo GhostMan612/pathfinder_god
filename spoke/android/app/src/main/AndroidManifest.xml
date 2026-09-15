@@ -3,6 +3,11 @@
         android:label="Pathfinder God"
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon">
+
+    <!-- CRITICAL: Disables Impeller to fix BLASTBufferQueue UI lag on Moto G -->
+    <meta-data
+        android:name="io.flutter.app.android.EnableImpeller"
+        android:value="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
