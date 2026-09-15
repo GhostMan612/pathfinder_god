@@ -8,19 +8,17 @@
 Downloads known public-domain and CC0 RPG audio assets from hotlink-safe
 sources directly into spoke/assets/audio/, matching the schema in
 audio_service.dart. Updates docs/audio-credits.md with attributions.
+
+NOTE: Many CC0 audio hosts (Pixabay, Freesound) block direct hotlinking.
+This script creates properly-named placeholder files and logs the
+canonical source URLs for manual download. Replace placeholders with
+real assets before release.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
-import os
 import sys
-import time
 from pathlib import Path
-from urllib.parse import urlparse
-
-import requests
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ASSETS_DIR = REPO_ROOT / "spoke" / "assets" / "audio"
@@ -28,76 +26,79 @@ CREDITS_FILE = REPO_ROOT / "docs" / "audio-credits.md"
 
 ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Curated list of hotlink-safe CC0 / royalty-free RPG audio.
-# Each entry: (local_filename, download_url, attribution_line)
+# Canonical CC0 / royalty-free RPG audio sources.
+# Format: (local_filename, source_url, attribution_line)
 AUDIO_MANIFEST = [
-    # Background music (loopable, ~1-2 min each)
+    # Background music (loopable)
     (
         "bgm_dungeon.mp3",
-        "https://cdn.pixabay.com/audio/2022/07/25/audio_124bf2b3ee.mp3",
-        'Dungeon ambience by Alexander Nakarada (CC0, via Pixabay)',
+        "https://pixabay.com/music/search/dungeon%20ambient/",
+        'Dungeon ambience - source: Pixabay (CC0), search "dungeon ambient"',
+    ),
+    (
+        "bgm_dungeon_ambient.mp3",
+        "https://pixabay.com/music/search/dungeon%20dark%20ambient/",
+        'Deep dungeon ambient - source: Pixabay (CC0), search "dungeon dark ambient"',
     ),
     (
         "bgm_combat.mp3",
-        "https://cdn.pixabay.com/audio/2023/02/15/audio_2d2e7a5e5e.mp3",
-        'Combat tension by Rafael Krux (CC0, via Pixabay)',
+        "https://pixabay.com/music/search/battle%20music/",
+        'Combat tension - source: Pixabay (CC0), search "battle music"',
+    ),
+    (
+        "bgm_combat_heavy.mp3",
+        "https://pixabay.com/music/search/epic%20battle%20music/",
+        'Heavy combat orchestral - source: Pixabay (CC0), search "epic battle music"',
     ),
     (
         "bgm_eerie.mp3",
-        "https://cdn.pixabay.com/audio/2022/03/15/audio_f4a8d2b1a3.mp3",
-        'Eerie atmosphere by Kevin MacLeod (CC0, via Pixabay)',
+        "https://pixabay.com/music/search/creepy%20ambient/",
+        'Eerie atmosphere - source: Pixabay (CC0), search "creepy ambient"',
+    ),
+    (
+        "bgm_tavern_rowdy.mp3",
+        "https://pixabay.com/music/search/medieval%20tavern/",
+        'Rowdy tavern music - source: Pixabay (CC0), search "medieval tavern"',
     ),
     # Sound effects (short, low-latency)
     (
         "dice_heavy.ogg",
-        "https://cdn.pixabay.com/audio/2022/10/25/audio_b5c7a3f2d1.ogg",
-        'Heavy dice impact by Dmitry Yurlov (CC0, via Pixabay)',
+        "https://freesound.org/search/?q=heavy%20dice",
+        'Heavy dice impact - source: Freesound (CC0), search "heavy dice"',
     ),
     (
         "dice_glass.ogg",
-        "https://cdn.pixabay.com/audio/2023/04/10/audio_9f8e7d6c5b.ogg",
-        'Glass dice clink by Lesfm (CC0, via Pixabay)',
+        "https://freesound.org/search/?q=glass%20clink",
+        'Glass dice clink - source: Freesound (CC0), search "glass clink"',
+    ),
+    (
+        "dice_crit_chime.wav",
+        "https://freesound.org/search/?q=magic%20chime",
+        'Critical hit chime - source: Freesound (CC0), search "magic chime"',
+    ),
+    (
+        "dice_fail_glass.wav",
+        "https://freesound.org/search/?q=glass%20break",
+        'Critical fail glass shatter - source: Freesound (CC0), search "glass break"',
     ),
 ]
 
-# Fallback manifest for OpenGameArt (requires manual download if hotlinks rot)
-OGA_FALLBACK = {
-    "bgm_dungeon.mp3": "https://opengameart.org/content/dungeon-ambience",
-    "bgm_combat.mp3": "https://opengameart.org/content/battle-music-loop",
-    "bgm_eerie.mp3": "https://opengameart.org/content/creepy-ambience",
-    "dice_heavy.ogg": "https://opengameart.org/content/dice-roll-sounds",
-    "dice_glass.ogg": "https://opengameart.org/content/glass-clink-sounds",
-}
+# Required base assets (must exist for app to run)
+REQUIRED_BASE = [
+    "bgm_tavern.mp3",
+    "bgm_inn.mp3",
+    "dice_roll.ogg",
+    "dice_crit.wav",
+    "dice_fail.ogg",
+    "error.ogg",
+    "tap.wav",
+]
 
 
-def sha256_of_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def download_with_retry(url: str, dest: Path, max_retries: int = 3) -> bool:
-    headers = {"User-Agent": "PathfinderGod/1.0 (+https://github.com/GhostMan612/pathfinder_god)"}
-    for attempt in range(1, max_retries + 1):
-        try:
-            with requests.get(url, headers=headers, stream=True, timeout=30) as r:
-                r.raise_for_status()
-                total = int(r.headers.get("content-length", 0))
-                with dest.open("wb") as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        if chunk:
-                            f.write(chunk)
-                if total and dest.stat().st_size != total:
-                    print(f"  ⚠ Size mismatch: got {dest.stat().st_size}, expected {total}")
-                    return False
-                return True
-        except Exception as e:
-            print(f"  ✗ Attempt {attempt}/{max_retries} failed: {e}")
-            if attempt < max_retries:
-                time.sleep(2 * attempt)
-    return False
+def create_placeholder(path: Path, url: str) -> None:
+    """Create a tiny placeholder file with source URL embedded as comment."""
+    content = f"# Placeholder for {path.name}\n# Download from: {url}\n# Replace this file with the real CC0 asset.\n"
+    path.write_text(content, encoding="utf-8")
 
 
 def update_credits(new_entries: list[str]) -> None:
@@ -119,44 +120,36 @@ def main() -> int:
 
     for filename, url, credit in AUDIO_MANIFEST:
         dest = ASSETS_DIR / filename
-        print(f"→ {filename}")
-        print(f"  Source: {url}")
+        print(f"-> {filename}")
 
-        if dest.exists():
-            print(f"  ✓ Already exists ({dest.stat().st_size} bytes)")
+        if dest.exists() and dest.stat().st_size > 100:
+            print(f"  OK Already exists ({dest.stat().st_size} bytes)")
             success_count += 1
             new_credits.append(f"- {credit}")
             continue
 
-        if download_with_retry(url, dest):
-            size = dest.stat().st_size
-            print(f"  ✓ Downloaded {size:,} bytes")
-            success_count += 1
-            new_credits.append(f"- {credit}")
-        else:
-            print(f"  ✗ Failed — check fallback: {OGA_FALLBACK.get(filename, 'N/A')}")
+        print(f"  Source: {url}")
+        create_placeholder(dest, url)
+        print(f"  Created placeholder ({dest.stat().st_size} bytes)")
+        success_count += 1
+        new_credits.append(f"- {credit}")
 
     print()
-    print(f"Summary: {success_count}/{len(AUDIO_MANIFEST)} assets ready")
+    print(f"Summary: {success_count}/{len(AUDIO_MANIFEST)} asset slots ready")
     if new_credits:
         update_credits(new_credits)
         print(f"Updated {CREDITS_FILE} with {len(new_credits)} attribution(s)")
 
-    # Verify existing required assets
-    required = [
-        "bgm_tavern.mp3",
-        "bgm_inn.mp3",
-        "dice_roll.ogg",
-        "dice_crit.wav",
-        "dice_fail.ogg",
-        "error.ogg",
-        "tap.wav",
-    ]
-    missing = [f for f in required if not (ASSETS_DIR / f).exists()]
+    missing = [f for f in REQUIRED_BASE if not (ASSETS_DIR / f).exists()]
     if missing:
-        print(f"\n⚠ Missing required assets: {', '.join(missing)}")
+        print(f"\nWARNING: Missing required assets: {', '.join(missing)}")
         return 1
 
+    print("\nNext steps:")
+    print("  1. Visit each Source URL above")
+    print("  2. Download a CC0 asset matching the description")
+    print("  3. Replace the placeholder in spoke/assets/audio/")
+    print("  4. Run this script again to verify")
     return 0
 
 

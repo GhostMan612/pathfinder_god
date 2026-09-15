@@ -12,6 +12,8 @@ enum Sfx {
   dice,
   diceHeavy,
   diceGlass,
+  diceCritChime,
+  diceFailGlass,
   crit,
   fail,
   error,
@@ -33,15 +35,21 @@ class AudioService {
     'Tavern',
     'Inn',
     'Dungeon',
+    'Dungeon Deep',
     'Combat',
+    'Combat Heavy',
     'Eerie',
+    'Tavern Rowdy',
   ];
   static const List<String> _trackAssets = [
     'audio/bgm_tavern.mp3',
     'audio/bgm_inn.mp3',
     'audio/bgm_dungeon.mp3',
+    'audio/bgm_dungeon_ambient.mp3',
     'audio/bgm_combat.mp3',
+    'audio/bgm_combat_heavy.mp3',
     'audio/bgm_eerie.mp3',
+    'audio/bgm_tavern_rowdy.mp3',
   ];
 
   final List<AudioPlayer> _sfxPool = [];
@@ -148,6 +156,8 @@ class AudioService {
       Sfx.dice => ('audio/dice_roll.ogg', 0.9),
       Sfx.diceHeavy => ('audio/dice_heavy.ogg', 1.0),
       Sfx.diceGlass => ('audio/dice_glass.ogg', 0.85),
+      Sfx.diceCritChime => ('audio/dice_crit_chime.wav', 0.95),
+      Sfx.diceFailGlass => ('audio/dice_fail_glass.wav', 0.85),
       Sfx.crit => ('audio/dice_crit.wav', 0.95),
       Sfx.fail => ('audio/dice_fail.ogg', 0.85),
       Sfx.error => ('audio/error.ogg', 0.6),
