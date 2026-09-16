@@ -126,11 +126,13 @@ flutter_launcher_icons:
   adaptive_icon_foreground: "assets/pf_logo_adaptive_foreground.png"
 
 flutter_native_splash:
-  color: "#F3E9D2"
+  color: "#1E1B18"
   image: assets/pf_logo.jpg
+  android_gravity: center
+  ios_content_mode: center
   android_12:
     image: assets/pf_logo.jpg
-    color: "#F3E9D2"
-    icon_background_color: "#7B1E1E"
+    color: "#1E1B18"
+    icon_background_color: "#1E1B18"
   ios: false
   web: false

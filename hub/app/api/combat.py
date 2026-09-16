@@ -37,10 +37,13 @@ class ConditionItem(BaseModel):
 
 class EndTurnRequest(BaseModel):
     conditions: list[ConditionItem] = []
+    current_hp: int = 0
 
 
 class EndTurnResponse(BaseModel):
     conditions: list[ConditionItem]
+    notes: str = ""
+    damage_taken: int = 0
 
 
 @router.post("/resolve-strike", response_model=StrikeResponse)
@@ -66,5 +69,11 @@ async def resolve_strike(request: StrikeRequest) -> StrikeResponse:
 async def end_turn(request: EndTurnRequest) -> EndTurnResponse:
     """Process end-of-turn condition updates."""
     conditions = [c.model_dump() for c in request.conditions]
-    updated = CombatTrackerAgent.end_of_turn(conditions)
-    return EndTurnResponse(conditions=[ConditionItem(**c) for c in updated])
+    updated, notes, damage_taken = CombatTrackerAgent.end_of_turn(
+        conditions, current_hp=request.current_hp
+    )
+    return EndTurnResponse(
+        conditions=[ConditionItem(**c) for c in updated],
+        notes=notes,
+        damage_taken=damage_taken,
+    )

@@ -32,14 +32,20 @@ class HubClient {
     return HubHealth.fromJson(jsonDecode(resp.body) as Map<String, dynamic>);
   }
 
+  Future<T> _withTimeout<T>(Future<T> future) async {
+    return await future.timeout(const Duration(seconds: 30), onTimeout: () {
+      throw TimeoutException('Request timed out after 30 seconds');
+    });
+  }
+
   /// General GM Q&A / generation (buffered).
-  Future<AskResponse> ask(
+Future<AskResponse> ask(
       String query, {
-        String edition = 'both',
-        String? mode,
-        List<List<String>> history = const [],
-      }) async {
-    final resp = await _http.post(
+      String edition = 'both',
+      String? mode,
+      List<List<String>> history = const [],
+    }) async {
+    final resp = await _withTimeout(_http.post(
       config.httpUri('/ask'),
       headers: const {'Content-Type': 'application/json'},
       body: jsonEncode({
@@ -48,7 +54,7 @@ class HubClient {
         'mode': mode,
         'history': history,
       }),
-    );
+    ));
     _ensureOk(resp);
     return AskResponse.fromJson(jsonDecode(resp.body) as Map<String, dynamic>);
   }
@@ -59,24 +65,24 @@ class HubClient {
       String prompt, {
         String edition = 'both',
       }) async {
-    final resp = await _http.post(
+    final resp = await _withTimeout(_http.post(
       config.httpUri('/generate/$kind'),
       headers: const {'Content-Type': 'application/json'},
       body: jsonEncode({'prompt': prompt, 'edition': edition}),
-    );
+    ));
     _ensureOk(resp);
     return AskResponse.fromJson(jsonDecode(resp.body) as Map<String, dynamic>);
   }
 
   /// Raw rule/bestiary lookup (no LLM).
-  Future<List<RuleHit>> searchRules(
+Future<List<RuleHit>> searchRules(
       String query, {
-        String edition = 'both',
-        int limit = 10,
-      }) async {
-    final resp = await _http.get(
+      String edition = 'both',
+      int limit = 10,
+    }) async {
+    final resp = await _withTimeout(_http.get(
       config.httpUri('/rules/search', {'q': query, 'edition': edition, 'limit': limit}),
-    );
+    ));
     _ensureOk(resp);
     final body = jsonDecode(resp.body) as Map<String, dynamic>;
     return (body['results'] as List<dynamic>)
@@ -86,18 +92,18 @@ class HubClient {
 
   /// Campaign export — full DB dump for backup (hub online only).
   Future<Map<String, dynamic>> exportCampaign(int campaignId) async {
-    final resp = await _http.get(config.httpUri('/campaign/export', {'campaign_id': campaignId}));
+    final resp = await _withTimeout(_http.get(config.httpUri('/campaign/export', {'campaign_id': campaignId})));
     _ensureOk(resp);
     return jsonDecode(resp.body) as Map<String, dynamic>;
   }
 
   /// Campaign import — restores from backup (merges by id/name).
   Future<void> importCampaign(Map<String, dynamic> payload) async {
-    final resp = await _http.post(
+    final resp = await _withTimeout(_http.post(
       config.httpUri('/campaign/import'),
       headers: const {'Content-Type': 'application/json'},
       body: jsonEncode(payload),
-    );
+    ));
     _ensureOk(resp);
   }
 
@@ -194,11 +200,11 @@ class HubClient {
     String query, {
     String edition = 'both',
   }) async {
-    final resp = await _http.post(
+    final resp = await _withTimeout(_http.post(
       config.httpUri('/rules/fetch'),
       headers: const {'Content-Type': 'application/json'},
       body: jsonEncode({'q': query, 'edition': edition}),
-    );
+    ));
     _ensureOk(resp);
     return RuleHit.fromJson(jsonDecode(resp.body) as Map<String, dynamic>);
   }
@@ -206,14 +212,14 @@ class HubClient {
   /// Drain the offline miss queue into the hub's backfill list.
   /// Returns the number the hub accepted.
   Future<int> reportMisses(List<Map<String, String>> queries) async {
-    final resp = await _http.post(
+    final resp = await _withTimeout(_http.post(
       config.httpUri('/rules/missed'),
       headers: const {'Content-Type': 'application/json'},
       body: jsonEncode({
         'queries':
             queries.map((m) => {'q': m['q'] ?? '', 'edition': m['edition'] ?? 'both'}).toList(),
       }),
-    );
+    ));
     _ensureOk(resp);
     return (jsonDecode(resp.body) as Map<String, dynamic>)['queued'] as int? ?? 0;
   }
@@ -221,11 +227,11 @@ class HubClient {
   /// Build a character via LLM + Rules Lawyer validation.
   /// Returns the validated character JSON or errors.
   Future<Map<String, dynamic>> buildCharacter(String prompt) async {
-    final resp = await _http.post(
+    final resp = await _withTimeout(_http.post(
       config.httpUri('/generate/character'),
       headers: const {'Content-Type': 'application/json'},
       body: jsonEncode({'prompt': prompt}),
-    );
+    ));
     _ensureOk(resp);
     return jsonDecode(resp.body) as Map<String, dynamic>;
   }
@@ -238,7 +244,7 @@ class HubClient {
     required int targetHp,
     int targetTempHp = 0,
   }) async {
-    final resp = await _http.post(
+    final resp = await _withTimeout(_http.post(
       config.httpUri('/combat/resolve-strike'),
       headers: const {'Content-Type': 'application/json'},
       body: jsonEncode({
@@ -248,24 +254,30 @@ class HubClient {
         'target_hp': targetHp,
         'target_temp_hp': targetTempHp,
       }),
-    );
+    ));
     _ensureOk(resp);
     return jsonDecode(resp.body) as Map<String, dynamic>;
   }
 
   /// Process end-of-turn condition updates.
-  Future<List<Map<String, dynamic>>> endTurnConditions(
-      List<Map<String, dynamic>> conditions) async {
-    final resp = await _http.post(
+  Future<EndTurnOutcome> endTurnConditions(
+    List<Map<String, dynamic>> conditions, {
+    int currentHp = 0,
+  }) async {
+    final resp = await _withTimeout(_http.post(
       config.httpUri('/combat/end-turn'),
       headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({'conditions': conditions}),
-    );
+      body: jsonEncode({'conditions': conditions, 'current_hp': currentHp}),
+    ));
     _ensureOk(resp);
     final body = jsonDecode(resp.body) as Map<String, dynamic>;
-    return (body['conditions'] as List<dynamic>)
-        .map((e) => e as Map<String, dynamic>)
-        .toList();
+    return EndTurnOutcome(
+      conditions: (body['conditions'] as List<dynamic>? ?? [])
+          .map((e) => e as Map<String, dynamic>)
+          .toList(),
+      notes: body['notes'] as String? ?? '',
+      damageTaken: body['damage_taken'] as int? ?? 0,
+    );
   }
 
   /// Generate an encounter via LLM + deterministic XP budget.
@@ -275,7 +287,7 @@ class HubClient {
     required String threat,
     required String theme,
   }) async {
-    final resp = await _http.post(
+    final resp = await _withTimeout(_http.post(
       config.httpUri('/encounter/generate'),
       headers: const {'Content-Type': 'application/json'},
       body: jsonEncode({
@@ -284,7 +296,18 @@ class HubClient {
         'threat': threat,
         'theme': theme,
       }),
-    );
+    ));
+    _ensureOk(resp);
+    return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
+
+  /// Generate a map via LLM + Pillow rendering.
+  Future<Map<String, dynamic>> generateMap(String prompt) async {
+    final resp = await _withTimeout(_http.post(
+      config.httpUri('/map/generate'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'prompt': prompt}),
+    ));
     _ensureOk(resp);
     return jsonDecode(resp.body) as Map<String, dynamic>;
   }
@@ -296,6 +319,20 @@ class HubClient {
   }
 
   void close() => _http.close();
+
+  void dispose() => close();
+}
+
+class EndTurnOutcome {
+  final List<Map<String, dynamic>> conditions;
+  final String notes;
+  final int damageTaken;
+
+  const EndTurnOutcome({
+    required this.conditions,
+    this.notes = '',
+    this.damageTaken = 0,
+  });
 }
 
 class HubException implements Exception {

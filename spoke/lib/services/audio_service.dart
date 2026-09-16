@@ -34,22 +34,10 @@ class AudioService {
   static const List<String> tracks = [
     'Tavern',
     'Inn',
-    'Dungeon',
-    'Dungeon Deep',
-    'Combat',
-    'Combat Heavy',
-    'Eerie',
-    'Tavern Rowdy',
   ];
   static const List<String> _trackAssets = [
     'audio/bgm_tavern.mp3',
     'audio/bgm_inn.mp3',
-    'audio/bgm_dungeon.mp3',
-    'audio/bgm_dungeon_ambient.mp3',
-    'audio/bgm_combat.mp3',
-    'audio/bgm_combat_heavy.mp3',
-    'audio/bgm_eerie.mp3',
-    'audio/bgm_tavern_rowdy.mp3',
   ];
 
   final List<AudioPlayer> _sfxPool = [];

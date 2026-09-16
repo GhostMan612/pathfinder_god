@@ -82,33 +82,44 @@ class CombatStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> nextTurn() async {
-    if (_combatants.isEmpty || _isProcessing) return;
+  Future<String> nextTurn() async {
+    if (_combatants.isEmpty || _isProcessing) return '';
 
     _isProcessing = true;
     notifyListeners();
 
+    var notes = '';
     try {
-      // Call hub to process end-of-turn conditions
-      final conditions = _combatants
-          .where((c) => c.conditions.isNotEmpty)
-          .expand((c) => c.conditions.map((cd) => {
+      final active = _combatants[_activeIndex];
+      final conditions = active.conditions
+          .map((cd) => {
                 'name': cd.name,
                 'value': cd.value,
                 'duration_rounds': cd.durationRounds,
-              }))
+              })
           .toList();
 
       if (conditions.isNotEmpty) {
-        await _client.endTurnConditions(conditions);
-        // Apply returned conditions locally
-        for (final _ in conditions) {
-          // Note: In a real implementation, we'd map back the updated conditions
-          // For now, we just tick down locally
+        final outcome = await _client.endTurnConditions(
+          conditions,
+          currentHp: active.currentHp,
+        );
+        final updated = outcome.conditions
+            .map((m) => CombatCondition(
+                  name: m['name'] as String? ?? '',
+                  value: m['value'] as int? ?? 1,
+                  durationRounds: m['duration_rounds'] as int?,
+                ))
+            .toList();
+        var hp = active.currentHp;
+        if (outcome.damageTaken > 0) {
+          hp = (hp - outcome.damageTaken).clamp(0, active.maxHp);
         }
+        _combatants[_activeIndex] =
+            active.copyWith(currentHp: hp, conditions: updated);
+        notes = outcome.notes;
       }
     } catch (_) {
-      // Offline fallback: process locally
       _tickConditionsLocally();
     }
 
@@ -120,6 +131,7 @@ class CombatStore extends ChangeNotifier {
 
     _isProcessing = false;
     notifyListeners();
+    return notes;
   }
 
   void _tickConditionsLocally() {

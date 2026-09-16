@@ -476,7 +476,30 @@ class _RulebookScreenState extends State<RulebookScreen>
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_results.isEmpty) {
+    final results = _results;
+    if (results.isEmpty) {
+      if (_missQuery == null && _searchController.text.trim().isEmpty) {
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              _offlineReady
+                  ? 'Search your offline rulebook.'
+                  : 'Search rules via the hub.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey[600]),
+            ),
+          ),
+        );
+      }
+      if (_missQuery == null) {
+        return const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text('No rules found matching your query.'),
+          ),
+        );
+      }
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -518,9 +541,9 @@ class _RulebookScreenState extends State<RulebookScreen>
     }
     return ListView.builder(
       padding: const EdgeInsets.all(12),
-      itemCount: _results.length,
+      itemCount: results.length,
       itemBuilder: (_, i) {
-        final e = _results[i];
+        final e = results[i];
         return Card(
           margin: const EdgeInsets.symmetric(vertical: 4),
           child: ListTile(

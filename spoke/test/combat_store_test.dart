@@ -58,7 +58,11 @@ class _FakeHubClient extends HubClient {
   }) async => {};
 
   @override
-  Future<List<Map<String, dynamic>>> endTurnConditions(List<Map<String, dynamic>> conditions) async => [];
+  Future<EndTurnOutcome> endTurnConditions(
+    List<Map<String, dynamic>> conditions, {
+    int currentHp = 0,
+  }) async =>
+      const EndTurnOutcome(conditions: []);
 
   @override
   void close() {}

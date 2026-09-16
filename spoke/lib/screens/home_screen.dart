@@ -21,7 +21,12 @@ import '../services/combat_store.dart';
 class HomeScreen extends StatefulWidget {
   final HubClient client;
   final CharacterStore characters;
-  const HomeScreen({super.key, required this.client, required this.characters});
+  final CombatStore? combatStore;
+  const HomeScreen(
+      {super.key,
+      required this.client,
+      required this.characters,
+      this.combatStore});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -30,12 +35,14 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _index = 0;
   late final CombatStore _combatStore;
+  late final bool _ownsCombatStore;
   late final List<Widget> _screens;
 
   @override
   void initState() {
     super.initState();
-    _combatStore = CombatStore(widget.client);
+    _combatStore = widget.combatStore ?? CombatStore(widget.client);
+    _ownsCombatStore = widget.combatStore == null;
     // Built once so each tab keeps its state (dice history, chat) across switches.
     _screens = [
       const DiceScreen(),
@@ -47,6 +54,12 @@ class _HomeScreenState extends State<HomeScreen> {
       MapMakerScreen(client: widget.client),
       SettingsScreen(client: widget.client, characters: widget.characters),
     ];
+  }
+
+  @override
+  void dispose() {
+    if (_ownsCombatStore) _combatStore.dispose();
+    super.dispose();
   }
 
   @override

@@ -8,6 +8,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
 
 import '../api/hub_client.dart';
+import '../api/models.dart';
 import '../models/combatant.dart';
 import '../services/audio_service.dart';
 import '../services/combat_store.dart';
@@ -65,14 +66,49 @@ class _CombatTrackerScreenState extends State<CombatTrackerScreen> {
     }
     _error = null;
 
+    final bestiaryQuery = TextEditingController();
+    List<RuleHit>? bestiaryResults;
+    var bestiarySearching = false;
+
+    Future<void> searchBestiary(StateSetter setDialogState) async {
+      final q = bestiaryQuery.text.trim();
+      if (q.isEmpty) return;
+      setDialogState(() => bestiarySearching = true);
+      try {
+        final hits =
+            await widget.client.searchRules(q, edition: '2e', limit: 5);
+        setDialogState(() {
+          bestiaryResults = hits;
+          bestiarySearching = false;
+        });
+      } catch (_) {
+        setDialogState(() => bestiarySearching = false);
+      }
+    }
+
+    void applyBestiaryHit(RuleHit hit, StateSetter setDialogState) {
+      final hp =
+          RegExp(r'HP\s+(\d+)').firstMatch(hit.content)?.group(1) ?? '10';
+      final ac =
+          RegExp(r'AC\s+(\d+)').firstMatch(hit.content)?.group(1) ?? '10';
+      _hpController.text = hp;
+      _maxHpController.text = hp;
+      _acController.text = ac;
+      if (_nameController.text.trim().isEmpty) {
+        _nameController.text = hit.name;
+      }
+      setDialogState(() {});
+    }
+
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
-        title: Text(edit == null ? 'Add Combatant' : 'Edit Combatant'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
+      builder: (_) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: Text(edit == null ? 'Add Combatant' : 'Edit Combatant'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
               TextField(
                 controller: _nameController,
                 decoration: const InputDecoration(labelText: 'Name'),
@@ -118,9 +154,60 @@ class _CombatTrackerScreenState extends State<CombatTrackerScreen> {
               SwitchListTile(
                 title: const Text('Player Character'),
                 value: _isPc,
-                onChanged: (v) => setState(() => _isPc = v),
+                onChanged: (v) => setDialogState(() => _isPc = v),
                 dense: true,
               ),
+              const Divider(),
+              Text(
+                'Bestiary',
+                style: Theme.of(dialogContext).textTheme.titleSmall?.copyWith(
+                      color: PathfinderTheme.gold,
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: bestiaryQuery,
+                      textInputAction: TextInputAction.search,
+                      onSubmitted: (_) => searchBestiary(setDialogState),
+                      decoration: const InputDecoration(
+                        labelText: 'Search Bestiary',
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: bestiarySearching
+                        ? const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.search),
+                    tooltip: 'Search',
+                    onPressed: bestiarySearching
+                        ? null
+                        : () => searchBestiary(setDialogState),
+                  ),
+                ],
+              ),
+              if (bestiaryResults != null)
+                ...bestiaryResults!.map(
+                  (hit) => ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(hit.name),
+                    subtitle: Text(
+                      hit.category,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: const Icon(Icons.add),
+                    onTap: () => applyBestiaryHit(hit, setDialogState),
+                  ),
+                ),
               if (_error != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
@@ -139,6 +226,7 @@ class _CombatTrackerScreenState extends State<CombatTrackerScreen> {
             child: Text(edit == null ? 'Add' : 'Save'),
           ),
         ],
+        ),
       ),
     );
   }
@@ -281,7 +369,19 @@ class _CombatTrackerScreenState extends State<CombatTrackerScreen> {
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Next Turn',
-            onPressed: widget.store.isProcessing ? null : () => widget.store.nextTurn(),
+            onPressed: widget.store.isProcessing
+                ? null
+                : () async {
+                    final notes = await widget.store.nextTurn();
+                    if (!context.mounted || notes.isEmpty) return;
+                    AudioService.instance.play(Sfx.dice);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(notes),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  },
           ),
           IconButton(
             icon: const Icon(Icons.clear_all),
