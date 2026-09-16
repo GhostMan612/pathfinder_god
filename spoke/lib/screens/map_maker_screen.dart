@@ -13,6 +13,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../api/hub_client.dart';
+import '../storage/maps_cache_store.dart';
 import '../theme/app_theme.dart';
 import '../widgets/rpg_panel.dart';
 
@@ -35,6 +36,7 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
   int? _width;
   int? _height;
   List<MapRoom> _rooms = [];
+  List<CachedMap> _cachedMaps = [];
 
   @override
   void dispose() {
@@ -96,8 +98,18 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
         _base64Png = b64;
         _width = width;
         _height = height;
-        _rooms = _rooms;
+        _rooms = rooms;
       });
+
+      // Auto-save to local vault
+      final mapId = 'map_${DateTime.now().millisecondsSinceEpoch}';
+      await MapsCacheStore.instance.saveMap(
+        id: mapId,
+        prompt: _promptController.text.trim(),
+        base64Png: b64!,
+        width: width,
+        height: height,
+      );
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -139,27 +151,43 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Map Maker'),
-        actions: [
-          if (_base64Png != null)
-            IconButton(
-              icon: const Icon(Icons.refresh),
-              tooltip: 'New Map',
-              onPressed: () => setState(() {
-                _base64Png = null;
-                _error = null;
-              }),
-            ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Map Maker'),
+          bottom: TabBar(
+            tabs: [
+              Tab(icon: Icon(Icons.auto_fix_high), text: 'Forge'),
+              Tab(icon: Icon(Icons.security), text: 'Vault'),
+            ],
+          ),
+          actions: [
+            if (_base64Png != null)
+              IconButton(
+                icon: const Icon(Icons.refresh),
+                tooltip: 'New Map',
+                onPressed: () => setState(() {
+                  _base64Png = null;
+                  _error = null;
+                }),
+              ),
+          ],
+        ),
+        body: TabBarView(
           children: [
-            if (_base64Png == null) _buildForm() else _buildResult(),
+            // Forge Tab
+            SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (_base64Png == null) _buildForm() else _buildResult(),
+                ],
+              ),
+            ),
+            // Vault Tab
+            _buildVault(),
           ],
         ),
       ),
@@ -247,11 +275,11 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
               const SizedBox(height: 12),
               Row(
                 children: [
-                  _StatChip(label: 'Size', value: '${_width}x$_height'),
+                  _statChip(label: 'Size', value: '${_width}x$_height'),
                   const SizedBox(width: 8),
-                  _StatChip(label: 'Rooms', value: '${_rooms.length}'),
+                  _statChip(label: 'Rooms', value: '${_rooms.length}'),
                   const SizedBox(width: 8),
-                  _StatChip(label: 'Area', value: '${_width! * _height!} sq'),
+                  _statChip(label: 'Area', value: '${_width! * _height!} sq'),
                 ],
               ),
             ],
@@ -348,7 +376,120 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
     );
   }
 
-  Widget _StatChip({required String label, required String value}) {
+  Future<void> _loadVault() async {
+    final maps = await MapsCacheStore.instance.getMaps();
+    if (!mounted) return;
+    setState(() {
+      _cachedMaps = maps;
+    });
+  }
+
+  Future<void> _loadMap(CachedMap map) async {
+    setState(() {
+      _base64Png = map.base64Png;
+      _width = map.width;
+      _height = map.height;
+      _promptController.text = map.prompt;
+      _rooms = []; // We don't store rooms in cache, but we could
+    });
+    // Switch to Forge tab
+    DefaultTabController.of(context).animateTo(0);
+  }
+
+  Future<void> _deleteMap(String id) async {
+    await MapsCacheStore.instance.deleteMap(id);
+    await _loadVault();
+  }
+
+  Widget _buildVault() {
+    return FutureBuilder<List<CachedMap>>(
+      future: MapsCacheStore.instance.getMaps(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final maps = snapshot.data ?? [];
+        if (maps.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.account_balance, size: 64, color: Colors.grey),
+                const SizedBox(height: 16),
+                Text(
+                  'Vault is empty',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        color: Colors.grey[600],
+                      ),
+                  ),
+                const SizedBox(height: 8),
+                Text(
+                  'Generate a map to save it here',
+                  style: TextStyle(color: Colors.grey[500]),
+                ),
+              ],
+            ),
+          );
+        }
+return ListView.builder(
+          padding: const EdgeInsets.all(16),
+          itemCount: maps.length,
+          itemBuilder: (context, index) {
+            final map = maps[index];
+            return Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              child: ListTile(
+                leading: Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: PathfinderTheme.gold),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: Image.memory(
+                      base64Decode(map.base64Png),
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                ),
+                title: Text(map.prompt, maxLines: 1, overflow: TextOverflow.ellipsis),
+                subtitle: Text(
+                    '${map.width}x${map.height} • ${map.createdAt.toLocal().toString().split('.')[0]}'),
+                trailing: PopupMenuButton<String>(
+                  onSelected: (value) {
+                    if (value == 'load') {
+                      _loadMap(map);
+                    } else if (value == 'delete') {
+                      _deleteMap(map.id);
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(
+                      value: 'load',
+                      child: ListTile(
+                        leading: Icon(Icons.map),
+                        title: Text('Load Map'),
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: 'delete',
+                      child: ListTile(
+                        leading: Icon(Icons.delete, color: Colors.red),
+                        title: Text('Delete', style: TextStyle(color: Colors.red)),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _statChip({required String label, required String value}) {
     return Expanded(
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 8),
