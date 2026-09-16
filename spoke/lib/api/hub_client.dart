@@ -230,6 +230,44 @@ class HubClient {
     return jsonDecode(resp.body) as Map<String, dynamic>;
   }
 
+  /// Resolve a strike via deterministic PF2e math.
+  Future<Map<String, dynamic>> resolveStrike({
+    required int attackRoll,
+    required int targetAc,
+    required int damageRoll,
+    required int targetHp,
+    int targetTempHp = 0,
+  }) async {
+    final resp = await _http.post(
+      config.httpUri('/combat/resolve-strike'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'attack_roll': attackRoll,
+        'target_ac': targetAc,
+        'damage_roll': damageRoll,
+        'target_hp': targetHp,
+        'target_temp_hp': targetTempHp,
+      }),
+    );
+    _ensureOk(resp);
+    return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
+
+  /// Process end-of-turn condition updates.
+  Future<List<Map<String, dynamic>>> endTurnConditions(
+      List<Map<String, dynamic>> conditions) async {
+    final resp = await _http.post(
+      config.httpUri('/combat/end-turn'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'conditions': conditions}),
+    );
+    _ensureOk(resp);
+    final body = jsonDecode(resp.body) as Map<String, dynamic>;
+    return (body['conditions'] as List<dynamic>)
+        .map((e) => e as Map<String, dynamic>)
+        .toList();
+  }
+
   void _ensureOk(http.Response resp) {
     if (resp.statusCode < 200 || resp.statusCode >= 300) {
       throw HubException('Hub returned ${resp.statusCode}: ${resp.body}');

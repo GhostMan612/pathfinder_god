@@ -36,3 +36,8 @@ above. The generator stays in the repo for offline regeneration if needed.
 - Eerie atmosphere - source: Pixabay (CC0), search "creepy ambient"
 - Heavy dice impact - source: Freesound (CC0), search "heavy dice"
 - Glass dice clink - source: Freesound (CC0), search "glass clink"
+- Deep dungeon ambient - source: Pixabay (CC0), search "dungeon dark ambient"
+- Heavy combat orchestral - source: Pixabay (CC0), search "epic battle music"
+- Rowdy tavern music - source: Pixabay (CC0), search "medieval tavern"
+- Critical hit chime - source: Freesound (CC0), search "magic chime"
+- Critical fail glass shatter - source: Freesound (CC0), search "glass break"

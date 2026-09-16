@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import '../api/hub_client.dart';
 import '../storage/character_store.dart';
 import 'character_list_screen.dart';
+import 'combat_tracker_screen.dart';
 import 'dice_screen.dart';
 import 'gm_chat_screen.dart';
 import 'rulebook_screen.dart';
@@ -36,6 +37,7 @@ class _HomeScreenState extends State<HomeScreen> {
       GmChatScreen(client: widget.client),
       CharacterListScreen(client: widget.client, store: widget.characters),
       RulebookScreen(client: widget.client),
+      CombatTrackerScreen(client: widget.client, store: widget.characters),
       SettingsScreen(client: widget.client, characters: widget.characters),
     ];
   }
@@ -52,6 +54,7 @@ class _HomeScreenState extends State<HomeScreen> {
           NavigationDestination(icon: Icon(Icons.auto_stories_outlined), selectedIcon: Icon(Icons.auto_stories), label: 'God'),
           NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Hero'),
           NavigationDestination(icon: Icon(Icons.menu_book_outlined), selectedIcon: Icon(Icons.menu_book), label: 'Rules'),
+          NavigationDestination(icon: Icon(Icons.auto_fix_high_outlined), selectedIcon: Icon(Icons.auto_fix_high), label: 'Combat'),
           NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'Setup'),
         ],
       ),

@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import health, ask, generate, rules, campaign, monitoring
+from app.api import health, ask, generate, rules, campaign, monitoring, combat
 from app.api.security import (
     RateLimitMiddleware,
     SecurityHeadersMiddleware,
@@ -66,6 +66,7 @@ def create_app() -> FastAPI:
     app.include_router(rules.router)
     app.include_router(campaign.router)
     app.include_router(monitoring.router)
+    app.include_router(combat.router)
 
     return app
 
