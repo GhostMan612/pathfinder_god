@@ -16,7 +16,7 @@ class CharacterStore {
   Database? _db;
 
   static const _dbName = 'pathfinder_spoke.db';
-  static const _dbVersion = 2;
+  static const _dbVersion = 3;
 
   Future<Database> _open() async {
     if (_db != null) return _db!;
@@ -30,6 +30,9 @@ class CharacterStore {
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           await _migrateToV2(db);
+        }
+        if (oldVersion < 3) {
+          await _migrateToV3(db);
         }
       },
     );
@@ -59,6 +62,7 @@ class CharacterStore {
         languages TEXT,
         senses TEXT,
         speed TEXT,
+        portrait_path TEXT,
         abilities TEXT,
         proficiencies TEXT,
         feats TEXT,
@@ -132,6 +136,10 @@ class CharacterStore {
         await db.update('characters', updates, where: 'id = ?', whereArgs: [id]);
       }
     }
+  }
+
+  Future<void> _migrateToV3(Database db) async {
+    await db.execute('ALTER TABLE characters ADD COLUMN portrait_path TEXT');
   }
 
   Future<List<Character>> all() async {

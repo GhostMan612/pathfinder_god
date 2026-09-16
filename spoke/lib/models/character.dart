@@ -787,6 +787,7 @@ class Character {
   final String languages;
   final String senses;
   final String speed; // base speed
+  final String? portraitPath; // local file path to character portrait
 
   final AbilityScores abilities;
   final Proficiencies proficiencies;
@@ -818,6 +819,7 @@ class Character {
     this.languages = 'Common',
     this.senses = '',
     this.speed = '25',
+    this.portraitPath,
     AbilityScores? abilities,
     Proficiencies? proficiencies,
     List<Feat>? feats,
@@ -855,6 +857,7 @@ class Character {
     String? languages,
     String? senses,
     String? speed,
+    String? portraitPath,
     AbilityScores? abilities,
     Proficiencies? proficiencies,
     List<Feat>? feats,
@@ -885,6 +888,7 @@ class Character {
       languages: languages ?? this.languages,
       senses: senses ?? this.senses,
       speed: speed ?? this.speed,
+      portraitPath: portraitPath ?? this.portraitPath,
       abilities: abilities ?? this.abilities,
       proficiencies: proficiencies ?? this.proficiencies,
       feats: feats ?? this.feats,
@@ -917,6 +921,7 @@ class Character {
         'languages': languages,
         'senses': senses,
         'speed': speed,
+        'portrait_path': portraitPath,
         'abilities': abilities.toJson(),
         'proficiencies': proficiencies.toJson(),
         'feats': jsonEncode(feats.map((f) => f.toMap()).toList()),

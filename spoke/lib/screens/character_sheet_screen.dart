@@ -3,12 +3,18 @@
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../api/hub_client.dart';
 import '../models/character.dart';
+import '../services/export_service.dart';
 import '../storage/character_store.dart';
 import '../theme/app_theme.dart';
+import '../widgets/rpg_panels.dart';
 
 /// Create/edit a character with full PF2e fields.
 class CharacterSheetScreen extends StatefulWidget {
@@ -29,6 +35,8 @@ class CharacterSheetScreen extends StatefulWidget {
 class _CharacterSheetScreenState extends State<CharacterSheetScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
+  final ImagePicker _picker = ImagePicker();
+  String? _portraitPath;
 
   // Basic info
   final _name = TextEditingController();
@@ -69,6 +77,7 @@ class _CharacterSheetScreenState extends State<CharacterSheetScreen>
     _tabController = TabController(length: 9, vsync: this);
     final c = widget.initial;
     if (c != null) {
+      _portraitPath = c.portraitPath;
       _name.text = c.name;
       _ancestry.text = c.ancestry;
       _heritage.text = c.heritage;
@@ -109,7 +118,6 @@ class _CharacterSheetScreenState extends State<CharacterSheetScreen>
     ]) {
       c.dispose();
     }
-    _tabController.dispose();
     super.dispose();
   }
 
@@ -134,6 +142,7 @@ class _CharacterSheetScreenState extends State<CharacterSheetScreen>
         languages: _languages.text.trim(),
         senses: _senses.text.trim(),
         speed: _speed.text.trim(),
+        portraitPath: _portraitPath,
         abilities: AbilityScores(
           str: int.tryParse(_str.text) ?? 10,
           dex: int.tryParse(_dex.text) ?? 10,
@@ -191,6 +200,20 @@ class _CharacterSheetScreenState extends State<CharacterSheetScreen>
     }
   }
 
+  Future<void> _pickPortrait() async {
+    final XFile? image = await _picker.pickImage(source: ImageSource.gallery, maxWidth: 512, maxHeight: 512);
+    if (image != null) {
+      setState(() {
+        _portraitPath = image.path;
+      });
+    }
+  }
+
+  Future<void> _shareSheet() async {
+    final c = _current().recalculateDerived();
+    await ExportService.shareCharacter(c);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -214,7 +237,14 @@ class _CharacterSheetScreenState extends State<CharacterSheetScreen>
         actions: [
           if (widget.initial != null)
             IconButton(icon: const Icon(Icons.delete_outline), onPressed: _delete),
-          IconButton(icon: const Icon(Icons.save), onPressed: _save),
+          IconButton(
+            icon: const Icon(Icons.save),
+            onPressed: _save,
+          ).animate().scale(duration: 120.ms, curve: Curves.elasticOut),
+          IconButton(
+            icon: const Icon(Icons.share),
+            onPressed: _shareSheet,
+          ).animate().scale(duration: 120.ms, curve: Curves.elasticOut),
         ],
       ),
       body: TabBarView(
@@ -238,59 +268,104 @@ class _CharacterSheetScreenState extends State<CharacterSheetScreen>
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            _field(_name, 'Name'),
-            _field(_ancestry, 'Ancestry'),
-            _field(_heritage, 'Heritage'),
-            _field(_background, 'Background'),
-            _field(_class, 'Class'),
-            _field(_subclass, 'Subclass / Archetype'),
-            _field(_level, 'Level', keyboard: TextInputType.number),
-            _field(_deity, 'Deity'),
-            _field(_alignment, 'Alignment'),
-            _field(_size, 'Size'),
-            _field(_gender, 'Gender'),
-            _field(_age, 'Age', keyboard: TextInputType.number),
-            _field(_eyes, 'Eyes'),
-            _field(_hair, 'Hair'),
-            _field(_height, 'Height'),
-            _field(_weight, 'Weight'),
-            _field(_languages, 'Languages'),
-            _field(_senses, 'Senses'),
-            _field(_speed, 'Speed', keyboard: TextInputType.number),
+            RpgPanels.gothicStone(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                children: [
+                  GestureDetector(
+                    onTap: _pickPortrait,
+                    child: CircleAvatar(
+                      radius: 56,
+                      backgroundColor: PathfinderTheme.gold.withValues(alpha: 0.2),
+                      backgroundImage: _portraitPath != null ? FileImage(File(_portraitPath!)) : null,
+                      child: _portraitPath == null
+                          ? Icon(Icons.person, size: 56, color: PathfinderTheme.gold.withValues(alpha: 0.5))
+                          : null,
+                    ),
+                  ).animate().scale(duration: 400.ms, curve: Curves.elasticOut),
+                  const SizedBox(height: 12),
+                  Text(
+                    _name.text.isEmpty ? 'Unnamed Hero' : _name.text,
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                          color: PathfinderTheme.gold,
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ).animate().fadeIn(duration: 300.ms).slideY(begin: 0.2),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Level ${_level.text.isEmpty ? '1' : _level.text} ${_ancestry.text} ${_class.text}${_subclass.text.isNotEmpty ? ' (${_subclass.text})' : ''}',
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: PathfinderTheme.ink),
+                  ).animate().fadeIn(duration: 300.ms, delay: 100.ms).slideY(begin: 0.2),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Tap portrait to change',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: PathfinderTheme.ink.withValues(alpha: 0.6)),
+                  ),
+                ],
+              ),
+            ).animate().fadeIn(duration: 400.ms).slideY(begin: -0.1),
+            const SizedBox(height: 16),
+            Column(
+              children: _basicFields().map((w) => w.animate().fadeIn(duration: 200.ms).slideX(begin: 0.2)).toList(),
+            ),
           ],
         ),
       );
+
+  List<Widget> _basicFields() => [
+        _field(_name, 'Name'),
+        _field(_ancestry, 'Ancestry'),
+        _field(_heritage, 'Heritage'),
+        _field(_background, 'Background'),
+        _field(_class, 'Class'),
+        _field(_subclass, 'Subclass / Archetype'),
+        _field(_level, 'Level', keyboard: TextInputType.number),
+        _field(_deity, 'Deity'),
+        _field(_alignment, 'Alignment'),
+        _field(_size, 'Size'),
+        _field(_gender, 'Gender'),
+        _field(_age, 'Age', keyboard: TextInputType.number),
+        _field(_eyes, 'Eyes'),
+        _field(_hair, 'Hair'),
+        _field(_height, 'Height'),
+        _field(_weight, 'Weight'),
+        _field(_languages, 'Languages'),
+        _field(_senses, 'Senses'),
+        _field(_speed, 'Speed', keyboard: TextInputType.number),
+      ];
 
   Widget _buildAbilitiesTab() => SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            _abilityRow('STR', _str, _strMod),
-            _abilityRow('DEX', _dex, _dexMod),
-            _abilityRow('CON', _con, _conMod),
-            _abilityRow('INT', _int, _intMod),
-            _abilityRow('WIS', _wis, _wisMod),
-            _abilityRow('CHA', _cha, _chaMod),
-            const SizedBox(height: 16),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Key Ability Modifiers',
-                        style: Theme.of(context).textTheme.titleMedium),
-                    const SizedBox(height: 8),
-                    _modRow('STR Mod', _strMod),
-                    _modRow('DEX Mod', _dexMod),
-                    _modRow('CON Mod', _conMod),
-                    _modRow('INT Mod', _intMod),
-                    _modRow('WIS Mod', _wisMod),
-                    _modRow('CHA Mod', _chaMod),
-                  ],
-                ),
-              ),
+            Column(
+              children: [
+                _abilityRow('STR', _str, _strMod),
+                _abilityRow('DEX', _dex, _dexMod),
+                _abilityRow('CON', _con, _conMod),
+                _abilityRow('INT', _int, _intMod),
+                _abilityRow('WIS', _wis, _wisMod),
+                _abilityRow('CHA', _cha, _chaMod),
+              ].map((w) => w.animate().fadeIn(duration: 200.ms).slideX(begin: 0.2)).toList(),
             ),
+            const SizedBox(height: 16),
+            RpgPanels.gothicStone(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Key Ability Modifiers',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(color: PathfinderTheme.gold)),
+                  const SizedBox(height: 8),
+                  _modRow('STR Mod', _strMod),
+                  _modRow('DEX Mod', _dexMod),
+                  _modRow('CON Mod', _conMod),
+                  _modRow('INT Mod', _intMod),
+                  _modRow('WIS Mod', _wisMod),
+                  _modRow('CHA Mod', _chaMod),
+                ],
+              ),
+            ).animate().fadeIn(duration: 300.ms, delay: 300.ms).slideY(begin: 0.2),
           ],
         ),
       );
@@ -346,18 +421,31 @@ class _CharacterSheetScreenState extends State<CharacterSheetScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _sectionHeader('Skills'),
-            _proficiencyGrid(SkillProficiencies().toMap().keys.toList(), 
-                (s) => _skillField(s)),
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              children: _proficiencyGrid(SkillProficiencies().toMap().keys.toList(),
+                  (s) => _skillField(s)).map((w) => w.animate().fadeIn(duration: 150.ms).slideX(begin: 0.1)).toList(),
+            ),
             const SizedBox(height: 16),
             _sectionHeader('Defenses'),
-            _proficiencyGrid(
-                ['Fortitude', 'Reflex', 'Will', 'Perception',
-                 'Unarmored', 'Light Armor', 'Medium Armor', 'Heavy Armor',
-                 'Simple Weapons', 'Martial Weapons', 'Advanced Weapons', 'Unarmed'],
-                (s) => _profField(s)),
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              children: _proficiencyGrid(
+                  ['Fortitude', 'Reflex', 'Will', 'Perception',
+                   'Unarmored', 'Light Armor', 'Medium Armor', 'Heavy Armor',
+                   'Simple Weapons', 'Martial Weapons', 'Advanced Weapons', 'Unarmed'],
+                  (s) => _profField(s)).map((w) => w.animate().fadeIn(duration: 150.ms).slideX(begin: 0.1)).toList(),
+            ),
             const SizedBox(height: 16),
             _sectionHeader('Class'),
-            _proficiencyGrid(['Class DC', 'Spell DC', 'Spell Attack'], (s) => _profField(s)),
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              children: _proficiencyGrid(['Class DC', 'Spell DC', 'Spell Attack'], (s) => _profField(s))
+                  .map((w) => w.animate().fadeIn(duration: 150.ms).slideX(begin: 0.1)).toList(),
+            ),
           ],
         ),
       );
@@ -368,11 +456,8 @@ class _CharacterSheetScreenState extends State<CharacterSheetScreen>
             style: Theme.of(context).textTheme.titleMedium?.copyWith(color: PathfinderTheme.gold)),
       );
 
-  Widget _proficiencyGrid(List<String> items, Widget Function(String) builder) => Wrap(
-        spacing: 12,
-        runSpacing: 8,
-        children: items.map(builder).toList(),
-      );
+  List<Widget> _proficiencyGrid(List<String> items, Widget Function(String) builder) =>
+      items.map(builder).toList();
 
   Widget _skillField(String skill) => _profDropdown(skill, SkillProficiencies().toMap()[skill]?.toString() ?? '0');
 
@@ -416,7 +501,7 @@ class _CharacterSheetScreenState extends State<CharacterSheetScreen>
               onPressed: () {},
             ),
           ],
-        ),
+        ).animate().fadeIn(duration: 300.ms).slideX(begin: 0.2),
       );
 
   Widget _buildSpellsTab() => SingleChildScrollView(
@@ -432,7 +517,8 @@ class _CharacterSheetScreenState extends State<CharacterSheetScreen>
             _sectionHeader('Spell Slots per Level'),
             Wrap(
               spacing: 8,
-              children: List.generate(11, (i) => _slotField(i == 0 ? 'Cantrip' : 'Level $i')),
+              children: List.generate(11, (i) => _slotField(i == 0 ? 'Cantrip' : 'Level $i'))
+                  .map((w) => w.animate().fadeIn(duration: 150.ms).slideY(begin: 0.1)).toList(),
             ),
             const SizedBox(height: 16),
             _sectionHeader('Focus Pool'),
@@ -451,7 +537,7 @@ class _CharacterSheetScreenState extends State<CharacterSheetScreen>
               onPressed: () {},
             ),
           ],
-        ),
+        ).animate().fadeIn(duration: 300.ms).slideX(begin: 0.2),
       );
 
   Widget _slotField(String label) => SizedBox(
@@ -494,7 +580,7 @@ class _CharacterSheetScreenState extends State<CharacterSheetScreen>
               Expanded(child: _field(TextEditingController(text: '0'), 'PP')),
             ]),
           ],
-        ),
+        ).animate().fadeIn(duration: 300.ms).slideX(begin: 0.2),
       );
 
   Widget _buildDerivedTab() {
@@ -506,20 +592,23 @@ class _CharacterSheetScreenState extends State<CharacterSheetScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _sectionHeader('Combat Stats'),
-          _statGrid([
-            ['HP', '${d.hp} / ${d.maxHp}'],
-            ['AC', d.ac.toString()],
-            ['Fortitude', '${d.fortitude >= 0 ? "+" : ""}${d.fortitude}'],
-            ['Reflex', '${d.reflex >= 0 ? "+" : ""}${d.reflex}'],
-            ['Will', '${d.will >= 0 ? "+" : ""}${d.will}'],
-            ['Perception', '${d.perception >= 0 ? "+" : ""}${d.perception}'],
-            ['Class DC', d.classDC.toString()],
-            ['Spell DC', d.spellDC.toString()],
-            ['Spell Attack', '${d.spellAttack >= 0 ? "+" : ""}${d.spellAttack}'],
-            ['Speed', '${d.speed} ft'],
-            ['Initiative', '${d.initiative >= 0 ? "+" : ""}${d.initiative}'],
-            ['Bulk Limit', '${d.bulkLimit}'],
-          ]),
+          RpgPanels.gothicStone(
+            padding: const EdgeInsets.all(12),
+            child: _statGrid([
+              ['HP', '${d.hp} / ${d.maxHp}'],
+              ['AC', d.ac.toString()],
+              ['Fortitude', '${d.fortitude >= 0 ? "+" : ""}${d.fortitude}'],
+              ['Reflex', '${d.reflex >= 0 ? "+" : ""}${d.reflex}'],
+              ['Will', '${d.will >= 0 ? "+" : ""}${d.will}'],
+              ['Perception', '${d.perception >= 0 ? "+" : ""}${d.perception}'],
+              ['Class DC', d.classDC.toString()],
+              ['Spell DC', d.spellDC.toString()],
+              ['Spell Attack', '${d.spellAttack >= 0 ? "+" : ""}${d.spellAttack}'],
+              ['Speed', '${d.speed} ft'],
+              ['Initiative', '${d.initiative >= 0 ? "+" : ""}${d.initiative}'],
+              ['Bulk Limit', '${d.bulkLimit}'],
+            ]),
+          ).animate().fadeIn(duration: 300.ms).slideY(begin: 0.2),
         ],
       ),
     );
@@ -553,10 +642,10 @@ class _CharacterSheetScreenState extends State<CharacterSheetScreen>
                 _condField('Clumsy', '0'),
                 _condField('Enfeebled', '0'),
                 _condField('Drained', '0'),
-              ],
+              ].map((w) => w.animate().fadeIn(duration: 150.ms).slideX(begin: 0.1)).toList(),
             ),
           ],
-        ),
+        ).animate().fadeIn(duration: 300.ms).slideX(begin: 0.2),
       );
 
   Widget _condField(String label, String initial) => SizedBox(
@@ -580,18 +669,21 @@ class _CharacterSheetScreenState extends State<CharacterSheetScreen>
                   : const Icon(Icons.auto_fix_high),
               label: Text(_generating ? 'Forging…' : 'Forge full bio with the God'),
               onPressed: _generating ? null : _forgeWithGod,
-            ),
+            ).animate().scale(duration: 120.ms, curve: Curves.elasticOut),
             const SizedBox(height: 12),
-            TextField(
-              controller: _notes,
-              minLines: 10,
-              maxLines: 40,
-              decoration: const InputDecoration(
-                labelText: 'Bio, backstory, gear & abilities',
-                alignLabelWithHint: true,
-                border: OutlineInputBorder(),
+            RpgPanels.gothicStone(
+              padding: const EdgeInsets.all(16),
+              child: TextField(
+                controller: _notes,
+                minLines: 10,
+                maxLines: 40,
+                decoration: const InputDecoration(
+                  labelText: 'Bio, backstory, gear & abilities',
+                  alignLabelWithHint: true,
+                  border: InputBorder.none,
+                ),
               ),
-            ),
+            ).animate().fadeIn(duration: 300.ms, delay: 100.ms).slideY(begin: 0.2),
           ],
         ),
       );
@@ -606,6 +698,7 @@ class _CharacterSheetScreenState extends State<CharacterSheetScreen>
                     Expanded(
                       child: Card(
                         margin: const EdgeInsets.all(4),
+                        color: PathfinderTheme.parchment,
                         child: Padding(
                           padding: const EdgeInsets.all(12),
                           child: Column(

@@ -421,7 +421,7 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                         color: Colors.grey[600],
                       ),
-                  ),
+                ),
                 const SizedBox(height: 8),
                 Text(
                   'Generate a map to save it here',
@@ -431,7 +431,7 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
             ),
           );
         }
-return ListView.builder(
+        return ListView.builder(
           padding: const EdgeInsets.all(16),
           itemCount: maps.length,
           itemBuilder: (context, index) {
@@ -482,7 +482,8 @@ return ListView.builder(
                     ),
                   ],
                 ),
-              );
+              ),
+            );
           },
         );
       },
