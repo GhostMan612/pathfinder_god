@@ -12,6 +12,8 @@ import httpx
 import logging
 from typing import Any, AsyncGenerator
 
+from app.config import get_settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,7 +28,8 @@ class OllamaClient:
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
-            self._client = httpx.AsyncClient(timeout=httpx.Timeout(120.0))
+            timeout = get_settings().ollama_timeout_s
+            self._client = httpx.AsyncClient(timeout=httpx.Timeout(timeout))
         return self._client
 
     async def close(self) -> None:

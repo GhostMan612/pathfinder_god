@@ -48,9 +48,9 @@ class Settings(BaseSettings):
     # The laptop is CPU-only, so default to a small, fast model.
     ollama_host: str = "http://127.0.0.1:11450"
     ollama_model: str = "phi4-mini"
-    ollama_num_predict: int = 700  # room for a full biography/backstory
-    ollama_temperature: float = 0.6
-    ollama_timeout_s: float = 120.0
+    ollama_num_predict: int = 1200  # room for full character JSON + bio
+    ollama_temperature: float = 0.3
+    ollama_timeout_s: float = 600.0
 
     # --- Server ---
     host: str = "0.0.0.0"
