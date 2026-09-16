@@ -9,7 +9,7 @@ import 'package:provider/provider.dart';
 
 import '../api/hub_client.dart';
 import '../models/combatant.dart';
-../services/audio_service.dart';
+import '../services/audio_service.dart';
 import '../services/combat_store.dart';
 import '../theme/app_theme.dart';
 import '../widgets/rpg_panel.dart';
