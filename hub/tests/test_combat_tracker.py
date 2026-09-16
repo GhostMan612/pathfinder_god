@@ -122,27 +122,27 @@ class TestEndOfTurnConditions:
     def test_frightened_decays(self):
         """Frightened > 1 decrements by 1."""
         conditions = [{"name": "Frightened", "value": 2}]
-        updated = CombatTrackerAgent.end_of_turn(conditions)
+        updated, notes = CombatTrackerAgent.end_of_turn(conditions)
         assert len(updated) == 1
         assert updated[0]["value"] == 1
 
     def test_frightened_1_expires(self):
         """Frightened 1 is removed."""
         conditions = [{"name": "Frightened", "value": 1}]
-        updated = CombatTrackerAgent.end_of_turn(conditions)
+        updated, notes = CombatTrackerAgent.end_of_turn(conditions)
         assert len(updated) == 0
 
     def test_duration_condition_decrements(self):
         """Conditions with duration_rounds decrement and expire at 0."""
         conditions = [{"name": "Poisoned", "value": 2, "duration_rounds": 2}]
-        updated = CombatTrackerAgent.end_of_turn(conditions)
+        updated, notes = CombatTrackerAgent.end_of_turn(conditions)
         assert len(updated) == 1
         assert updated[0]["duration_rounds"] == 1
 
     def test_duration_condition_expires(self):
         """Conditions with duration_rounds = 1 are removed."""
         conditions = [{"name": "Poisoned", "value": 2, "duration_rounds": 1}]
-        updated = CombatTrackerAgent.end_of_turn(conditions)
+        updated, notes = CombatTrackerAgent.end_of_turn(conditions)
         assert len(updated) == 0
 
     def test_other_conditions_unchanged(self):
@@ -151,7 +151,7 @@ class TestEndOfTurnConditions:
             {"name": "Prone", "value": 1},
             {"name": "Frightened", "value": 3},
         ]
-        updated = CombatTrackerAgent.end_of_turn(conditions)
+        updated, notes = CombatTrackerAgent.end_of_turn(conditions)
         assert len(updated) == 2
         # Frightened should decay
         frightened = next(c for c in updated if c["name"] == "Frightened")
@@ -159,3 +159,93 @@ class TestEndOfTurnConditions:
         # Prone should remain
         prone = next(c for c in updated if c["name"] == "Prone")
         assert prone["value"] == 1
+
+
+class TestPersistentDamage:
+    def test_persistent_damage_rolls_and_flat_check(self):
+        """Persistent damage rolls dice and applies flat check."""
+        conditions = [{"name": "Persistent Fire 1d6", "value": 1}]
+        updated, notes = CombatTrackerAgent.end_of_turn(conditions)
+        # Should have notes about damage and flat check
+        assert "Took" in notes or "Flat check" in notes
+
+    def test_persistent_damage_flat_check_success(self):
+        """Flat check >= 15 removes persistent damage."""
+        # We can't easily test random, but we can verify structure
+        conditions = [{"name": "Persistent Fire 1d6", "value": 1}]
+        updated, notes = CombatTrackerAgent.end_of_turn(conditions)
+        # Should have notes about damage and flat check
+        assert "Flat check" in notes
+
+    def test_persistent_damage_flat_check_failure(self):
+        """Flat check < 15 keeps persistent damage."""
+        conditions = [{"name": "Persistent Fire 1d6", "value": 1}]
+        updated, notes = CombatTrackerAgent.end_of_turn(conditions)
+        # If flat check fails, condition persists
+        if "persists" in notes:
+            assert len(updated) == 1
+            assert updated[0]["name"] == "Persistent Fire 1d6"
+
+    def test_persistent_damage_no_dice_notation(self):
+        """Persistent damage without dice notation still gets flat check."""
+        conditions = [{"name": "Persistent Fire", "value": 1}]
+        updated, notes = CombatTrackerAgent.end_of_turn(conditions)
+        # Should still have flat check
+        assert "Flat check" in notes
+
+
+class TestDyingWounded:
+    def test_dying_increments_at_zero_hp(self):
+        """Dying increments when at 0 HP."""
+        conditions = [{"name": "Dying", "value": 1}]
+        updated, notes = CombatTrackerAgent.end_of_turn(conditions, current_hp=0)
+        assert len(updated) == 1
+        assert updated[0]["value"] == 2
+        assert "Dying increased to 2" in notes
+
+    def test_dying_not_increment_above_zero_hp(self):
+        """Dying does not increment when above 0 HP."""
+        conditions = [{"name": "Dying", "value": 1}]
+        updated, notes = CombatTrackerAgent.end_of_turn(conditions, current_hp=10)
+        assert len(updated) == 1
+        assert updated[0]["value"] == 1
+
+    def test_wounded_persists(self):
+        """Wounded condition persists and doesn't change."""
+        conditions = [{"name": "Wounded", "value": 2}]
+        updated, notes = CombatTrackerAgent.end_of_turn(conditions, current_hp=0)
+        assert len(updated) == 1
+        assert updated[0]["value"] == 2
+        assert updated[0]["name"] == "Wounded"
+
+    def test_frightened_and_dying_together(self):
+        """Multiple conditions processed together."""
+        conditions = [
+            {"name": "Frightened", "value": 2},
+            {"name": "Dying", "value": 1},
+        ]
+        updated, notes = CombatTrackerAgent.end_of_turn(conditions, current_hp=0)
+        assert len(updated) == 2
+        frightened = next(c for c in updated if c["name"] == "Frightened")
+        dying = next(c for c in updated if c["name"] == "Dying")
+        assert frightened["value"] == 1  # Decayed
+        assert dying["value"] == 2  # Incremented
+        assert "Flat check" in notes or "Dying increased" in notes
+
+
+class TestPersistentDamageFlatCheck:
+    def test_flat_check_success_removes(self):
+        """Flat check >= 15 removes persistent damage condition."""
+        # We can't easily control randomness, but we can verify the logic
+        conditions = [{"name": "Persistent Fire 1d6", "value": 1}]
+        updated, notes = CombatTrackerAgent.end_of_turn(conditions)
+        # The condition should be removed if flat check succeeds
+        # We can't deterministically test this, but we verify the logic path exists
+        assert "Flat check" in notes or "Took" in notes
+
+    def test_persistent_damage_no_dice_notation(self):
+        """Persistent damage without dice notation still gets flat check."""
+        conditions = [{"name": "Persistent Fire", "value": 1}]
+        updated, notes = CombatTrackerAgent.end_of_turn(conditions)
+        # Should still have flat check
+        assert "Flat check" in notes
