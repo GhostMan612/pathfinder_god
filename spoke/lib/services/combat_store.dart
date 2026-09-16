@@ -4,7 +4,6 @@
 // ============================================================
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 
 import '../api/hub_client.dart';
 import '../models/combatant.dart';
@@ -13,7 +12,7 @@ import '../models/combatant.dart';
 class CombatStore extends ChangeNotifier {
   final HubClient _client;
 
-  List<Combatant> _combatants = [];
+  final List<Combatant> _combatants = [];
   int _activeIndex = 0;
   int _currentRound = 1;
   bool _isProcessing = false;
@@ -157,9 +156,16 @@ class CombatStore extends ChangeNotifier {
   }
 
   void reorder(int oldIndex, int newIndex) {
-    if (oldIndex < newIndex) newIndex--;
     final item = _combatants.removeAt(oldIndex);
     _combatants.insert(newIndex, item);
     notifyListeners();
+  }
+
+  void updateCombatant(String id, Combatant updated) {
+    final idx = _combatants.indexWhere((c) => c.id == id);
+    if (idx >= 0) {
+      _combatants[idx] = updated;
+      notifyListeners();
+    }
   }
 }

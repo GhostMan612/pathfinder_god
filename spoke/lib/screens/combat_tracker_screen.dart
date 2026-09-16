@@ -174,22 +174,17 @@ class _CombatTrackerScreenState extends State<CombatTrackerScreen> {
     );
 
     if (edit != null) {
-      final idx = widget.store.combatants.indexWhere((c) => c.id == edit.id);
-      if (idx >= 0) {
-        final c = widget.store.combatants[idx];
-        final updated = c.copyWith(
-          name: name,
-          initiative: initiative,
-          currentHp: currentHp.clamp(0, maxHp),
-          maxHp: maxHp,
-          ac: ac,
-        );
-        widget.store.combatants[idx] = updated;
-      }
+      final updated = edit.copyWith(
+        name: name,
+        initiative: initiative,
+        currentHp: currentHp.clamp(0, maxHp),
+        maxHp: maxHp,
+        ac: ac,
+      );
+      widget.store.updateCombatant(edit.id, updated);
     } else {
       widget.store.addCombatant(combatant);
     }
-    widget.store.notifyListeners();
     Navigator.pop(context);
   }
 
@@ -363,7 +358,7 @@ class _CombatTrackerScreenState extends State<CombatTrackerScreen> {
                       )
                     : ReorderableListView.builder(
                         padding: const EdgeInsets.all(12),
-                        onReorder: store.reorder,
+                        onReorderItem: (int oldIndex, int newIndex) => store.reorder(oldIndex, newIndex),
                         itemCount: store.combatants.length,
                         itemBuilder: (context, index) {
                           final c = store.combatants[index];

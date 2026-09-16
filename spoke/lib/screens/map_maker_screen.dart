@@ -5,10 +5,8 @@
 
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -36,7 +34,6 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
   int? _width;
   int? _height;
   List<MapRoom> _rooms = [];
-  List<CachedMap> _cachedMaps = [];
 
   @override
   void dispose() {
@@ -106,7 +103,7 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
       await MapsCacheStore.instance.saveMap(
         id: mapId,
         prompt: _promptController.text.trim(),
-        base64Png: b64!,
+        base64Png: b64,
         width: width,
         height: height,
       );
@@ -250,8 +247,6 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
   }
 
   Widget _buildResult() {
-    final b64 = _base64Png!;
-    final bytes = base64Decode(b64);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -377,11 +372,9 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
   }
 
   Future<void> _loadVault() async {
-    final maps = await MapsCacheStore.instance.getMaps();
+    await MapsCacheStore.instance.getMaps();
     if (!mounted) return;
-    setState(() {
-      _cachedMaps = maps;
-    });
+    setState(() {});
   }
 
   Future<void> _loadMap(CachedMap map) async {

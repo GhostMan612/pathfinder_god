@@ -10,7 +10,6 @@ import 'package:pathfinder_god/api/hub_client.dart';
 import 'package:pathfinder_god/api/models.dart';
 import 'package:pathfinder_god/config/hub_config.dart';
 import 'package:http/http.dart' as http;
-import 'package:web_socket_channel/web_socket_channel.dart';
 
 /// Minimal fake HubClient for testing CombatStore without network.
 /// Extends HubClient and provides minimal implementations.

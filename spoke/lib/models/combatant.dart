@@ -3,8 +3,6 @@
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
 
-import 'dart:convert';
-
 /// A single condition affecting a combatant.
 class CombatCondition {
   final String name;
