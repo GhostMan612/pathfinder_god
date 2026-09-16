@@ -301,12 +301,15 @@ Future<List<RuleHit>> searchRules(
     return jsonDecode(resp.body) as Map<String, dynamic>;
   }
 
-  /// Generate a map via LLM + Pillow rendering.
-  Future<Map<String, dynamic>> generateMap(String prompt) async {
+  /// Generate a dual-layer map via LLM + Pillow rendering.
+  Future<Map<String, dynamic>> generateMap(
+    String prompt, {
+    bool gridEnabled = true,
+  }) async {
     final resp = await _withTimeout(_http.post(
       config.httpUri('/map/generate'),
       headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({'prompt': prompt}),
+      body: jsonEncode({'prompt': prompt, 'grid_enabled': gridEnabled}),
     ));
     _ensureOk(resp);
     return jsonDecode(resp.body) as Map<String, dynamic>;

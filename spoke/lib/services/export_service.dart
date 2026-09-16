@@ -3,6 +3,12 @@
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
 
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:path_provider/path_provider.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
 
 import '../models/character.dart';
@@ -224,6 +230,30 @@ class ExportService {
       ShareParams(
         text: markdown,
         subject: '${c.name} - Pathfinder 2e Character',
+      ),
+    );
+  }
+
+  static Future<void> shareMapPdf(String base64Image, String mapName) async {
+    final bytes = base64Decode(base64Image);
+    final doc = pw.Document();
+    final image = pw.MemoryImage(bytes);
+    doc.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.letter,
+        build: (_) => pw.Center(child: pw.Image(image)),
+      ),
+    );
+    final safeName = mapName.trim().isEmpty
+        ? 'map'
+        : mapName.trim().replaceAll(RegExp(r'[^A-Za-z0-9-_]+'), '_');
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/$safeName.pdf');
+    await file.writeAsBytes(await doc.save());
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [XFile(file.path)],
+        subject: '$mapName - Pathfinder Battle Map',
       ),
     );
   }

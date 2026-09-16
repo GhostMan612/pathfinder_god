@@ -4,18 +4,17 @@
 // ============================================================
 
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 
 import '../api/hub_client.dart';
+import '../services/export_service.dart';
 import '../storage/maps_cache_store.dart';
 import '../theme/app_theme.dart';
 import '../widgets/rpg_panel.dart';
 
-/// Map Maker — LLM prompt → Pillow-rendered PNG → share or save.
+/// Map Maker — LLM prompt → dual-layer Pillow PNG → PDF share or vault.
 class MapMakerScreen extends StatefulWidget {
   final HubClient client;
   const MapMakerScreen({super.key, required this.client});
@@ -29,11 +28,19 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
     text: 'A ruined tavern 30x30 with a cellar trapdoor',
   );
   bool _building = false;
+  bool _gridEnabled = true;
+  bool _showGmLayer = true;
   String? _error;
-  String? _base64Png;
+  String? _gmBase64Png;
+  String? _playerBase64Png;
   int? _width;
   int? _height;
   List<MapRoom> _rooms = [];
+  List<MapSecret> _secrets = [];
+
+  bool get _hasMap => _gmBase64Png != null && _playerBase64Png != null;
+  String get _activeBase64 =>
+      _showGmLayer ? _gmBase64Png! : _playerBase64Png!;
 
   @override
   void dispose() {
@@ -51,11 +58,15 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
     setState(() {
       _building = true;
       _error = null;
-      _base64Png = null;
+      _gmBase64Png = null;
+      _playerBase64Png = null;
     });
 
     try {
-      final result = await widget.client.generateMap(prompt);
+      final result = await widget.client.generateMap(
+        prompt,
+        gridEnabled: _gridEnabled,
+      );
       final valid = result['valid'] as bool? ?? false;
 
       if (!valid) {
@@ -66,12 +77,14 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
         return;
       }
 
-      final b64 = result['base64_png'] as String?;
+      final gmB64 = result['gm_base64_png'] as String?;
+      final playerB64 = result['player_base64_png'] as String?;
       final width = result['width'] as int?;
       final height = result['height'] as int?;
       final roomsJson = result['rooms'] as List<dynamic>?;
+      final secretsJson = result['secret_features'] as List<dynamic>?;
 
-      if (b64 == null || width == null || height == null) {
+      if (gmB64 == null || playerB64 == null || width == null || height == null) {
         setState(() {
           _building = false;
           _error = 'Invalid response from hub';
@@ -88,22 +101,35 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
                 name: r['name'] as String? ?? '',
               ))
           .toList();
+      final secrets = (secretsJson ?? [])
+          .map((s) => MapSecret(
+                x: s['x'] as int? ?? 0,
+                y: s['y'] as int? ?? 0,
+                w: s['w'] as int? ?? 0,
+                h: s['h'] as int? ?? 0,
+                type: s['type'] as String? ?? 'secret',
+                name: s['name'] as String? ?? '',
+              ))
+          .toList();
 
       if (!mounted) return;
       setState(() {
         _building = false;
-        _base64Png = b64;
+        _gmBase64Png = gmB64;
+        _playerBase64Png = playerB64;
         _width = width;
         _height = height;
         _rooms = rooms;
+        _secrets = secrets;
+        _showGmLayer = true;
       });
 
-      // Auto-save to local vault
       final mapId = 'map_${DateTime.now().millisecondsSinceEpoch}';
       await MapsCacheStore.instance.saveMap(
         id: mapId,
         prompt: _promptController.text.trim(),
-        base64Png: b64,
+        gmBase64Png: gmB64,
+        playerBase64Png: playerB64,
         width: width,
         height: height,
       );
@@ -117,30 +143,19 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
     }
   }
 
-  Future<void> _saveMap() async {
-    if (_base64Png == null) return;
-
+  Future<void> _sharePdf(bool gmLayer) async {
+    final b64 = gmLayer ? _gmBase64Png : _playerBase64Png;
+    if (b64 == null) return;
+    final layer = gmLayer ? 'GM' : 'Player';
     try {
-      final bytes = base64Decode(_base64Png!);
-      final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}/map.png');
-      await file.writeAsBytes(bytes);
-
-      if (!mounted) return;
-      await SharePlus.instance.share(ShareParams(
-        files: [XFile(file.path)],
-        text: 'Pathfinder Map $_width x $_height',
-      ));
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Map saved and shared')),
-        );
-      }
+      await ExportService.shareMapPdf(
+        b64,
+        '${_promptController.text.trim()} $layer',
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Save failed: $e')),
+          SnackBar(content: Text('PDF export failed: $e')),
         );
       }
     }
@@ -153,19 +168,20 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Map Maker'),
-          bottom: TabBar(
+          bottom: const TabBar(
             tabs: [
               Tab(icon: Icon(Icons.auto_fix_high), text: 'Forge'),
               Tab(icon: Icon(Icons.security), text: 'Vault'),
             ],
           ),
           actions: [
-            if (_base64Png != null)
+            if (_hasMap)
               IconButton(
                 icon: const Icon(Icons.refresh),
                 tooltip: 'New Map',
                 onPressed: () => setState(() {
-                  _base64Png = null;
+                  _gmBase64Png = null;
+                  _playerBase64Png = null;
                   _error = null;
                 }),
               ),
@@ -173,17 +189,15 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
         ),
         body: TabBarView(
           children: [
-            // Forge Tab
             SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  if (_base64Png == null) _buildForm() else _buildResult(),
+                  if (!_hasMap) _buildForm() else _buildResult(),
                 ],
               ),
             ),
-            // Vault Tab
             _buildVault(),
           ],
         ),
@@ -205,7 +219,7 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Describe the location. The God will design a grid map and render it with Pillow.',
+            'Describe the location. The God renders GM and Player layers with Pillow.',
             style: TextStyle(color: Colors.grey[700]),
           ),
           const SizedBox(height: 20),
@@ -219,6 +233,13 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
               border: OutlineInputBorder(),
               alignLabelWithHint: true,
             ),
+          ),
+          SwitchListTile(
+            title: const Text('Enable Grid Overlay'),
+            value: _gridEnabled,
+            activeThumbColor: PathfinderTheme.gold,
+            onChanged: (v) => setState(() => _gridEnabled = v),
+            dense: true,
           ),
           if (_error != null) ...[
             const SizedBox(height: 12),
@@ -240,7 +261,7 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
               backgroundColor: PathfinderTheme.gold,
               foregroundColor: PathfinderTheme.ink,
             ),
-          ),
+          ).animate().scale(duration: 120.ms, curve: Curves.elasticOut),
         ],
       ),
     );
@@ -270,38 +291,53 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
               const SizedBox(height: 12),
               Row(
                 children: [
-                  _statChip(label: 'Size', value: '${_width}x$_height'),
+                  _statChip(label: 'Size', value: '$_width x $_height'),
                   const SizedBox(width: 8),
                   _statChip(label: 'Rooms', value: '${_rooms.length}'),
                   const SizedBox(width: 8),
-                  _statChip(label: 'Area', value: '${_width! * _height!} sq'),
+                  _statChip(label: 'Secrets', value: '${_secrets.length}'),
                 ],
               ),
             ],
           ),
         ),
         const SizedBox(height: 16),
-        // Map image with pinch-to-zoom
+        SegmentedButton<bool>(
+          segments: const [
+            ButtonSegment(
+              value: true,
+              label: Text('GM Layer'),
+              icon: Icon(Icons.visibility),
+            ),
+            ButtonSegment(
+              value: false,
+              label: Text('Player Layer'),
+              icon: Icon(Icons.visibility_off),
+            ),
+          ],
+          selected: {_showGmLayer},
+          onSelectionChanged: (s) => setState(() => _showGmLayer = s.first),
+        ),
+        const SizedBox(height: 16),
         InteractiveViewer(
           minScale: 0.5,
           maxScale: 4.0,
           child: ClipRRect(
             borderRadius: BorderRadius.circular(12),
             child: Image.memory(
-              base64Decode(_base64Png!),
+              base64Decode(_activeBase64),
               fit: BoxFit.contain,
             ),
           ),
         ),
         const SizedBox(height: 16),
-        // Room list
         if (_rooms.isNotEmpty) ...[
           RpgPanels.gothicStone.build(
             padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
+                const Text(
                   'Rooms',
                   style: TextStyle(
                     fontSize: 18,
@@ -339,33 +375,73 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
             ),
           ),
         ],
+        if (_secrets.isNotEmpty && _showGmLayer) ...[
+          const SizedBox(height: 16),
+          RpgPanels.gothicStone.build(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Secrets (GM only)',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: PathfinderTheme.crimson,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                for (final s in _secrets)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      '${s.type}: ${s.name} (${s.w}x${s.h} @ ${s.x},${s.y})',
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 16),
         Row(
           children: [
             Expanded(
               child: FilledButton.icon(
-                onPressed: _saveMap,
-                icon: const Icon(Icons.share),
-                label: const Text('Save / Share Map'),
+                onPressed: () => _sharePdf(false),
+                icon: const Icon(Icons.picture_as_pdf),
+                label: const Text('Share Player Map (PDF)'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  backgroundColor: PathfinderTheme.gold,
+                  foregroundColor: PathfinderTheme.ink,
+                ),
+              ).animate().scale(duration: 120.ms, curve: Curves.elasticOut),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: () => _sharePdf(true),
+                icon: const Icon(Icons.picture_as_pdf),
+                label: const Text('Share GM Map (PDF)'),
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   backgroundColor: PathfinderTheme.crimson,
                   foregroundColor: Colors.white,
                 ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: () => setState(() {
-                  _base64Png = null;
-                  _error = null;
-                }),
-                icon: const Icon(Icons.refresh),
-                label: const Text('New Map'),
-              ),
+              ).animate().scale(duration: 120.ms, curve: Curves.elasticOut),
             ),
           ],
+        ),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: () => setState(() {
+            _gmBase64Png = null;
+            _playerBase64Png = null;
+            _error = null;
+          }),
+          icon: const Icon(Icons.refresh),
+          label: const Text('New Map'),
         ),
       ],
     );
@@ -379,13 +455,15 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
 
   Future<void> _loadMap(CachedMap map) async {
     setState(() {
-      _base64Png = map.base64Png;
+      _gmBase64Png = map.gmBase64Png;
+      _playerBase64Png = map.playerBase64Png;
       _width = map.width;
       _height = map.height;
       _promptController.text = map.prompt;
-      _rooms = []; // We don't store rooms in cache, but we could
+      _rooms = [];
+      _secrets = [];
+      _showGmLayer = true;
     });
-    // Switch to Forge tab
     DefaultTabController.of(context).animateTo(0);
   }
 
@@ -416,9 +494,9 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
                       ),
                 ),
                 const SizedBox(height: 8),
-                Text(
+                const Text(
                   'Generate a map to save it here',
-                  style: TextStyle(color: Colors.grey[500]),
+                  style: TextStyle(color: Colors.grey),
                 ),
               ],
             ),
@@ -442,7 +520,7 @@ class _MapMakerScreenState extends State<MapMakerScreen> {
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(4),
                     child: Image.memory(
-                      base64Decode(map.base64Png),
+                      base64Decode(map.playerBase64Png),
                       fit: BoxFit.cover,
                     ),
                   ),
@@ -515,6 +593,24 @@ class MapRoom {
     required this.y,
     required this.w,
     required this.h,
+    required this.name,
+  });
+}
+
+class MapSecret {
+  final int x;
+  final int y;
+  final int w;
+  final int h;
+  final String type;
+  final String name;
+
+  MapSecret({
+    required this.x,
+    required this.y,
+    required this.w,
+    required this.h,
+    required this.type,
     required this.name,
   });
 }

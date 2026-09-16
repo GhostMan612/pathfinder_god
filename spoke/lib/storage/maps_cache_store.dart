@@ -4,15 +4,12 @@
 // ============================================================
 
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../models/encounter.dart';
-
-/// Local cache for generated maps.
+/// Local cache for generated dual-layer maps.
 class MapsCacheStore {
   static final MapsCacheStore instance = MapsCacheStore._();
   MapsCacheStore._();
@@ -25,18 +22,25 @@ class MapsCacheStore {
     final path = '$dir${separator}maps_cache.db';
     _db = await openDatabase(
       path,
-      version: 1,
-      onCreate: _onCreate,
+      version: 2,
+      onCreate: (db, version) => _createV2(db),
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute('DROP TABLE IF EXISTS maps');
+          await _createV2(db);
+        }
+      },
     );
     return _db!;
   }
 
-  Future<void> _onCreate(Database db, int version) async {
+  Future<void> _createV2(Database db) async {
     await db.execute('''
       CREATE TABLE maps (
         id TEXT PRIMARY KEY,
         prompt TEXT NOT NULL,
-        base64_png TEXT NOT NULL,
+        gm_base64_png TEXT NOT NULL,
+        player_base64_png TEXT NOT NULL,
         width INTEGER NOT NULL,
         height INTEGER NOT NULL,
         created_at TEXT NOT NULL
@@ -44,11 +48,12 @@ class MapsCacheStore {
     ''');
   }
 
-  /// Save a generated map to the local cache.
+  /// Save a generated dual-layer map to the local cache.
   Future<void> saveMap({
     required String id,
     required String prompt,
-    required String base64Png,
+    required String gmBase64Png,
+    required String playerBase64Png,
     required int width,
     required int height,
   }) async {
@@ -58,7 +63,8 @@ class MapsCacheStore {
       {
         'id': id,
         'prompt': prompt,
-        'base64_png': base64Png,
+        'gm_base64_png': gmBase64Png,
+        'player_base64_png': playerBase64Png,
         'width': width,
         'height': height,
         'created_at': DateTime.now().toIso8601String(),
@@ -89,11 +95,12 @@ class MapsCacheStore {
   }
 }
 
-/// A cached map entry.
+/// A cached dual-layer map entry.
 class CachedMap {
   final String id;
   final String prompt;
-  final String base64Png;
+  final String gmBase64Png;
+  final String playerBase64Png;
   final int width;
   final int height;
   final DateTime createdAt;
@@ -101,7 +108,8 @@ class CachedMap {
   const CachedMap({
     required this.id,
     required this.prompt,
-    required this.base64Png,
+    required this.gmBase64Png,
+    required this.playerBase64Png,
     required this.width,
     required this.height,
     required this.createdAt,
@@ -110,7 +118,8 @@ class CachedMap {
   factory CachedMap.fromMap(Map<String, dynamic> map) => CachedMap(
         id: map['id'] as String,
         prompt: map['prompt'] as String,
-        base64Png: map['base64_png'] as String,
+        gmBase64Png: map['gm_base64_png'] as String,
+        playerBase64Png: map['player_base64_png'] as String,
         width: map['width'] as int,
         height: map['height'] as int,
         createdAt: DateTime.parse(map['created_at'] as String),
@@ -119,7 +128,8 @@ class CachedMap {
   Map<String, dynamic> toMap() => {
         'id': id,
         'prompt': prompt,
-        'base64_png': base64Png,
+        'gm_base64_png': gmBase64Png,
+        'player_base64_png': playerBase64Png,
         'width': width,
         'height': height,
         'created_at': createdAt.toIso8601String(),

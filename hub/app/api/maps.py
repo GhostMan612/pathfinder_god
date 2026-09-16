@@ -3,7 +3,7 @@
 # The Future Dictates the Past and the Past is Always Present.
 # ============================================================
 
-"""Map Generator API — LLM + Pillow rendering."""
+"""Map Generator API — LLM + dual-layer Pillow rendering."""
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -17,6 +17,7 @@ router = APIRouter(prefix="/map", tags=["map"])
 
 class MapRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=500)
+    grid_enabled: bool = True
 
 
 class MapRoomResponse(BaseModel):
@@ -27,12 +28,23 @@ class MapRoomResponse(BaseModel):
     name: str
 
 
+class MapSecretResponse(BaseModel):
+    x: int
+    y: int
+    w: int
+    h: int
+    type: str
+    name: str
+
+
 class MapResponse(BaseModel):
     valid: bool
-    base64_png: str | None = None
+    gm_base64_png: str | None = None
+    player_base64_png: str | None = None
     width: int | None = None
     height: int | None = None
     rooms: list[MapRoomResponse] | None = None
+    secret_features: list[MapSecretResponse] | None = None
     error: str | None = None
 
 
@@ -43,7 +55,7 @@ async def generate_map(request: MapRequest) -> MapResponse:
     agent = MapMakerAgent(llm)
 
     try:
-        result = await agent.build(request.prompt)
+        result = await agent.build(request.prompt, grid_enabled=request.grid_enabled)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Map generation failed: {e}")
     finally:
@@ -54,7 +66,8 @@ async def generate_map(request: MapRequest) -> MapResponse:
 
     return MapResponse(
         valid=result.valid,
-        base64_png=result.base64_png,
+        gm_base64_png=result.gm_base64_png,
+        player_base64_png=result.player_base64_png,
         width=result.layout.width if result.layout else None,
         height=result.layout.height if result.layout else None,
         rooms=[
@@ -66,6 +79,17 @@ async def generate_map(request: MapRequest) -> MapResponse:
                 name=r.name,
             )
             for r in result.layout.rooms
+        ] if result.layout else None,
+        secret_features=[
+            MapSecretResponse(
+                x=s.x,
+                y=s.y,
+                w=s.w,
+                h=s.h,
+                type=s.type,
+                name=s.name,
+            )
+            for s in result.layout.secret_features
         ] if result.layout else None,
         error=result.error,
     )
