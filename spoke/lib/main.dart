@@ -14,6 +14,7 @@ import 'config/hub_config.dart';
 import 'screens/home_screen.dart';
 import 'services/audio_service.dart';
 import 'services/haptics_service.dart';
+import 'services/slm_guide.dart';
 import 'storage/character_store.dart';
 import 'theme/app_theme.dart';
 
@@ -46,20 +47,41 @@ Future<void> _reclaimPartialDownloads() async {
   } catch (_) {}
 }
 
-class PathfinderSpokeApp extends StatelessWidget {
+class PathfinderSpokeApp extends StatefulWidget {
   final HubConfig config;
   const PathfinderSpokeApp({super.key, required this.config});
 
   @override
+  State<PathfinderSpokeApp> createState() => _PathfinderSpokeAppState();
+}
+
+class _PathfinderSpokeAppState extends State<PathfinderSpokeApp> {
+  late final HubClient _hubClient;
+  late final CharacterStore _characters;
+
+  @override
+  void initState() {
+    super.initState();
+    _hubClient = HubClient(widget.config);
+    _characters = CharacterStore();
+  }
+
+  @override
+  void dispose() {
+    AudioService.instance.dispose();
+    SlmGuideService.instance.dispose();
+    _hubClient.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final client = HubClient(config);
-    final characters = CharacterStore();
     return MaterialApp(
       title: 'Pathfinder God',
       debugShowCheckedModeBanner: false,
       theme: PathfinderTheme.light(),
       darkTheme: PathfinderTheme.dark(),
-      home: HomeScreen(client: client, characters: characters),
+      home: HomeScreen(client: _hubClient, characters: _characters),
     );
   }
 }

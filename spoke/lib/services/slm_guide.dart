@@ -248,6 +248,8 @@ class SlmGuideService {
     _chat = null;
   }
 
+  void dispose() => close();
+
   static const _systemPrompt =
       'You are the Pathfinder Guide, a helpful tabletop RPG assistant running '
       'fully offline on a phone. Answer concisely in markdown. '

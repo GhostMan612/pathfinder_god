@@ -12,6 +12,7 @@ import 'combat_tracker_screen.dart';
 import 'dice_screen.dart';
 import 'encounter_builder_screen.dart';
 import 'gm_chat_screen.dart';
+import 'map_maker_screen.dart';
 import 'rulebook_screen.dart';
 import 'settings_screen.dart';
 import '../services/combat_store.dart';
@@ -43,6 +44,7 @@ class _HomeScreenState extends State<HomeScreen> {
       RulebookScreen(client: widget.client),
       CombatTrackerScreen(client: widget.client, store: _combatStore),
       EncounterBuilderScreen(client: widget.client, store: _combatStore),
+      MapMakerScreen(client: widget.client),
       SettingsScreen(client: widget.client, characters: widget.characters),
     ];
   }
@@ -61,6 +63,7 @@ class _HomeScreenState extends State<HomeScreen> {
           NavigationDestination(icon: Icon(Icons.menu_book_outlined), selectedIcon: Icon(Icons.menu_book), label: 'Rules'),
           NavigationDestination(icon: Icon(Icons.auto_fix_high_outlined), selectedIcon: Icon(Icons.auto_fix_high), label: 'Combat'),
           NavigationDestination(icon: Icon(Icons.auto_fix_high_outlined), selectedIcon: Icon(Icons.auto_fix_high), label: 'Encounter'),
+          NavigationDestination(icon: Icon(Icons.map_outlined), selectedIcon: Icon(Icons.map), label: 'Map'),
           NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'Setup'),
         ],
       ),

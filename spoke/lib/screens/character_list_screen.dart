@@ -7,6 +7,7 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart' as fp;
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../api/hub_client.dart';
@@ -16,6 +17,7 @@ import '../storage/character_store.dart';
 import '../theme/app_theme.dart';
 import 'character_builder_screen.dart';
 import 'character_sheet_screen.dart';
+import '../widgets/rpg_panel.dart';
 
 /// Lists the player's saved characters (stored locally on the phone).
 class CharacterListScreen extends StatefulWidget {
@@ -104,27 +106,30 @@ class _CharacterListScreenState extends State<CharacterListScreen> {
         )),
         icon: const Icon(Icons.auto_fix_high),
         label: const Text('Forge'),
-      ),
+      ).animate().scale(duration: 120.ms, curve: Curves.elasticOut),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _characters.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text('No heroes yet.'),
-                      const SizedBox(height: 12),
-                      FilledButton.icon(
-                        onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                          builder: (_) => CharacterBuilderScreen(
-                            client: widget.client,
-                            store: widget.store,
-                          ),
-                        )),
-                        icon: const Icon(Icons.auto_fix_high),
-                        label: const Text('Forge Your First Hero'),
-                      ),
-                    ],
+              ? RpgPanels.gothicStone.build(
+                  padding: const EdgeInsets.all(24),
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('No heroes yet.'),
+                        const SizedBox(height: 12),
+                        FilledButton.icon(
+                          onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                            builder: (_) => CharacterBuilderScreen(
+                              client: widget.client,
+                              store: widget.store,
+                            ),
+                          )),
+                          icon: const Icon(Icons.auto_fix_high),
+                          label: const Text('Forge Your First Hero'),
+                        ),
+                      ],
+                    ),
                   ),
                 )
               : ListView.separated(

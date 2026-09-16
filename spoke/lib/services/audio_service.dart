@@ -169,6 +169,15 @@ class AudioService {
       return player.play(AssetSource(asset), volume: volume);
     }).catchError((_) {}));
   }
+
+  void dispose() {
+    for (final p in _sfxPool) {
+      p.dispose();
+    }
+    _sfxPool.clear();
+    _music?.dispose();
+    _music = null;
+  }
 }
 
 /// Track/artist/license credits for the bundled royalty-free audio.
