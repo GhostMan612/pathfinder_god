@@ -10,9 +10,11 @@ import '../storage/character_store.dart';
 import 'character_list_screen.dart';
 import 'combat_tracker_screen.dart';
 import 'dice_screen.dart';
+import 'encounter_builder_screen.dart';
 import 'gm_chat_screen.dart';
 import 'rulebook_screen.dart';
 import 'settings_screen.dart';
+import '../services/combat_store.dart';
 
 /// The app shell: a bottom navigation bar tying the five screens together.
 class HomeScreen extends StatefulWidget {
@@ -26,18 +28,21 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _index = 0;
+  late final CombatStore _combatStore;
   late final List<Widget> _screens;
 
   @override
   void initState() {
     super.initState();
+    _combatStore = CombatStore(widget.client);
     // Built once so each tab keeps its state (dice history, chat) across switches.
     _screens = [
       const DiceScreen(),
       GmChatScreen(client: widget.client),
       CharacterListScreen(client: widget.client, store: widget.characters),
       RulebookScreen(client: widget.client),
-      CombatTrackerScreen(client: widget.client, store: widget.characters),
+      CombatTrackerScreen(client: widget.client, store: _combatStore),
+      EncounterBuilderScreen(client: widget.client, store: _combatStore),
       SettingsScreen(client: widget.client, characters: widget.characters),
     ];
   }
@@ -55,6 +60,7 @@ class _HomeScreenState extends State<HomeScreen> {
           NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Hero'),
           NavigationDestination(icon: Icon(Icons.menu_book_outlined), selectedIcon: Icon(Icons.menu_book), label: 'Rules'),
           NavigationDestination(icon: Icon(Icons.auto_fix_high_outlined), selectedIcon: Icon(Icons.auto_fix_high), label: 'Combat'),
+          NavigationDestination(icon: Icon(Icons.auto_fix_high_outlined), selectedIcon: Icon(Icons.auto_fix_high), label: 'Encounter'),
           NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'Setup'),
         ],
       ),

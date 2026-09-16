@@ -268,6 +268,27 @@ class HubClient {
         .toList();
   }
 
+  /// Generate an encounter via LLM + deterministic XP budget.
+  Future<Map<String, dynamic>> generateEncounter({
+    required int partyLevel,
+    required int partySize,
+    required String threat,
+    required String theme,
+  }) async {
+    final resp = await _http.post(
+      config.httpUri('/encounter/generate'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'party_level': partyLevel,
+        'party_size': partySize,
+        'threat': threat,
+        'theme': theme,
+      }),
+    );
+    _ensureOk(resp);
+    return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
+
   void _ensureOk(http.Response resp) {
     if (resp.statusCode < 200 || resp.statusCode >= 300) {
       throw HubException('Hub returned ${resp.statusCode}: ${resp.body}');
