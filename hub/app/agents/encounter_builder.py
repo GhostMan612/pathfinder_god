@@ -24,6 +24,7 @@ from app.llm.ollama_client import OllamaClient
 from app.config import get_settings
 from app.db.repository import CampaignRepository
 from app.rag.retriever import Retriever
+from app.agents.dice_utils import roll_dice
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,38 @@ CREATURE_XP_BY_LEVEL_DIFF: dict[int, int] = {
 
 VALID_THREATS = tuple(THREAT_BUDGET_4.keys())
 
+# Elite / Weak adjustment templates (PF2e Bestiary building rules).
+# Strikes, saves, AC, DCs and damage shift by 2; HP scales by 20%;
+# the adjusted creature counts one level up (elite) or down (weak) for XP.
+TEMPLATE_MODIFIERS: dict[str, dict[str, float]] = {
+    "normal": {"ac": 0, "saves": 0, "strikes": 0, "damage": 0, "hp_mult": 1.0, "level_bump": 0},
+    "elite": {"ac": 2, "saves": 2, "strikes": 2, "damage": 2, "hp_mult": 1.2, "level_bump": 1},
+    "weak": {"ac": -2, "saves": -2, "strikes": -2, "damage": -2, "hp_mult": 0.8, "level_bump": -1},
+}
+
+VALID_TEMPLATES = tuple(TEMPLATE_MODIFIERS.keys())
+
+HP_STATIC_RE = re.compile(r"\bHP\s+(\d{1,4})\b", re.IGNORECASE)
+HP_DICE_RE = re.compile(
+    r"\bHP\s*\(?\s*(\d+\s*d\s*\d+(?:\s*[+-]\s*\d+)?)\s*\)?",
+    re.IGNORECASE,
+)
+HP_PAREN_DICE_RE = re.compile(
+    r"\bHP\s*\d+\s*\(\s*(\d+\s*d\s*\d+(?:\s*[+-]\s*\d+)?)\s*\)",
+    re.IGNORECASE,
+)
+
+
+@dataclass
+class AdjustedStats:
+    level: int
+    ac: int
+    saves: int
+    strikes: int
+    damage_bonus: int
+    hp: int
+    template: str
+
 
 @dataclass
 class EncounterMonster:
@@ -75,6 +108,8 @@ class EncounterMonster:
     xp_each: int
     content: str
     source_book: str
+    hp: int = 0
+    template: str = "normal"
 
     @property
     def total_xp(self) -> int:
@@ -123,15 +158,66 @@ class EncounterBuilderAgent:
             return CREATURE_XP_BY_LEVEL_DIFF[4]
         return CREATURE_XP_BY_LEVEL_DIFF[diff]
 
+    def apply_template(
+        self,
+        level: int,
+        ac: int,
+        saves: int,
+        strikes: int,
+        hp: int,
+        template: str,
+    ) -> AdjustedStats:
+        key = (template or "normal").lower()
+        if key not in TEMPLATE_MODIFIERS:
+            raise ValueError(f"Invalid template: {template}. Valid: {VALID_TEMPLATES}")
+        mods = TEMPLATE_MODIFIERS[key]
+        return AdjustedStats(
+            level=level,
+            ac=ac + int(mods["ac"]),
+            saves=saves + int(mods["saves"]),
+            strikes=strikes + int(mods["strikes"]),
+            damage_bonus=int(mods["damage"]),
+            hp=max(1, int(hp * float(mods["hp_mult"]))),
+            template=key,
+        )
+
+    def template_level_bump(self, template: str) -> int:
+        key = (template or "normal").lower()
+        if key not in TEMPLATE_MODIFIERS:
+            raise ValueError(f"Invalid template: {template}. Valid: {VALID_TEMPLATES}")
+        return int(TEMPLATE_MODIFIERS[key]["level_bump"])
+
+    def extract_hp(self, content: str) -> int | None:
+        m = HP_STATIC_RE.search(content or "")
+        if m:
+            return int(m.group(1))
+        return None
+
+    def extract_hit_dice(self, content: str) -> str | None:
+        text = content or ""
+        m = HP_DICE_RE.search(text) or HP_PAREN_DICE_RE.search(text)
+        if m:
+            return re.sub(r"\s+", "", m.group(1))
+        return None
+
+    def roll_hp(self, content: str, rng: Any = None) -> int | None:
+        dice = self.extract_hit_dice(content)
+        if dice:
+            total, _, _ = roll_dice(dice, rng)
+            return max(1, total)
+        return self.extract_hp(content)
+
     async def build(
         self,
         party_level: int,
         party_size: int,
         threat: str,
         theme: str,
+        template: str = "normal",
     ) -> BuildResult:
         # 1. Calculate budget
         target_xp = self.calculate_budget(party_level, party_size, threat)
+        level_bump = self.template_level_bump(template)
 
         # 2. Query FTS5 for theme, filter by level range PL-4..PL+4
         min_level = max(1, party_level - 4)
@@ -150,7 +236,7 @@ class EncounterBuilderAgent:
             level = self._extract_level(content)
             if level is None or not (min_level <= level <= max_level):
                 continue
-            xp = self.creature_xp(party_level, level)
+            xp = self.creature_xp(party_level, level + level_bump)
             candidates.append({
                 "name": h["name"],
                 "level": level,
@@ -182,13 +268,21 @@ class EncounterBuilderAgent:
         # 4. Hydrate selected monsters with full content
         monsters: list[EncounterMonster] = []
         total_xp = 0
+        template_key = (template or "normal").lower()
         for item in selection:
             name = item["name"]
             count = int(item["count"])
             match = next((c for c in candidates if c["name"] == name), None)
             if not match:
                 raise ValueError(f"LLM selected unknown monster: {name}")
-            xp = match["xp_each"]
+            xp = self.creature_xp(party_level, match["level"] + level_bump)
+            base_hp = self.roll_hp(match["content"]) or 0
+            hp = base_hp
+            if template_key != "normal" and base_hp > 0:
+                hp = max(
+                    1,
+                    int(base_hp * float(TEMPLATE_MODIFIERS[template_key]["hp_mult"])),
+                )
             monsters.append(EncounterMonster(
                 name=name,
                 count=count,
@@ -196,6 +290,8 @@ class EncounterBuilderAgent:
                 xp_each=xp,
                 content=match["content"],
                 source_book=match["source_book"],
+                hp=hp,
+                template=template_key,
             ))
             total_xp += xp * count
 
