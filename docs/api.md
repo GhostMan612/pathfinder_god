@@ -8,6 +8,7 @@ Interactive playground (hub running): `http://localhost:8000/docs`.
 | Method | Path | Body / Query | Returns |
 |---|---|---|---|
 | GET | `/health` | — | `{status, version, ollama_model, databases_found[]}` |
+| GET | `/ready`, `/health/detailed`, `/version`, `/metrics`, `/metrics/json` | — | Readiness probe (db + ollama checks), detailed health, version, Prometheus text / JSON metrics |
 | POST | `/ask` | `{query, edition=both, mode?, history=[[role,text]…]}` | `{answer, backend, mode, edition, sources[]}` |
 | POST | `/generate/{kind}` | `{prompt, edition}` · kind ∈ `npc monster boss map campaign encounter` | Same as `/ask` (mode forced) |
 | POST | `/generate/character` | `{prompt}` | `{valid, character?, errors[]}` — LLM + Rules Lawyer validated |

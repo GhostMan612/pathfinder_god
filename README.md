@@ -20,7 +20,7 @@ No typing IP addresses: the hub announces itself on the LAN and the app's
 **Setup → Find hub automatically** connects with one tap. Details in
 [`docs/troubleshooting.md`](docs/troubleshooting.md).
 
-## Spoke features (5 tabs)
+## Spoke features (9 tabs)
 
 | Tab | What | Needs the hub? |
 |---|---|---|
@@ -28,6 +28,10 @@ No typing IP addresses: the hub announces itself on the LAN and the app's
 | God | Live GM chat, streaming markdown with source citations | Yes |
 | Hero | Full PF2e character sheet (9 tabs), derived stats auto-recalc, local SQLite | No (except "Forge with the God") |
 | Rules | Offline rulebook: search + browse chips + Guide chatbot, hub fallback | No — 44,620 entries on-device |
+| Combat | Tracker: conditions, persistent damage + flat checks, Dying/Wounded; hub strike/end-turn assist | Hub-assisted (`/combat/*`) |
+| Encounter | Vault of cached XP-budget generations | Generation needs hub |
+| Map | Map Maker Vault: dual-layer GM/player maps + PDF share | Generation needs hub |
+| Campaign | Journal: sessions/notes/decisions + chronicler summaries | Summaries need hub |
 | Setup | Hub connection (auto-discover), sound/haptics toggles, backup/restore | — |
 
 Backup/restore (Settings): characters + campaign export as JSON/JSONL via the system
@@ -62,6 +66,7 @@ browse models, search rules, run generators, roll dice, chat with the God, watch
 |---|---|
 | `hub/` | Python FastAPI service. See [`hub/README.md`](hub/README.md). |
 | `spoke/` | Flutter Android app (`com.pathfindergod`). See [`spoke/README.md`](spoke/README.md). |
+| `spoke_kt/` | Native Kotlin spoke (pre-Glass scaffold, `assembleDebug` green). Hub owns all agents; Kotlin owns ViewModels + rendering per `shared/openapi.yaml`. |
 | `shared/openapi.yaml` | The API contract both sides build against (v0.1.0). |
 | `data/` | Laptop-only `.db` files (git-ignored). Schema: [`data/SCHEMA.md`](data/SCHEMA.md). |
 | `tools/` | Sound synth (`gen_audio.py`), Command Center source (PySide6). |
@@ -90,7 +95,8 @@ git clone https://github.com/GhostMan612/pathfinder_god.git
 
 ## Status
 
-v0.6.4 — `flutter analyze`: clean · `flutter test`: 25/25 · hub `py_compile`: clean.
+Hub/Spoke decoupling complete: the hub owns every micro-agent behind `shared/openapi.yaml` (26 paths), and the native `spoke_kt/` scaffold compiles (`assembleDebug` green) as the future Compose spoke.
+Current: `flutter analyze`: clean · `flutter test`: 53/53 · hub `pytest hub/tests/`: 107/107.
 History: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 
 ---

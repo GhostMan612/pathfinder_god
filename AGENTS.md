@@ -4,7 +4,8 @@
 ```
 C:\pathfinder_god\
 ├── hub/                 # Python FastAPI service (WORKING: /health /ask /stream /rules/search /generate)
-├── spoke/               # Flutter Android app, 5 tabs (BUILDS IN ANDROID STUDIO)
+├── spoke/               # Flutter Android app, 9 tabs (BUILDS IN ANDROID STUDIO)
+├── spoke_kt/            # Native Kotlin spoke, pre-Glass scaffold (see Native Lane)
 ├── shared/openapi.yaml  # API contract (source of truth)
 ├── data/                # SQLite DBs (pathfinder_rag.db 58MB / 44,620 rows, gitignored, laptop only)
 ├── docs/                # Setup + architecture guides
@@ -30,11 +31,19 @@ cd hub
 python -m app.main        # starts on :8000 (uses C:\venv-hub)
 ```
 
+### Native (Kotlin) — pre-Glass scaffold
+```powershell
+cd spoke_kt
+$env:JAVA_HOME='C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1'
+.\gradlew.bat assembleDebug --no-daemon   # always --no-daemon: daemons get reaped in this shell
+```
+
 ### Environment
 - Python: `C:\venv-hub\venv\Scripts\python.exe` (3.14.6) — use as-is
 - Ollama: `ollama serve` on `0.0.0.0:11434` (hub `.env` maps `127.0.0.1:11450`, model `phi4-mini`)
 - Android SDK: `C:\android\sdk` (Gradle 9.3.1 cached)
-- Native JDK: Temurin 17 in temp (`$env:JAVA_HOME` per command) — Studio's bundled JBR is stripped, never use it
+- Flutter SDK: `C:\android\flutter` (NOT on PATH — invoke `C:\android\flutter\bin\flutter.bat`; the `C:\src\flutter` PATH entry is dead)
+- Native JDK: Temurin 17 at `C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1` (`$env:JAVA_HOME` per command) — Studio's bundled JBR is stripped, never use it
 - Native agents: `.opencode/agent/native-dev.md` owns `spoke_kt/` (AGP 9.0.1 + KSP + Room 2.7, compileSdk 34)
 
 ## Critical Rules (from RULES.md)
@@ -63,10 +72,16 @@ python -m app.main        # starts on :8000 (uses C:\venv-hub)
 - **Local-Only Fallback**: Ollama (local) → Raw FTS5 excerpts (always works). No cloud tiers.
 - **Rules DB**: FTS5 in `data/pathfinder_rag.db` (gitignored). Rebuild via `hub/scripts/rebuild_rags.py`
 
+## Native Lane (`spoke_kt/`)
+- **Separation**: every micro-agent (GM, encounter, loot, continuity, maps) runs on the Python Hub. Kotlin is strictly state-management (`ViewModel`/`StateFlow`) + rendering (Compose) — no LLM, no rules logic on-device beyond the bundled FTS5 read path.
+- **Contract is law**: `shared/openapi.yaml` (26 paths) — Retrofit endpoints and WS frames must match it byte-for-byte. Emulator → `http://10.0.2.2:8000`; real device → laptop LAN IP.
+- **Local-only**: Hub LLM is Ollama (`127.0.0.1:11450`) → raw FTS5 excerpts. No cloud tiers, no API keys anywhere in the lane.
+- **Owner**: `.opencode/agent/native-dev.md` (AGP 9.0.1 + KSP 2.3.4 + Room 2.7.0, NGA sqlite-android for FTS5, compile/target 34, min 26).
+
 ## Current State
 - **Spoke**: 9-tab app, builds in Android Studio, `flutter analyze` 0 issues, `flutter test` 53/53
 - **Offline Spoke**: bundled rulebook (48MB gz → FTS5), Guide chatbot w/ offline retrieval, dice + PF2e degrees of success, SFX + BGM — works with laptop off
-- **Hub**: Working service on :8000 (Ollama `phi4-mini`, FTS5 rules); `pytest` green except stale `test_api.py` expectations under repair
+- **Hub**: Working service on :8000 (Ollama `phi4-mini`, FTS5 rules); `pytest hub/tests/` 107/107 green (hermetic harness)
 - **Native spoke_kt**: Gradle scaffold builds (`assembleDebug`); Room 2.7/KSP + FTS5 driver + Retrofit/AGDK deps; services and ViewModels unwired (pre-Glass)
 - **Android identity**: `com.pathfindergod`, label "Pathfinder God", circular branded icons
 - **Command Center**: **Standalone exe** at `tools/command_center/dist/PathfinderGodCommandCenter.exe` (~48MB) — launches via `Start_CommandCenter.bat`, no venv required
