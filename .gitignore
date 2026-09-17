@@ -67,6 +67,13 @@ spoke/*.iml
 spoke/ios/Pods/
 spoke/ios/.symlinks/
 
+# Native Kotlin Spoke (spoke_kt)
+spoke_kt/.gradle/
+spoke_kt/build/
+spoke_kt/app/build/
+spoke_kt/local.properties
+spoke_kt/*.iml
+
 # ─── Editors / OS ─────────────────────────────────────────────────────────
 .idea/
 .vscode/
