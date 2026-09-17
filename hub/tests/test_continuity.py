@@ -5,9 +5,12 @@
 
 """Tests for ContinuityAgent session summarization."""
 
+import json
+
 import pytest
 
-from app.agents.continuity import ContinuityAgent
+from app.agents.continuity import ContinuityAgent, ContinuityKeeper
+from app.db.repository import CampaignRepository
 
 
 CANNED_SUMMARY = (
@@ -71,3 +74,48 @@ class TestSummarizeSession:
         journal = await agent.summarize_session(EVENTS, "Abomination Vaults")
         assert journal.summary == ""
         assert journal.event_count == 3
+
+
+class _KeeperLlm:
+    def __init__(self, payloads: list[str]):
+        self._payloads = list(payloads)
+
+    async def generate(self, prompt, system=""):
+        return self._payloads.pop(0)
+
+
+class _StubOrchestrator:
+    def __init__(self, llm):
+        self.ollama = llm
+
+
+class TestProcessSession:
+    @pytest.mark.asyncio
+    async def test_process_session_persists_entities_and_summary(self, tmp_path):
+        repo = CampaignRepository(str(tmp_path / "campaign.db"))
+        llm = _KeeperLlm(
+            [
+                json.dumps(
+                    {
+                        "npcs": [{"name": "Mira", "role": "ally", "level": 2}],
+                        "locations": [],
+                        "items": [],
+                        "quests": [],
+                        "decisions": [],
+                    }
+                ),
+                "The party met Mira at the rusted lantern.",
+                json.dumps(
+                    [{"fact": "Mira joined the party", "category": "npc", "confidence": 0.9}]
+                ),
+            ]
+        )
+        keeper = ContinuityKeeper(repo, _StubOrchestrator(llm))
+        result = await keeper.process_session(1, 1, "The party met Mira.")
+        assert result.summary == "The party met Mira at the rusted lantern."
+        npcs = repo.get_npcs(1)
+        assert [n.name for n in npcs] == ["Mira"]
+        session = repo.get_latest_session(1)
+        assert session is not None
+        assert session.summary == "The party met Mira at the rusted lantern."
+        assert session.facts[0]["fact"] == "Mira joined the party"

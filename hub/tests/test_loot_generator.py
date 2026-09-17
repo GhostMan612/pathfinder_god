@@ -8,6 +8,7 @@
 import json
 
 import pytest
+from fastapi.testclient import TestClient
 
 from app.agents.loot_generator import LootGeneratorAgent
 from app.agents.rules_lawyer import RulesLawyerAgent
@@ -143,3 +144,33 @@ class TestMalformedLlm:
         bad = dict(VALID_LOOT, level=25)
         result = await _agent(bad).build("godslayer")
         assert result.valid is False
+
+
+class TestLootRoute:
+    def test_generate_loot_route_reaches_dedicated_handler(
+        self, tmp_path, monkeypatch
+    ):
+        """POST /generate/loot must hit the loot router, not generic /{kind}."""
+        from app.main import create_app
+        from app.api.deps import get_repo
+        from app.db.repository import CampaignRepository
+        from app.llm.ollama_client import OllamaClient
+
+        async def fake_generate(self, **kwargs):
+            return json.dumps(VALID_LOOT)
+
+        monkeypatch.setattr(OllamaClient, "generate", fake_generate)
+        app = create_app()
+        app.dependency_overrides[get_repo] = lambda: CampaignRepository(
+            str(tmp_path / "campaign.db")
+        )
+        try:
+            client = TestClient(app, raise_server_exceptions=False)
+            r = client.post("/generate/loot", json={"prompt": "gothic dagger"})
+        finally:
+            app.dependency_overrides.clear()
+        assert r.status_code == 200, r.text[:200]
+        body = r.json()
+        assert body["valid"] is True
+        assert body["item"]["name"] == "Widow's Caress"
+        assert isinstance(body["craft_dc"], int)

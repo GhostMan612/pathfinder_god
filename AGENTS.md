@@ -34,6 +34,8 @@ python -m app.main        # starts on :8000 (uses C:\venv-hub)
 - Python: `C:\venv-hub\venv\Scripts\python.exe` (3.14.6) — use as-is
 - Ollama: `ollama serve` on `0.0.0.0:11434` (hub `.env` maps `127.0.0.1:11450`, model `phi4-mini`)
 - Android SDK: `C:\android\sdk` (Gradle 9.3.1 cached)
+- Native JDK: Temurin 17 in temp (`$env:JAVA_HOME` per command) — Studio's bundled JBR is stripped, never use it
+- Native agents: `.opencode/agent/native-dev.md` owns `spoke_kt/` (AGP 9.0.1 + KSP + Room 2.7, compileSdk 34)
 
 ## Critical Rules (from RULES.md)
 
@@ -62,9 +64,10 @@ python -m app.main        # starts on :8000 (uses C:\venv-hub)
 - **Rules DB**: FTS5 in `data/pathfinder_rag.db` (gitignored). Rebuild via `hub/scripts/rebuild_rags.py`
 
 ## Current State
-- **Spoke**: 6-tab app, builds in Android Studio, `flutter analyze` 0 issues, `flutter test` 10/10
+- **Spoke**: 9-tab app, builds in Android Studio, `flutter analyze` 0 issues, `flutter test` 53/53
 - **Offline Spoke**: bundled rulebook (48MB gz → FTS5), Guide chatbot w/ offline retrieval, dice + PF2e degrees of success, SFX + BGM — works with laptop off
-- **Hub**: Working service on :8000 (Ollama `phi4-mini`, FTS5 rules)
+- **Hub**: Working service on :8000 (Ollama `phi4-mini`, FTS5 rules); `pytest` green except stale `test_api.py` expectations under repair
+- **Native spoke_kt**: Gradle scaffold builds (`assembleDebug`); Room 2.7/KSP + FTS5 driver + Retrofit/AGDK deps; services and ViewModels unwired (pre-Glass)
 - **Android identity**: `com.pathfindergod`, label "Pathfinder God", circular branded icons
 - **Command Center**: **Standalone exe** at `tools/command_center/dist/PathfinderGodCommandCenter.exe` (~48MB) — launches via `Start_CommandCenter.bat`, no venv required
 

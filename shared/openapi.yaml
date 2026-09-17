@@ -46,6 +46,56 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /generate/loot:
+    post:
+      tags:
+      - gm
+      summary: Generate Loot
+      operationId: generate_loot_generate_loot_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LootRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LootResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /generate/character:
+    post:
+      tags:
+      - gm
+      summary: Build Character Endpoint
+      operationId: build_character_endpoint_generate_character_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuildCharacterRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildCharacterResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /generate/{kind}:
     post:
       tags:
@@ -311,6 +361,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CampaignStateResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /campaign/summarize-session:
+    post:
+      tags:
+      - campaign
+      summary: Summarize Session
+      description: Turn raw session events into an atmospheric journal entry.
+      operationId: summarize_session_campaign_summarize_session_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SummarizeSessionRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SummarizeSessionResponse'
         '422':
           description: Validation Error
           content:
@@ -655,6 +731,108 @@ paths:
           content:
             application/json:
               schema: {}
+  /combat/resolve-strike:
+    post:
+      tags:
+      - combat
+      summary: Resolve Strike
+      description: Resolve a single strike using deterministic PF2e math.
+      operationId: resolve_strike_combat_resolve_strike_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StrikeRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StrikeResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /combat/end-turn:
+    post:
+      tags:
+      - combat
+      summary: End Turn
+      description: Process end-of-turn condition updates.
+      operationId: end_turn_combat_end_turn_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EndTurnRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EndTurnResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /encounter/generate:
+    post:
+      tags:
+      - encounter
+      summary: Generate Encounter
+      operationId: generate_encounter_encounter_generate_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EncounterRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EncounterResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /map/generate:
+    post:
+      tags:
+      - map
+      summary: Generate Map
+      operationId: generate_map_map_generate_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MapRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MapResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     AskRequest:
@@ -711,6 +889,36 @@ components:
       - edition
       - sources
       title: AskResponse
+    BuildCharacterRequest:
+      properties:
+        prompt:
+          type: string
+          title: Prompt
+      type: object
+      required:
+      - prompt
+      title: BuildCharacterRequest
+    BuildCharacterResponse:
+      properties:
+        valid:
+          type: boolean
+          title: Valid
+        character:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Character
+        errors:
+          items:
+            type: string
+          type: array
+          title: Errors
+          default: []
+      type: object
+      required:
+      - valid
+      title: BuildCharacterResponse
     CampaignExport:
       properties:
         campaign:
@@ -849,6 +1057,30 @@ components:
             type: array
           - type: 'null'
           title: Party Members
+        sessions:
+          anyOf:
+          - items:
+              additionalProperties: true
+              type: object
+            type: array
+          - type: 'null'
+          title: Sessions
+        notes:
+          anyOf:
+          - items:
+              additionalProperties: true
+              type: object
+            type: array
+          - type: 'null'
+          title: Notes
+        decisions:
+          anyOf:
+          - items:
+              additionalProperties: true
+              type: object
+            type: array
+          - type: 'null'
+          title: Decisions
         replace_existing:
           type: boolean
           title: Replace Existing
@@ -887,6 +1119,24 @@ components:
       - party
       - notes
       title: CampaignStateResponse
+    ConditionItem:
+      properties:
+        name:
+          type: string
+          title: Name
+        value:
+          type: integer
+          title: Value
+          default: 1
+        duration_rounds:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Duration Rounds
+      type: object
+      required:
+      - name
+      title: ConditionItem
     DetailedHealthResponse:
       properties:
         status:
@@ -943,6 +1193,131 @@ components:
       - ollama
       - checks
       title: DetailedHealthResponse
+    EncounterMonsterResponse:
+      properties:
+        name:
+          type: string
+          title: Name
+        count:
+          type: integer
+          title: Count
+        level:
+          type: integer
+          title: Level
+        xp_each:
+          type: integer
+          title: Xp Each
+        total_xp:
+          type: integer
+          title: Total Xp
+        source_book:
+          type: string
+          title: Source Book
+      type: object
+      required:
+      - name
+      - count
+      - level
+      - xp_each
+      - total_xp
+      - source_book
+      title: EncounterMonsterResponse
+    EncounterRequest:
+      properties:
+        party_level:
+          type: integer
+          maximum: 20.0
+          minimum: 1.0
+          title: Party Level
+        party_size:
+          type: integer
+          maximum: 10.0
+          minimum: 1.0
+          title: Party Size
+        threat:
+          type: string
+          pattern: ^(trivial|low|moderate|severe|extreme)$
+          title: Threat
+        theme:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Theme
+      type: object
+      required:
+      - party_level
+      - party_size
+      - threat
+      - theme
+      title: EncounterRequest
+    EncounterResponse:
+      properties:
+        target_xp:
+          type: integer
+          title: Target Xp
+        total_xp:
+          type: integer
+          title: Total Xp
+        party_level:
+          type: integer
+          title: Party Level
+        party_size:
+          type: integer
+          title: Party Size
+        threat:
+          type: string
+          title: Threat
+        theme:
+          type: string
+          title: Theme
+        monsters:
+          items:
+            $ref: '#/components/schemas/EncounterMonsterResponse'
+          type: array
+          title: Monsters
+      type: object
+      required:
+      - target_xp
+      - total_xp
+      - party_level
+      - party_size
+      - threat
+      - theme
+      - monsters
+      title: EncounterResponse
+    EndTurnRequest:
+      properties:
+        conditions:
+          items:
+            $ref: '#/components/schemas/ConditionItem'
+          type: array
+          title: Conditions
+          default: []
+        current_hp:
+          type: integer
+          title: Current Hp
+          default: 0
+      type: object
+      title: EndTurnRequest
+    EndTurnResponse:
+      properties:
+        conditions:
+          items:
+            $ref: '#/components/schemas/ConditionItem'
+          type: array
+          title: Conditions
+        notes:
+          type: string
+          title: Notes
+          default: ''
+        damage_taken:
+          type: integer
+          title: Damage Taken
+          default: 0
+      type: object
+      required:
+      - conditions
+      title: EndTurnResponse
     FetchRequest:
       properties:
         q:
@@ -1037,6 +1412,158 @@ components:
       - timestamp
       - uptime_seconds
       title: HealthResponse
+    LootRequest:
+      properties:
+        prompt:
+          type: string
+          title: Prompt
+      type: object
+      required:
+      - prompt
+      title: LootRequest
+    LootResponse:
+      properties:
+        valid:
+          type: boolean
+          title: Valid
+        item:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Item
+        craft_dc:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Craft Dc
+        errors:
+          items:
+            type: string
+          type: array
+          title: Errors
+          default: []
+      type: object
+      required:
+      - valid
+      title: LootResponse
+    MapRequest:
+      properties:
+        prompt:
+          type: string
+          maxLength: 500
+          minLength: 1
+          title: Prompt
+        grid_enabled:
+          type: boolean
+          title: Grid Enabled
+          default: true
+      type: object
+      required:
+      - prompt
+      title: MapRequest
+    MapResponse:
+      properties:
+        valid:
+          type: boolean
+          title: Valid
+        gm_base64_png:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Gm Base64 Png
+        player_base64_png:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Player Base64 Png
+        width:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Width
+        height:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Height
+        rooms:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/MapRoomResponse'
+            type: array
+          - type: 'null'
+          title: Rooms
+        secret_features:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/MapSecretResponse'
+            type: array
+          - type: 'null'
+          title: Secret Features
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+      type: object
+      required:
+      - valid
+      title: MapResponse
+    MapRoomResponse:
+      properties:
+        x:
+          type: integer
+          title: X
+        y:
+          type: integer
+          title: Y
+        w:
+          type: integer
+          title: W
+        h:
+          type: integer
+          title: H
+        name:
+          type: string
+          title: Name
+      type: object
+      required:
+      - x
+      - y
+      - w
+      - h
+      - name
+      title: MapRoomResponse
+    MapSecretResponse:
+      properties:
+        x:
+          type: integer
+          title: X
+        y:
+          type: integer
+          title: Y
+        w:
+          type: integer
+          title: W
+        h:
+          type: integer
+          title: H
+        type:
+          type: string
+          title: Type
+        name:
+          type: string
+          title: Name
+      type: object
+      required:
+      - x
+      - y
+      - w
+      - h
+      - type
+      - name
+      title: MapSecretResponse
     MetricsResponse:
       properties:
         requests_total:
@@ -1246,6 +1773,82 @@ components:
       - edition
       - results
       title: RulesSearchResponse
+    StrikeRequest:
+      properties:
+        attack_roll:
+          type: integer
+          title: Attack Roll
+        target_ac:
+          type: integer
+          title: Target Ac
+        damage_roll:
+          type: integer
+          title: Damage Roll
+        target_hp:
+          type: integer
+          title: Target Hp
+        target_temp_hp:
+          type: integer
+          title: Target Temp Hp
+          default: 0
+      type: object
+      required:
+      - attack_roll
+      - target_ac
+      - damage_roll
+      - target_hp
+      title: StrikeRequest
+    StrikeResponse:
+      properties:
+        outcome:
+          type: string
+          title: Outcome
+        damage_dealt:
+          type: integer
+          title: Damage Dealt
+        new_hp:
+          type: integer
+          title: New Hp
+        new_temp_hp:
+          type: integer
+          title: New Temp Hp
+        notes:
+          type: string
+          title: Notes
+      type: object
+      required:
+      - outcome
+      - damage_dealt
+      - new_hp
+      - new_temp_hp
+      - notes
+      title: StrikeResponse
+    SummarizeSessionRequest:
+      properties:
+        events:
+          items:
+            type: string
+          type: array
+          title: Events
+        campaign_name:
+          type: string
+          title: Campaign Name
+          default: Untitled Campaign
+      type: object
+      title: SummarizeSessionRequest
+    SummarizeSessionResponse:
+      properties:
+        summary:
+          type: string
+          title: Summary
+        event_count:
+          type: integer
+          title: Event Count
+      type: object
+      required:
+      - summary
+      - event_count
+      title: SummarizeSessionResponse
     ValidationError:
       properties:
         loc:

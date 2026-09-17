@@ -68,7 +68,11 @@ class StreamEvent(BaseModel):
     sources: list[dict] = []
 
 
+stream_router = APIRouter(tags=["gm"])
+
+
 @router.websocket("/stream")
+@stream_router.websocket("/stream")
 async def stream_endpoint(
     websocket: WebSocket,
     repo: CampaignRepository = Depends(get_repo),

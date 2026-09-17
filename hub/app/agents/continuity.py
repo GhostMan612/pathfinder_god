@@ -17,7 +17,7 @@ Tool interface (for GM Storyteller):
 import json
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -150,11 +150,11 @@ class ContinuityKeeper:
         facts = await self._extract_facts(session_log, entities)
 
         # 5. Persist session record
-        await self.repo.save_session(
+        self.repo.save_session(
             campaign_id=campaign_id,
             session_num=session_num,
             summary=summary,
-            facts=facts,
+            facts=[asdict(f) for f in facts],
             raw_log=session_log,
         )
 
@@ -170,11 +170,27 @@ class ContinuityKeeper:
             return ExtractedEntities()
 
         return ExtractedEntities(
-            npcs=[ExtractedEntity(type="npc", **e) for e in data.get("npcs", [])],
-            locations=[ExtractedEntity(type="location", **e) for e in data.get("locations", [])],
-            items=[ExtractedEntity(type="item", **e) for e in data.get("items", [])],
-            quests=[ExtractedEntity(type="quest", **e) for e in data.get("quests", [])],
-            decisions=[ExtractedEntity(type="decision", **e) for e in data.get("decisions", [])],
+            npcs=[self._entity("npc", e) for e in data.get("npcs", [])],
+            locations=[self._entity("location", e) for e in data.get("locations", [])],
+            items=[self._entity("item", e) for e in data.get("items", [])],
+            quests=[self._entity("quest", e) for e in data.get("quests", [])],
+            decisions=[self._entity("decision", e) for e in data.get("decisions", [])],
+        )
+
+    @staticmethod
+    def _entity(entry_type: str, entry: dict) -> ExtractedEntity:
+        fields = dict(entry)
+        name = fields.pop("name", "Unknown")
+        confidence = fields.pop("confidence", 1.0)
+        source_text = fields.pop("source_text", "")
+        attributes = fields.pop("attributes", None) or {}
+        attributes.update(fields)
+        return ExtractedEntity(
+            type=entry_type,
+            name=name,
+            attributes=attributes,
+            confidence=confidence,
+            source_text=source_text,
         )
 
     async def _upsert_entities(
@@ -184,7 +200,7 @@ class ContinuityKeeper:
         entities: ExtractedEntities,
     ) -> None:
         for npc in entities.npcs:
-            await self.repo.upsert_npc(
+            self.repo.upsert_npc(
                 campaign_id=campaign_id,
                 name=npc.name,
                 alias=npc.attributes.get("alias"),
@@ -198,7 +214,7 @@ class ContinuityKeeper:
             )
 
         for loc in entities.locations:
-            await self.repo.upsert_location(
+            self.repo.upsert_location(
                 campaign_id=campaign_id,
                 name=loc.name,
                 type_=loc.attributes.get("type", "other"),
@@ -208,7 +224,7 @@ class ContinuityKeeper:
             )
 
         for item in entities.items:
-            await self.repo.upsert_item(
+            self.repo.upsert_item(
                 campaign_id=campaign_id,
                 name=item.name,
                 type_=item.attributes.get("type", "other"),
@@ -221,7 +237,7 @@ class ContinuityKeeper:
             )
 
         for quest in entities.quests:
-            await self.repo.upsert_quest(
+            self.repo.upsert_quest(
                 campaign_id=campaign_id,
                 name=quest.name,
                 status=quest.attributes.get("status", "active"),
@@ -233,7 +249,7 @@ class ContinuityKeeper:
             )
 
         for decision in entities.decisions:
-            await self.repo.add_decision(
+            self.repo.add_decision(
                 campaign_id=campaign_id,
                 session_num=session_num,
                 decision=decision.attributes.get("decision", decision.name),

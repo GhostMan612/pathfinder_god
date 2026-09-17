@@ -2,47 +2,46 @@
 # As Above, So Below. As Within, So Without.
 # The Future Dictates the Past and the Past is Always Present.
 # ============================================================
-"""Critical FastAPI route tests — 6 essential tests only."""
+"""Critical FastAPI route tests — hermetic: tmp DBs, faked Ollama."""
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-
-from app.config import Settings
-from app.llm.backends import LLMResult
-from app.service import GodService
-from app.state.campaign import CampaignStore
-
-
-class FakeLLM:
-    async def complete(self, prompt: str, *, system: str = "", hits=None) -> "LLMResult":
-        return LLMResult(text="FAKE ANSWER for: " + prompt[:40], backend="ollama")
-
-    async def stream(self, prompt: str, *, system: str = "", hits=None) -> AsyncIterator[tuple[str, str]]:
-        for word in ["The ", "God ", "speaks."]:
-            yield ("ollama", word)
 
 
 # API key for authenticated endpoints
 TEST_API_KEY = "pfg_test_key_12345"
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_hub(tmp_path: Path, monkeypatch):
+    import app.main as main
+    from app.api.deps import get_repo
+    from app.db.repository import CampaignRepository
+    from app.llm.ollama_client import OllamaClient
+
+    async def fake_generate(self, **kwargs):
+        return "Fake answer from the God."
+
+    async def fake_stream(self, **kwargs):
+        yield "Fake "
+        yield "answer."
+
+    monkeypatch.setattr(OllamaClient, "generate", fake_generate)
+    monkeypatch.setattr(OllamaClient, "stream", fake_stream)
+    main.app.dependency_overrides[get_repo] = lambda: CampaignRepository(
+        str(tmp_path / "campaign.db")
+    )
+    yield
+    main.app.dependency_overrides.clear()
+
+
 @pytest.fixture
 def client(rules_db_dir: Path):
     import app.main as main
 
-    test_settings = Settings(
-        data_dir=rules_db_dir,
-        campaign_state_path=rules_db_dir / "campaign_state.json",
-    )
-    svc = GodService(test_settings)
-    svc._llm = FakeLLM()  # type: ignore[assignment]
-    main.settings = test_settings
-    main.service = svc
-    main.campaign = CampaignStore(test_settings.campaign_state_path)
     return TestClient(main.app)
 
 
@@ -50,20 +49,8 @@ def client(rules_db_dir: Path):
 def authenticated_client(rules_db_dir: Path):
     """Client with a valid API key for authenticated endpoints."""
     import app.main as main
-    from app.config import Settings
-    from app.service import GodService
-    from app.state.campaign import CampaignStore
     from fastapi.testclient import TestClient
 
-    test_settings = Settings(
-        data_dir=rules_db_dir,
-        campaign_state_path=rules_db_dir / "campaign_state.json",
-    )
-    svc = GodService(test_settings)
-    svc._llm = FakeLLM()
-    main.settings = test_settings
-    main.service = svc
-    main.campaign = CampaignStore(test_settings.campaign_state_path)
     client = TestClient(main.app)
     client.headers["X-API-Key"] = "pfg_test_key_12345"
     return client
@@ -138,18 +125,49 @@ def test_generate_boss_forces_mode(authenticated_client):
     assert r.json()["mode"] == "boss"
 
 
-def test_generate_unknown_kind_autodetects(authenticated_client):
+def test_generate_unknown_kind_returns_400_with_valid_kinds(authenticated_client):
     r = authenticated_client.post("/generate/whatever", json={"prompt": "build me a rogue"})
-    assert r.status_code == 200
-    assert r.json()["mode"] == "character"
+    assert r.status_code == 400
+    assert "character" in r.json()["detail"]
 
 
 def test_generate_all_kinds(authenticated_client):
-    kinds = ["character", "npc", "monster", "boss", "map", "campaign", "encounter"]
+    kinds = ["npc", "monster", "boss", "map", "campaign", "encounter"]
     for kind in kinds:
         r = authenticated_client.post(f"/generate/{kind}", json={"prompt": "test", "edition": "2e"})
         assert r.status_code == 200, f"kind={kind} failed"
         assert r.json()["mode"] == kind
+
+
+def test_generate_character_dedicated_route(authenticated_client, monkeypatch):
+    import json as _json
+
+    from app.llm.ollama_client import OllamaClient
+
+    character = {
+        "name": "Valeros",
+        "ancestry": "Human",
+        "heritage": "",
+        "background": "Guard",
+        "character_class": "Fighter",
+        "level": 1,
+        "abilities": {"str": 16, "dex": 12, "con": 14, "int": 10, "wis": 12, "cha": 10},
+        "proficiencies": {
+            "skills": {"athletics": 1, "stealth": 1, "arcana": 1},
+            "defenses": {"martialWeapons": 1},
+            "classProfs": {},
+        },
+    }
+
+    async def fake_character_json(self, **kwargs):
+        return _json.dumps(character)
+
+    monkeypatch.setattr(OllamaClient, "generate", fake_character_json)
+    r = authenticated_client.post("/generate/character", json={"prompt": "human fighter"})
+    assert r.status_code == 200, r.text[:200]
+    body = r.json()
+    assert body["valid"] is True
+    assert body["character"]["name"] == "Valeros"
 
 
 def test_campaign_note_roundtrip(authenticated_client):
@@ -174,7 +192,7 @@ def test_stream_websocket(authenticated_client):
                 chunks.append(msg["text"])
             elif msg["type"] == "end":
                 break
-        assert "".join(chunks) == "The God speaks."
+        assert "".join(chunks) == "Fake answer."
 
 
 def test_ask_with_history(authenticated_client):

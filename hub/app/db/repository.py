@@ -10,7 +10,7 @@ Campaign Repository — SQLite CRUD + queries for Campaign & Continuity data.
 import json
 import sqlite3
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -164,10 +164,9 @@ class CampaignRepository:
             ).fetchone()
             if not row:
                 return None
-            return Session(
-                **dict(row),
-                facts=json.loads(row["facts_json"]) if row["facts_json"] else [],
-            )
+            values = dict(row)
+            values["facts"] = json.loads(values.pop("facts_json")) if values.get("facts_json") else []
+            return Session(**values)
 
     def get_session(self, campaign_id: int, session_num: int) -> Session | None:
         with self._conn() as conn:
@@ -177,10 +176,9 @@ class CampaignRepository:
             ).fetchone()
             if not row:
                 return None
-            return Session(
-                **dict(row),
-                facts=json.loads(row["facts_json"]) if row["facts_json"] else [],
-            )
+            values = dict(row)
+            values["facts"] = json.loads(values.pop("facts_json")) if values.get("facts_json") else []
+            return Session(**values)
 
     def get_latest_session_num(self, campaign_id: int) -> int:
         with self._conn() as conn:
@@ -285,13 +283,20 @@ class CampaignRepository:
             )
             return cur.fetchone()[0]
 
+    @staticmethod
+    def _npc_from_row(row: dict) -> NPC:
+        known = {f.name for f in fields(NPC)}
+        values = dict(row)
+        values["class_"] = values.pop("class", None)
+        return NPC(**{k: v for k, v in values.items() if k in known})
+
     def get_npcs(self, campaign_id: int) -> list[NPC]:
         with self._conn() as conn:
             rows = conn.execute(
                 "SELECT * FROM npcs WHERE campaign_id = ? ORDER BY name",
                 (campaign_id,),
             ).fetchall()
-            return [NPC(**dict(r)) for r in rows]
+            return [self._npc_from_row(dict(r)) for r in rows]
 
     def get_npc(self, campaign_id: int, name: str) -> NPC | None:
         with self._conn() as conn:
@@ -299,7 +304,7 @@ class CampaignRepository:
                 "SELECT * FROM npcs WHERE campaign_id = ? AND name = ?",
                 (campaign_id, name),
             ).fetchone()
-            return NPC(**dict(row)) if row else None
+            return self._npc_from_row(dict(row)) if row else None
 
     # ──────────────────────────────────────────────────────────────
     # Locations

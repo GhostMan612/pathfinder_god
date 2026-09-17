@@ -62,6 +62,8 @@ def create_app() -> FastAPI:
     # Routers
     app.include_router(health.router)
     app.include_router(ask.router)
+    app.include_router(ask.stream_router)
+    app.include_router(loot.router)
     app.include_router(generate.router)
     app.include_router(rules.router)
     app.include_router(campaign.router)

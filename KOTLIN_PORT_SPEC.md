@@ -80,14 +80,14 @@ acceptable; keep separate DBs only if migration risk demands it.
   upgrade; repeat only for cache tables, never for characters.
 - `EncounterEntity` — `id, theme, threat, monsters_json, target_xp,
   created_at`.
-- **Rules FTS5 — the hard one.** The app bundles `pathfinder_rag.db.gz`
+- **Rules FTS5 — resolved as-built.** The app bundles `pathfinder_rag.db.gz`
   because `sqlite3_flutter_libs` ships FTS5, which AOSP SQLite lacks.
-  Room uses the platform SQLite → match queries would silently break.
-  Options, ranked: (a) Requery `sqlite-android` (FTS5 build) + Room via
-  custom `SupportSQLiteOpenHelper` (keeps DAO + FTS5); (b) keep the
-  extract-once flow and query the FTS5 file with the bundled native lib
-  through JNI, bypassing Room for `rules_fts` only; (c) ship a
-  pre-extracted DB and accept APK bloat. Do NOT assume platform FTS5.
+  Native side runs Room on `mil.nga:sqlite-android:3450200` (SQLite 3.45
+  with FTS5) through the hand-rolled `NgaSQLiteOpenHelperFactory` bridge
+  (`io.requery:sqlite-android` does not exist on Central — do not revert).
+  `RuleFtsEntity` maps the real `rules` virtual table with `@RawQuery`
+  `MATCH` + `bm25()`. Still unproven: Room's identity-hash check against
+  the external table at first open — spike before the Glass rules screen.
 - Extraction flow to preserve: first launch gunzips 48 MB → app storage
   once (`bundleVersion` marker file forces re-extract); `RoomDatabase.Callback`
   is the wrong hook for a 58 MB asset — do it in `AppViewModel` boot
@@ -160,10 +160,13 @@ module drops in without rewriting the app:
 
 ## 5. Build, Test, Rollout
 
-- Modules: `:app` (Compose/Hilt/Room/Retrofit), `:native-lib` (JNI stub),
-  `:rules-db` (asset + FTS5 access). Gradle version catalog pins
-  `androidx.bom`, `room`, `retrofit`, `okhttp`, `coil`, `datastore`,
-  `hilt`, `splashscreen`, `agdk-libraries`.
+- Modules: `:app` only (single-module scaffold, as built). Pinned as-built:
+  AGP 9.0.1 (built-in Kotlin — no `kotlin.android` plugin, no kapt),
+  KSP 2.3.4 + Room 2.7.0 (2.6.1's processor crashes on new Kotlin),
+  Compose BOM 2024.10.01 (newer BOMs demand compileSdk 35; directive
+  holds 34), `mil.nga:sqlite-android:3450200`, Retrofit 2.11/OkHttp 4.12,
+  AGDK games-activity/frame-pacing. `androidx.sqlite` 2.5 interfaces are
+  Kotlin properties (`override val/var`, `Array<out Any?>` bind args).
 - Tests: JUnit5 + Turbine (`CombatViewModel` end-turn notes event,
   `GodChatViewModel` retry frame clears text), Robolectric for DAOs,
   MockWebServer for `/combat/end-turn` dual payload + `/map/generate`
@@ -175,8 +178,8 @@ module drops in without rewriting the app:
   Map → Settings), M3 native audio/dice pilot, M4 AGDK surface option.
   Acceptance per milestone: `connectedAndroidTest` green, hub
   `pytest` untouched, wire payloads byte-identical to `openapi.yaml`.
-- Risks: platform SQLite without FTS5 (§2 — mitigated by
-  Requery/JNI path); MediaPipe Gemma 3n has no AGDK shortcut — keep the
+- Risks: platform SQLite without FTS5 (§2 — mitigated by the NGA
+  bridge); MediaPipe Gemma 3n has no AGDK shortcut — keep the
   `flutter_gemma` equivalent via MediaPipe LLM Inference AAR and the
   existing side-load + gated-download flow; 58 MB rules DB keeps the
   `android:largeHeap` + scoped-storage extraction plan mandatory.
