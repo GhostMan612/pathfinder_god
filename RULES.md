@@ -50,15 +50,15 @@ Do not install software, modify system settings, or write to new locations outsi
 ## 2. PROJECT CONVENTIONS (The Sovereign Directives)
 
 1. **Full code only** — no partial snippets, no TODO stubs.
-2. **No comments in code** — except the Genesis header every `.dart`/`.py` file must carry:
+2. **No comments in code** — except the Genesis header every `.dart`/`.py`/`.kt` file must carry:
    ```
    // ============================================================
    // As Above, So Below. As Within, So Without.
    // The Future Dictates the Past and the Past is Always Present.
    // ============================================================
    ```
-3. **Design bible is canon** for gameplay numbers (`docs\game-design-bible.txt`); whitepaper is canon for lore/systems flavor (`docs\white-paper-3.1.0-extracted.txt`).
-4. Scene names are string-coupled: `GameBootstrap.firstLevelScene` ↔ `CorruptedWard.unity`. Renames require touching both + EditorBuildSettings.
+   (Use `#` for Python files.)
+3. **Deterministic tables are canon** for gameplay numbers (hub XP/DC/rune/adjustment tables, never LLM memory); lore/systems flavor follows `docs\WHITEPAPER_ARCHITECTURE_v1.md`.
 
 ---
 
@@ -66,16 +66,10 @@ Do not install software, modify system settings, or write to new locations outsi
 
 | Law | Rule |
 |-----|------|
-| Batchmode generation | ALWAYS use the delayCall pattern (`*Headless` entries): NO `-quit` flag, `EditorApplication.delayCall` + `AssetDatabase.Refresh()`, self `Exit(0)`. Otherwise prefabs save broken `m_Script:{fileID:0}` refs. |
-| Art pass ordering | ANY `SceneBuilder.BuildAllHeadless` run resets materials → rerun `ArtPassBuilder.ArtPassHeadless` BEFORE building APK/exe. |
-| Input handling | `activeInputHandler` stays `2` (Both). Never -1. New input code goes through `SNInput`, never raw `Input.` in gameplay scripts. |
 | Long builds | Launch DETACHED (no `-Wait`) and poll logs — tool timeouts kill child processes. `Start-Process` on `.bat` may throw a cosmetic harness error; poll logs, don't trust it. |
-| Cross-enemy AI | Use `BaseEnemy.AlertChase()`; `TransitionTo` is protected. |
-| NavMesh | Namespace is `Unity.AI.Navigation` (not UnityEngine.AI) for `NavMeshSurface`. |
-| Random | In files with `using System`, qualify `UnityEngine.Random`. |
-| BuildTarget | Windows target enum = `BuildTarget.StandaloneWindows64`. Verify API names against package sources, not memory. |
-| CompanionApp | Generated BuildConfig ns = `com.wastelandscrolls`; palette lives in `ui/theme/Color.kt`; build via user's env (`local.properties` → `C:\android\sdk`, cached Gradle 9.3.1). |
-| Starter WAD | Ships NODES-less; ZDaemon auto-builds, else resave from UDB once. |
+| Native builds | Build via user's env (`local.properties` → `C:\android\sdk`, cached Gradle dists, Temurin JDK 17 in temp). Android Studio's bundled JBR is stripped (no working `java.exe`) — never point `JAVA_HOME` at it. |
+| API names | Verify API/artifact names against package sources, not memory (`io.requery:sqlite-android` does not exist on Central; the maintained fork is `mil.nga:sqlite-android`). |
+| SQLite platform gap | Android's platform SQLite has no FTS5 — offline rules search must go through an FTS5-capable driver (Spoke: `sqlite3_flutter_libs`; native: NGA bindings), never the platform default. |
 
 ---
 
@@ -117,12 +111,13 @@ Big dreams go into blueprint sections with phased plans first. Ship vertical sli
 
 ### 5.3 Python Hub Conventions
 - FastAPI + `uvicorn` for serving.
-- Ollama client for local LLM calls (fully local, no cloud fallback).
-- SQLite for campaign state; Chroma/Qdrant for vector RAG.
-- All hub code under `hub/` — keep it separate from Flutter.
+- 3-tier LLM fallback, in order: DeepSeek cloud (only when `PFGOD_DEEPSEEK_API_KEY` is set) → local Ollama → raw FTS5 excerpts (always works, no LLM).
+- SQLite for campaign state; SQLite FTS5 (`data/pathfinder_rag.db`) for rules RAG. No vector store — do not add Chroma/Qdrant without a blueprint gate.
+- All hub code under `hub/` — keep it separate from the spokes.
+- New endpoints must not be shadowed by earlier-registered routes (FastAPI matches in order — see the `/generate/loot` vs `/{kind}` outage).
 
 ### 5.4 Flutter Spoke Conventions
-- Clean Architecture: `lib/api/`, `lib/screens/`, `lib/storage/`, `lib/theme/`, `lib/config/`, `lib/models/`.
+- State via Provider + ChangeNotifier (`CombatStore` injected at the root); screens organized `lib/api/`, `lib/screens/`, `lib/storage/`, `lib/theme/`, `lib/config/`, `lib/models/`.
 - Riverpod/Provider-free: manual DI via constructors (see `main.dart`).
 - WebSocket streaming for live GM chat (`/stream` endpoint).
 - Theme: `PathfinderTheme` (gold/crimson/parchment palette).
