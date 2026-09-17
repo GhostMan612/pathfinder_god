@@ -1,8 +1,11 @@
+<!-- As Above, So Below. As Within, So Without. The Future Dictates the Past and the Past is Always Present. -->
 # Pathfinder God — Kotlin/AGDK Port Specification (Muse Spark 1.3)
 
 Target: rewrite the Flutter Spoke (`spoke/lib`, 39 files) as a 100% native
-Kotlin Android app (package `com.pathfindergod`, label "Pathfinder God"),
-Jetpack Compose UI, AGDK-ready native layer for future game-loop rendering.
+Kotlin Android app (package `com.pathfindergod`, label "Pathfinder God")
+with a pure 2D Jetpack Compose UI — the terminal architecture (no Unity,
+no Godot, no native render surface). AGDK libraries (Oboe, frame-pacing)
+are used only where they serve the 2D UI.
 The Python Hub is untouched; `shared/openapi.yaml` plus the existing REST/WS
 shapes remain the wire contract.
 
@@ -132,34 +135,30 @@ acceptable; keep separate DBs only if migration risk demands it.
 - Offline tiers preserved: bundled FTS5 → hub → miss queue → on-demand
   scrape; `GET /rules/fetch` results upserted locally.
 
-## 4. AGDK Integration (future game-loop hooks)
+## 4. Native Performance (AGDK libraries, no engine)
 
-No engine today — this section reserves the seams so a Godot/Unity C++
-module drops in without rewriting the app:
+Terminal decision: the UI is pure 2D Jetpack Compose. No Unity, no Godot,
+no native render surface, no JNI bridge skeleton — earlier drafts reserved
+a `GodotBridge.kt` seam and a Vulkan/Filament dice pilot; both are deleted
+from the plan. `MainActivity` stays a standard Compose
+`ComponentActivity` (not `GameActivity` — there is no surface to host).
+What survives from AGDK is libraries only, applied to the 2D UI:
 
-- Ship `GameActivity` (`com.google.androidgamesdk.GameActivity`) as the
-  `MainActivity` base now (static `android.app.NativeActivity` meta-data
-  off); render the Compose UI on top until a surface is needed. Keeps
-  `android:configChanges` and immersive-sticky behavior identical.
-- `native-lib` module skeleton: `externalNativeBuild` (CMake), one JNI
-  bridge `GodotBridge.kt` (`external fun rollDiceVisual(seed: Long)`),
-  `System.loadLibrary("godot_bridge")` guarded by `try/catch` so the app
-  runs fully without the `.so` present.
 - Audio: migrate dice SFX to **Oboe** (`AAudio`, low-latency stream,
   `PerformanceMode::LowLatency`) reusing the pooled-player design
   (4 voices) and the existing CC0/CC-BY asset set; BGM stays on
   `MediaPlayer` loop.
-- Dice 3D first: port `dice_physics.dart` tumble curves to a Vulkan
-  swapchain scene or Filament `ModelViewer` as the pilot native surface
-  (deterministic result stays in Kotlin; native layer is presentation
-  only). Frame pacing via **Swappy**, perf telemetry via **Tuning Fork**
-  from day one of native rendering.
-- Input: **Paddleboat** game-controller mapping reserved for tabletop
-  remote mode; `games-frame-pacing` + `games-performance-tuner` AARs via
-  the AGDK libraries bill of materials.
+- Dice motion: port the `dice_physics.dart` tumble curves to Compose
+  `Animatable`/`Transition` canvas drawing (deterministic result stays
+  in Kotlin; presentation only) — no 3D scene, no swapchain.
+- Jank telemetry: **Tuning Fork** + `games-frame-pacing` AARs stay on the
+  BOM for frame-time histograms around the Compose dice/map canvases.
 
 ## 5. Build, Test, Rollout
 
+- UI architecture (locked): pure 2D Jetpack Compose is terminal. No
+  Unity/Godot integration at any milestone — §§4–5 describe libraries,
+  ViewModels, and Compose screens only.
 - Modules: `:app` only (single-module scaffold, as built). Pinned as-built:
   AGP 9.0.1 (built-in Kotlin — no `kotlin.android` plugin, no kapt),
   KSP 2.3.4 + Room 2.7.0 (2.6.1's processor crashes on new Kotlin),
@@ -177,7 +176,8 @@ module drops in without rewriting the app:
 - Rollout (strangler, contract-first): milestones M1 data+network
   (Room + Retrofit + discovery, behind the Flutter app via shared hub),
   M2 screens in Navigation order (Dice → Combat → Sheet → Rulebook →
-  Map → Settings), M3 native audio/dice pilot, M4 AGDK surface option.
+  Map → Settings), M3 Oboe audio pilot + Compose dice-motion port,
+  M4 Compose performance hardening (jank telemetry, baseline profiles).
   Acceptance per milestone: `connectedAndroidTest` green, hub
   `pytest` untouched, wire payloads byte-identical to `openapi.yaml`.
 - Risks: platform SQLite without FTS5 (§2 — mitigated by the NGA

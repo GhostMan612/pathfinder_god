@@ -96,6 +96,7 @@ git clone https://github.com/GhostMan612/pathfinder_god.git
 ## Status
 
 Hub/Spoke decoupling complete: the hub owns every micro-agent behind `shared/openapi.yaml` (26 paths), and the native `spoke_kt/` scaffold compiles (`assembleDebug` green) as the future Compose spoke.
+Terminal UI decision: pure 2D Jetpack Compose — no Unity/Godot, no native render surface.
 Current: `flutter analyze`: clean · `flutter test`: 53/53 · hub `pytest hub/tests/`: 107/107.
 History: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 
