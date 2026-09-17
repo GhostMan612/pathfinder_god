@@ -209,6 +209,20 @@ Future<List<RuleHit>> searchRules(
     return RuleHit.fromJson(jsonDecode(resp.body) as Map<String, dynamic>);
   }
 
+  /// Summarize raw session events into a campaign journal entry.
+  Future<String> summarizeSession(
+      List<String> events, String campaignName) async {
+    final resp = await _withTimeout(_http.post(
+      config.httpUri('/campaign/summarize-session'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'events': events, 'campaign_name': campaignName}),
+    ));
+    _ensureOk(resp);
+    return (jsonDecode(resp.body) as Map<String, dynamic>)['summary']
+            as String? ??
+        '';
+  }
+
   /// Drain the offline miss queue into the hub's backfill list.
   /// Returns the number the hub accepted.
   Future<int> reportMisses(List<Map<String, String>> queries) async {

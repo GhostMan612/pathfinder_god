@@ -13,10 +13,13 @@ from datetime import datetime
 
 from app.api.deps import get_repo
 from app.db.repository import CampaignRepository
-from app.agents.continuity import ContinuityKeeper
+from app.agents.continuity import ContinuityKeeper, ContinuityAgent
 from app.llm.orchestrator import LLMOrchestrator
+from app.llm.ollama_client import OllamaClient
+from app.config import get_settings
 from app.api.security import get_audit_logger, get_current_user, require_auth, get_client_ip, AuditLogger
 
+import json
 import logging
 logger = logging.getLogger(__name__)
 
@@ -68,7 +71,20 @@ class CampaignImport(BaseModel):
     items: Optional[list[dict]] = None
     quests: Optional[list[dict]] = None
     party_members: Optional[list[dict]] = None
+    sessions: Optional[list[dict]] = None
+    notes: Optional[list[dict]] = None
+    decisions: Optional[list[dict]] = None
     replace_existing: bool = True
+
+
+class SummarizeSessionRequest(BaseModel):
+    events: list[str] = Field(default_factory=list)
+    campaign_name: str = "Untitled Campaign"
+
+
+class SummarizeSessionResponse(BaseModel):
+    summary: str
+    event_count: int
 
 
 # ──────────────────────────────────────────────────────────────
@@ -150,6 +166,26 @@ async def reset_campaign(
     repo.get_or_create_campaign(campaign_id)
     state = repo.get_campaign_state(campaign_id)
     return CampaignStateResponse(**state)
+
+
+# ──────────────────────────────────────────────────────────────
+# Session Summarization — Campaign Journal
+# ──────────────────────────────────────────────────────────────
+
+@router.post("/summarize-session", response_model=SummarizeSessionResponse)
+async def summarize_session(request: SummarizeSessionRequest) -> SummarizeSessionResponse:
+    """Turn raw session events into an atmospheric journal entry."""
+    clean = [e.strip() for e in request.events if e and e.strip()]
+    if not clean:
+        raise HTTPException(status_code=400, detail="No events to summarize")
+    settings = get_settings()
+    llm = OllamaClient(settings.ollama_host)
+    agent = ContinuityAgent(llm)
+    try:
+        journal = await agent.summarize_session(clean, request.campaign_name)
+    finally:
+        await llm.close()
+    return SummarizeSessionResponse(summary=journal.summary, event_count=journal.event_count)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -275,7 +311,56 @@ async def import_campaign(
                 conn.execute("DELETE FROM party_members WHERE campaign_id = ?", (campaign_id,))
         for member in import_data.party_members:
             repo.upsert_party_member(campaign_id=campaign_id, **member)
-    
+
+    if import_data.sessions:
+        if import_data.replace_existing:
+            with repo._conn() as conn:
+                conn.execute("DELETE FROM sessions WHERE campaign_id = ?", (campaign_id,))
+        for session in import_data.sessions:
+            raw_facts = session.get("facts", session.get("facts_json", []))
+            if isinstance(raw_facts, str):
+                try:
+                    raw_facts = json.loads(raw_facts)
+                except ValueError:
+                    raw_facts = []
+            repo.save_session(
+                campaign_id=campaign_id,
+                session_num=int(session.get("session_num", 1)),
+                summary=session.get("summary", ""),
+                facts=raw_facts if isinstance(raw_facts, list) else [],
+                raw_log=session.get("raw_log", ""),
+            )
+
+    if import_data.notes:
+        if import_data.replace_existing:
+            with repo._conn() as conn:
+                conn.execute("DELETE FROM session_notes WHERE campaign_id = ?", (campaign_id,))
+        for note in import_data.notes:
+            with repo._conn() as conn:
+                conn.execute(
+                    "INSERT INTO session_notes (campaign_id, session_num, note_type, content) VALUES (?, ?, ?, ?)",
+                    (
+                        campaign_id,
+                        int(note.get("session_num", 1)),
+                        note.get("note_type", "gm"),
+                        note.get("content", ""),
+                    ),
+                )
+
+    if import_data.decisions:
+        if import_data.replace_existing:
+            with repo._conn() as conn:
+                conn.execute("DELETE FROM player_decisions WHERE campaign_id = ?", (campaign_id,))
+        for decision in import_data.decisions:
+            repo.add_decision(
+                campaign_id=campaign_id,
+                session_num=int(decision.get("session_num", 1)),
+                decision=decision.get("decision", ""),
+                context=decision.get("context"),
+                consequences=decision.get("consequences"),
+                made_by=decision.get("made_by", "party"),
+            )
+
     audit_logger.log_data_access(
         user_id=user.get("sub", "unknown"),
         resource="campaign",

@@ -6,7 +6,9 @@
 import 'package:flutter/material.dart';
 
 import '../api/hub_client.dart';
+import '../storage/campaign_store.dart' as campaign_storage;
 import '../storage/character_store.dart';
+import 'campaign_screen.dart';
 import 'character_list_screen.dart';
 import 'combat_tracker_screen.dart';
 import 'dice_screen.dart';
@@ -36,6 +38,7 @@ class _HomeScreenState extends State<HomeScreen> {
   int _index = 0;
   late final CombatStore _combatStore;
   late final bool _ownsCombatStore;
+  late final campaign_storage.CampaignStore _campaigns;
   late final List<Widget> _screens;
 
   @override
@@ -43,6 +46,7 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _combatStore = widget.combatStore ?? CombatStore(widget.client);
     _ownsCombatStore = widget.combatStore == null;
+    _campaigns = campaign_storage.CampaignStore();
     // Built once so each tab keeps its state (dice history, chat) across switches.
     _screens = [
       const DiceScreen(),
@@ -52,6 +56,11 @@ class _HomeScreenState extends State<HomeScreen> {
       CombatTrackerScreen(client: widget.client, store: _combatStore),
       EncounterBuilderScreen(client: widget.client, store: _combatStore),
       MapMakerScreen(client: widget.client),
+      CampaignScreen(
+        client: widget.client,
+        combatStore: _combatStore,
+        store: _campaigns,
+      ),
       SettingsScreen(client: widget.client, characters: widget.characters),
     ];
   }
@@ -77,6 +86,7 @@ class _HomeScreenState extends State<HomeScreen> {
           NavigationDestination(icon: Icon(Icons.auto_fix_high_outlined), selectedIcon: Icon(Icons.auto_fix_high), label: 'Combat'),
           NavigationDestination(icon: Icon(Icons.auto_fix_high_outlined), selectedIcon: Icon(Icons.auto_fix_high), label: 'Encounter'),
           NavigationDestination(icon: Icon(Icons.map_outlined), selectedIcon: Icon(Icons.map), label: 'Map'),
+          NavigationDestination(icon: Icon(Icons.campaign_outlined), selectedIcon: Icon(Icons.campaign), label: 'Campaign'),
           NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'Setup'),
         ],
       ),

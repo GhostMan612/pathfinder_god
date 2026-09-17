@@ -23,6 +23,8 @@ from typing import Any
 
 from app.db.repository import CampaignRepository
 from app.llm.orchestrator import LLMOrchestrator
+from app.llm.ollama_client import OllamaClient
+from app.config import get_settings
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -271,3 +273,44 @@ class ContinuityKeeper:
             "entities": entities,
             "facts": session.facts,
         }
+
+
+CHRONICLER_SYSTEM = "You are a chronicler recording a Pathfinder campaign journal. Write a concise, atmospheric 2-paragraph summary of these events."
+
+
+@dataclass
+class SessionJournal:
+    campaign_name: str
+    summary: str
+    event_count: int
+
+
+class ContinuityAgent:
+    def __init__(self, llm: OllamaClient):
+        self._llm = llm
+        self._settings = get_settings()
+
+    async def summarize_session(
+        self, events: list[str], campaign_name: str
+    ) -> SessionJournal:
+        clean = [e.strip() for e in events if e and e.strip()]
+        if not clean:
+            return SessionJournal(campaign_name=campaign_name, summary="", event_count=0)
+        log = "\n".join(f"- {e}" for e in clean)
+        try:
+            summary = await self._llm.generate(
+                prompt=f"{CHRONICLER_SYSTEM}\n\nCampaign: {campaign_name}\n\nEvents:\n{log}",
+                model=self._settings.ollama_model,
+                temperature=0.4,
+                num_predict=400,
+            )
+        except Exception as e:
+            logger.warning(f"ContinuityAgent summarization failed: {e}")
+            return SessionJournal(
+                campaign_name=campaign_name, summary="", event_count=len(clean)
+            )
+        return SessionJournal(
+            campaign_name=campaign_name,
+            summary=summary.strip(),
+            event_count=len(clean),
+        )
