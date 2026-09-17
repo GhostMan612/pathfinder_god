@@ -58,7 +58,7 @@ python -m app.main        # starts on :8000 (uses C:\venv-hub)
 ## Architecture Notes
 - **Hub-Spoke**: Hub (laptop) does LLM + RAG + 500MB rules DB. Spoke (phone) is thin client: dice, sheet, chat, rules browser.
 - **API Contract**: `shared/openapi.yaml` v0.1.0 — both sides build against this.
-- **3-Tier Fallback**: DeepSeek (cloud) → Ollama (local) → Raw FTS5 excerpts (always works)
+- **Local-Only Fallback**: Ollama (local) → Raw FTS5 excerpts (always works). No cloud tiers.
 - **Rules DB**: FTS5 in `data/pathfinder_rag.db` (gitignored). Rebuild via `hub/scripts/rebuild_rags.py`
 
 ## Current State

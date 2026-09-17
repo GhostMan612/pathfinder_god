@@ -116,10 +116,10 @@ def test_generate_invalid_kind_returns_400(client):
     assert r.status_code == 400
 
 
-def test_ask_deepseek_disabled_by_default(client):
+def test_ask_local_only_backend(client):
     r = client.post("/ask", json={"query": "test", "edition": "2e"})
     assert r.status_code == 200
-    assert r.json()["backend"] == "ollama"
+    assert r.json()["backend"] in ("ollama", "raw-excerpts")
 
 
 # --- Authenticated endpoints (require API key) ---
@@ -187,10 +187,10 @@ def test_ask_with_history(authenticated_client):
     assert "answer" in r.json()
 
 
-def test_ask_deepseek_disabled_by_default(authenticated_client):
+def test_ask_local_only_backend(authenticated_client):
     r = authenticated_client.post("/ask", json={"query": "test", "edition": "2e"})
     assert r.status_code == 200
-    assert r.json()["backend"] == "ollama"
+    assert r.json()["backend"] in ("ollama", "raw-excerpts")
 
 
 def test_generate_invalid_kind_returns_400(authenticated_client):

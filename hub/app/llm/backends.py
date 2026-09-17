@@ -2,14 +2,12 @@
 # As Above, So Below. As Within, So Without.
 # The Future Dictates the Past and the Past is Always Present.
 # ============================================================
-"""LLM backends with the same 3-tier fallback the original scripts used.
+"""LLM backends with a local-only 2-tier fallback.
 
-Order of preference (from ``gm_termux_combined.py``):
+Order of preference:
 
-1. **DeepSeek API** — only when ``PFGOD_DEEPSEEK_API_KEY`` is set. Best for the
-   long biographies/backstories the tiny local model struggles with.
-2. **Local Ollama** — the laptop's CPU-friendly model (``phi4-mini`` by default).
-3. **Raw rule excerpts** — no LLM at all; hand back the retrieved rules so the
+1. **Local Ollama** — the laptop's CPU-friendly model (``phi4-mini`` by default).
+2. **Raw rule excerpts** — no LLM at all; hand back the retrieved rules so the
    user *always* gets a useful answer, even fully offline with Ollama stopped.
 
 Everything is async (``httpx``) so the FastAPI hub can stream tokens to the
@@ -31,15 +29,15 @@ class LLMResult:
     """The outcome of a generation, tagged with which backend produced it."""
 
     text: str
-    backend: str  # "deepseek" | "ollama" | "raw-excerpts"
+    backend: str  # "ollama" | "raw-excerpts"
 
 
 def _raw_excerpts(hits: list[RuleHit]) -> str:
-    """Format retrieved rules as a readable, LLM-free answer (tier 3)."""
+    """Format retrieved rules as a readable, LLM-free answer (tier 2)."""
     if not hits:
         return (
             "No local rules matched and no LLM is available. Try rephrasing, or "
-            "start Ollama / set a DeepSeek API key on the hub."
+            "start Ollama on the hub."
         )
     lines = ["(No LLM available — here are the most relevant rule excerpts.)", ""]
     for i, h in enumerate(hits, 1):
@@ -56,7 +54,7 @@ def _raw_excerpts(hits: list[RuleHit]) -> str:
 
 
 class LLMRouter:
-    """Routes a prompt through the 3-tier fallback, streaming or buffered."""
+    """Routes a prompt through the local-only fallback, streaming or buffered."""
 
     def __init__(self, settings: Settings) -> None:
         self._s = settings
@@ -71,11 +69,6 @@ class LLMRouter:
         hits: list[RuleHit] | None = None,
     ) -> LLMResult:
         """Return a full answer, walking the fallback chain until one works."""
-        if self._s.deepseek_api_key:
-            text = await self._deepseek(prompt, system)
-            if text is not None:
-                return LLMResult(text=text, backend="deepseek")
-
         text = await self._ollama(prompt, system)
         if text is not None:
             return LLMResult(text=text, backend="ollama")
@@ -95,14 +88,6 @@ class LLMRouter:
 
         The first tuple's ``backend`` tells the client which tier answered.
         """
-        if self._s.deepseek_api_key:
-            got_any = False
-            async for chunk in self._deepseek_stream(prompt, system):
-                got_any = True
-                yield ("deepseek", chunk)
-            if got_any:
-                return
-
         got_any = False
         async for chunk in self._ollama_stream(prompt, system):
             got_any = True
@@ -111,60 +96,6 @@ class LLMRouter:
             return
 
         yield ("raw-excerpts", _raw_excerpts(hits or []))
-
-    # -- DeepSeek ----------------------------------------------------------
-
-    def _deepseek_payload(self, prompt: str, system: str, stream: bool) -> dict:
-        return {
-            "model": self._s.deepseek_model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": self._s.ollama_temperature,
-            "max_tokens": self._s.ollama_num_predict,
-            "stream": stream,
-        }
-
-    async def _deepseek(self, prompt: str, system: str) -> str | None:
-        url = f"{self._s.deepseek_base_url}/chat/completions"
-        headers = {"Authorization": f"Bearer {self._s.deepseek_api_key}"}
-        try:
-            async with httpx.AsyncClient(timeout=self._s.deepseek_timeout_s) as client:
-                resp = await client.post(url, headers=headers, json=self._deepseek_payload(prompt, system, False))
-            if resp.status_code == 200:
-                return resp.json()["choices"][0]["message"]["content"]
-            print(f"[DeepSeek] HTTP {resp.status_code}: {resp.text[:120]}")
-        except Exception as exc:  # noqa: BLE001 - degrade to next tier
-            print(f"[DeepSeek] error: {exc}")
-        return None
-
-    async def _deepseek_stream(self, prompt: str, system: str) -> AsyncIterator[str]:
-        import json
-
-        url = f"{self._s.deepseek_base_url}/chat/completions"
-        headers = {"Authorization": f"Bearer {self._s.deepseek_api_key}"}
-        try:
-            async with httpx.AsyncClient(timeout=self._s.deepseek_timeout_s) as client:
-                async with client.stream("POST", url, headers=headers, json=self._deepseek_payload(prompt, system, True)) as resp:
-                    if resp.status_code != 200:
-                        await resp.aread()
-                        print(f"[DeepSeek] stream HTTP {resp.status_code}")
-                        return
-                    async for line in resp.aiter_lines():
-                        if not line or not line.startswith("data:"):
-                            continue
-                        data = line[len("data:"):].strip()
-                        if data == "[DONE]":
-                            break
-                        try:
-                            delta = json.loads(data)["choices"][0]["delta"].get("content")
-                        except (json.JSONDecodeError, KeyError, IndexError):
-                            continue
-                        if delta:
-                            yield delta
-        except Exception as exc:  # noqa: BLE001
-            print(f"[DeepSeek] stream error: {exc}")
 
     # -- Ollama ------------------------------------------------------------
 

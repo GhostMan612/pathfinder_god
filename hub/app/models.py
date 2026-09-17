@@ -23,7 +23,6 @@ class HealthResponse(BaseModel):
     status: Literal["ok"] = "ok"
     version: str
     ollama_model: str
-    deepseek_enabled: bool
     databases_found: list[str] = Field(default_factory=list)
 
 
@@ -49,7 +48,7 @@ class RuleHitModel(BaseModel):
 
 class AskResponse(BaseModel):
     answer: str
-    backend: Literal["deepseek", "ollama", "raw-excerpts"]
+    backend: Literal["ollama", "raw-excerpts"]
     mode: str
     edition: str
     sources: list[RuleHitModel] = Field(default_factory=list)

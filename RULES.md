@@ -111,7 +111,7 @@ Big dreams go into blueprint sections with phased plans first. Ship vertical sli
 
 ### 5.3 Python Hub Conventions
 - FastAPI + `uvicorn` for serving.
-- 3-tier LLM fallback, in order: DeepSeek cloud (only when `PFGOD_DEEPSEEK_API_KEY` is set) → local Ollama → raw FTS5 excerpts (always works, no LLM).
+- Local-only 2-tier LLM fallback, in order: local Ollama → raw FTS5 excerpts (always works, no LLM). No cloud tiers — no API keys leave the laptop.
 - SQLite for campaign state; SQLite FTS5 (`data/pathfinder_rag.db`) for rules RAG. No vector store — do not add Chroma/Qdrant without a blueprint gate.
 - All hub code under `hub/` — keep it separate from the spokes.
 - New endpoints must not be shadowed by earlier-registered routes (FastAPI matches in order — see the `/generate/loot` vs `/{kind}` outage).
