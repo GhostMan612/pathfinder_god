@@ -15,6 +15,7 @@ import android.os.Binder
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import com.pathfindergod.spoke.data.local.NetworkPreferences
 import com.pathfindergod.spoke.data.network.HubWebSocketClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -71,7 +72,8 @@ class HubForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_CONNECT -> {
-                streamUrl = intent.getStringExtra(EXTRA_URL) ?: DEFAULT_STREAM_URL
+                streamUrl = intent.getStringExtra(EXTRA_URL)
+                    ?: NetworkPreferences(this).streamUrl()
                 maintainLink()
             }
             ACTION_DISCONNECT -> dropLink()

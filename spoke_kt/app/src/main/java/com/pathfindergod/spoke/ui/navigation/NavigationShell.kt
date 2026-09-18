@@ -32,6 +32,7 @@ import com.pathfindergod.spoke.ui.character.CharacterListScreen
 import com.pathfindergod.spoke.ui.character.rememberCharacterViewModel
 import com.pathfindergod.spoke.ui.combat.CombatTrackerScreen
 import com.pathfindergod.spoke.ui.dice.DiceScreen
+import com.pathfindergod.spoke.ui.settings.SettingsScreen
 import com.pathfindergod.spoke.ui.theme.GoldAccent
 import com.pathfindergod.spoke.ui.theme.TextPrimary
 import com.pathfindergod.spoke.ui.theme.TextSecondary
@@ -79,6 +80,7 @@ fun NavigationShell() {
             when (items[selected]) {
                 NavigationItem.DICE -> DiceScreen()
                 NavigationItem.COMBAT -> CombatTrackerScreen()
+                NavigationItem.SETUP -> SettingsScreen()
                 NavigationItem.HERO -> {
                     val heroVm = rememberCharacterViewModel()
                     val heroState by heroVm.state.collectAsStateWithLifecycle()

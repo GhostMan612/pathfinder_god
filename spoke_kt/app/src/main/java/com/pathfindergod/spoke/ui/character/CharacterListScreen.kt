@@ -34,6 +34,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.pathfindergod.spoke.data.local.AppDatabase
 import com.pathfindergod.spoke.data.local.CharacterEntity
+import com.pathfindergod.spoke.data.local.NetworkPreferences
 import com.pathfindergod.spoke.data.network.HubApi
 import com.pathfindergod.spoke.data.repository.CharacterRepository
 import com.pathfindergod.spoke.ui.theme.CritRed
@@ -55,10 +56,10 @@ private class CharacterVmFactory(
         CharacterViewModel(repository) as T
 }
 
-private fun buildHubApi(): HubApi {
+private fun buildHubApi(baseUrl: String): HubApi {
     val json = Json { ignoreUnknownKeys = true }
     return Retrofit.Builder()
-        .baseUrl("http://10.0.2.2:8000/")
+        .baseUrl(baseUrl)
         .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
         .build()
         .create(HubApi::class.java)
@@ -67,10 +68,11 @@ private fun buildHubApi(): HubApi {
 @Composable
 internal fun rememberCharacterViewModel(): CharacterViewModel {
     val context = LocalContext.current
+    val prefs = remember { NetworkPreferences(context) }
     val repository = remember {
         CharacterRepository(
             AppDatabase.create(context.applicationContext),
-            buildHubApi(),
+            buildHubApi(prefs.restUrl()),
         )
     }
     return viewModel(factory = remember { CharacterVmFactory(repository) })
