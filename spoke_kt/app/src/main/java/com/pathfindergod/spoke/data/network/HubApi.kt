@@ -65,6 +65,15 @@ data class GenerateResponse(
 )
 
 @Serializable
+data class MapGenerateResponse(
+    val valid: Boolean = false,
+    @SerialName("gm_base64_png") val gmBase64Png: String = "",
+    @SerialName("player_base64_png") val playerBase64Png: String = "",
+    val width: Int = 0,
+    val height: Int = 0,
+)
+
+@Serializable
 data class LootResponse(
     val valid: Boolean,
     val item: Map<String, JsonElement>? = null,
@@ -83,7 +92,7 @@ interface HubApi {
     suspend fun generateLoot(@Body request: GenerateRequest): LootResponse
 
     @POST("generate/map")
-    suspend fun generateMap(@Body request: GenerateRequest): GenerateResponse
+    suspend fun generateMap(@Body request: GenerateRequest): MapGenerateResponse
 
     @POST("generate/character")
     suspend fun generateCharacter(@Body request: GenerateRequest): GenerateResponse

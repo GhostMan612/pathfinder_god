@@ -20,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -32,6 +33,9 @@ import com.pathfindergod.spoke.ui.character.CharacterListScreen
 import com.pathfindergod.spoke.ui.character.rememberCharacterViewModel
 import com.pathfindergod.spoke.ui.combat.CombatTrackerScreen
 import com.pathfindergod.spoke.ui.dice.DiceScreen
+import com.pathfindergod.spoke.ui.map.MapListScreen
+import com.pathfindergod.spoke.ui.map.MapViewerScreen
+import com.pathfindergod.spoke.ui.map.rememberMapViewModel
 import com.pathfindergod.spoke.ui.settings.SettingsScreen
 import com.pathfindergod.spoke.ui.theme.GoldAccent
 import com.pathfindergod.spoke.ui.theme.TextPrimary
@@ -43,6 +47,7 @@ import com.pathfindergod.spoke.ui.theme.rpgPanel
 fun NavigationShell() {
     var selected by rememberSaveable { mutableIntStateOf(0) }
     var detailId by rememberSaveable { mutableLongStateOf(-1L) }
+    var mapId by rememberSaveable { mutableStateOf<String?>(null) }
     val items = NavigationItem.entries
     Scaffold(
         containerColor = VoidBackground,
@@ -54,6 +59,9 @@ fun NavigationShell() {
                         onClick = {
                             if (index == selected && items[index] == NavigationItem.HERO) {
                                 detailId = -1L
+                            }
+                            if (index == selected && items[index] == NavigationItem.MAP) {
+                                mapId = null
                             }
                             selected = index
                         },
@@ -80,6 +88,23 @@ fun NavigationShell() {
             when (items[selected]) {
                 NavigationItem.DICE -> DiceScreen()
                 NavigationItem.COMBAT -> CombatTrackerScreen()
+                NavigationItem.MAP -> {
+                    val mapVm = rememberMapViewModel()
+                    val mapState by mapVm.state.collectAsStateWithLifecycle()
+                    val selected = mapState.maps.firstOrNull { it.id == mapId }
+                    if (mapId == null || selected == null) {
+                        MapListScreen(
+                            viewModel = mapVm,
+                            onSelect = { mapId = it },
+                        )
+                    } else {
+                        MapViewerScreen(
+                            mapId = selected.id,
+                            viewModel = mapVm,
+                            onBack = { mapId = null },
+                        )
+                    }
+                }
                 NavigationItem.SETUP -> SettingsScreen()
                 NavigationItem.HERO -> {
                     val heroVm = rememberCharacterViewModel()

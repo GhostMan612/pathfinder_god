@@ -43,10 +43,7 @@ import com.pathfindergod.spoke.ui.theme.TextPrimary
 import com.pathfindergod.spoke.ui.theme.TextSecondary
 import com.pathfindergod.spoke.ui.theme.rpgPanel
 import com.pathfindergod.spoke.ui.viewmodel.CharacterViewModel
-import kotlinx.serialization.json.Json
-import okhttp3.MediaType.Companion.toMediaType
-import retrofit2.Retrofit
-import retrofit2.converter.kotlinx.serialization.asConverterFactory
+import com.pathfindergod.spoke.data.network.HubApiFactory
 
 private class CharacterVmFactory(
     private val repository: CharacterRepository,
@@ -56,14 +53,7 @@ private class CharacterVmFactory(
         CharacterViewModel(repository) as T
 }
 
-private fun buildHubApi(baseUrl: String): HubApi {
-    val json = Json { ignoreUnknownKeys = true }
-    return Retrofit.Builder()
-        .baseUrl(baseUrl)
-        .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
-        .build()
-        .create(HubApi::class.java)
-}
+private fun buildHubApi(baseUrl: String): HubApi = HubApiFactory.create(baseUrl)
 
 @Composable
 internal fun rememberCharacterViewModel(): CharacterViewModel {
