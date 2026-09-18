@@ -38,6 +38,7 @@ import com.pathfindergod.spoke.ui.dice.DiceScreen
 import com.pathfindergod.spoke.ui.map.MapListScreen
 import com.pathfindergod.spoke.ui.map.MapViewerScreen
 import com.pathfindergod.spoke.ui.map.rememberMapViewModel
+import com.pathfindergod.spoke.ui.rules.RuleSearchScreen
 import com.pathfindergod.spoke.ui.settings.SettingsScreen
 import com.pathfindergod.spoke.ui.theme.GoldAccent
 import com.pathfindergod.spoke.ui.theme.TextPrimary
@@ -89,6 +90,7 @@ fun NavigationShell() {
         ) {
             when (items[selected]) {
                 NavigationItem.DICE -> DiceScreen()
+                NavigationItem.RULES -> RuleSearchScreen()
                 NavigationItem.COMBAT -> CombatTrackerScreen()
                 NavigationItem.CAMPAIGN -> {
                     CampaignScreen(viewModel = rememberCampaignViewModel())
