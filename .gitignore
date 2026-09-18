@@ -10,6 +10,8 @@ data/*.sqlite3
 *.sqlite3
 # ...but DO keep the schema doc and any tiny test fixtures we ship on purpose
 !hub/tests/fixtures/*.db
+# ...and the device rulebook extract (Git LFS, ships inside the APK)
+!spoke_kt/app/src/main/assets/rules/pathfinder_rag.db
 
 # Secrets / local config
 .env

@@ -50,7 +50,7 @@ Do not install software, modify system settings, or write to new locations outsi
 ## 2. PROJECT CONVENTIONS (The Sovereign Directives)
 
 1. **Full code only** — no partial snippets, no TODO stubs.
-2. **No comments in code** — except the Genesis header every `.dart`/`.py`/`.kt` file must carry:
+2. **No comments in code** — except the Genesis header every `.py`/`.kt` file must carry:
    ```
    // ============================================================
    // As Above, So Below. As Within, So Without.
@@ -69,7 +69,7 @@ Do not install software, modify system settings, or write to new locations outsi
 | Long builds | Launch DETACHED (no `-Wait`) and poll logs — tool timeouts kill child processes. `Start-Process` on `.bat` may throw a cosmetic harness error; poll logs, don't trust it. |
 | Native builds | Build via user's env (`local.properties` → `C:\android\sdk`, cached Gradle dists, Temurin JDK 17 in temp). Android Studio's bundled JBR is stripped (no working `java.exe`) — never point `JAVA_HOME` at it. |
 | API names | Verify API/artifact names against package sources, not memory (`io.requery:sqlite-android` does not exist on Central; the maintained fork is `mil.nga:sqlite-android`). |
-| SQLite platform gap | Android's platform SQLite has no FTS5 — offline rules search must go through an FTS5-capable driver (Spoke: `sqlite3_flutter_libs`; native: NGA bindings), never the platform default. |
+| SQLite platform gap | Android's platform SQLite has no FTS5 — offline rules search must go through an FTS5-capable driver (native: NGA bindings via `NgaSQLiteOpenHelperFactory`), never the platform default. |
 
 ---
 
@@ -99,15 +99,14 @@ Big dreams go into blueprint sections with phased plans first. Ship vertical sli
 
 ### 5.1 Hub-Spoke Architecture
 - **Hub** (`hub/`) — Python FastAPI + Ollama + RAG service. Runs on laptop. Heavy lifting (LLM + retrieval).
-- **Spoke** (`spoke/`) — Flutter Android app. Thin client: dice, character sheet, chat, rules browser.
+- **Spoke** (`spoke_kt/`) — native Kotlin Android app (Jetpack Compose 2D). Owns ViewModels + rendering only: dice, roster, ladder, vaults, journal, oracle. No LLM, no rules logic beyond the bundled FTS5 read path.
 - **Contract** (`shared/openapi.yaml`) — Single source of truth for API. Both sides generate from this.
 
 ### 5.2 Data & Build Boundaries
-- **500MB+ rules DBs** live in `data/` on laptop ONLY. Git-ignored. Never committed. Never in APK.
-- **NEVER run full builds.** Do not execute `flutter build apk`, `flutter build appbundle`, `flutter run`, or any command that produces a compiled binary artifact. The human builds the app in Android Studio.
-- **Lane ends at source correctness:** `flutter pub get`, `flutter analyze`, `flutter test` (host-side) are permitted. Anything that emits an APK/AAB/binary is out of scope.
-- **Verification hand-off:** After scaffolding code, state what the human should expect when they press Run in Android Studio (e.g., "analyze clean, tests pass; first Gradle sync will download X"). If a build breaks on their side, debug from their pasted error output, never by rebuilding locally.
-- Commit messages must not claim build success — only analyze/test status.
+- **500MB+ rules DBs** live in `data/` on laptop ONLY. Git-ignored. Never committed — except the raw device extract at `spoke_kt/app/src/main/assets/rules/pathfinder_rag.db` (Git LFS), which ships inside the APK by design.
+- **Native lane verification is `./gradlew assembleDebug`** in `spoke_kt/` (Temurin 17 via `$env:JAVA_HOME`, always `--no-daemon` — daemons get reaped in this shell). It is required before any native commit.
+- **No release artifacts.** Never commit APKs/AABs. The human runs Install/Run in Android Studio; agents stop at a green debug compile.
+- **Verification hand-off:** After scaffolding code, state what the human should expect when they press Run in Android Studio (e.g., "assembleDebug green; first launch extracts the 20MB rulebook"). If a build breaks on their side, debug from their pasted error output, never by rebuilding release locally.
 
 ### 5.3 Python Hub Conventions
 - FastAPI + `uvicorn` for serving.
@@ -116,14 +115,15 @@ Big dreams go into blueprint sections with phased plans first. Ship vertical sli
 - All hub code under `hub/` — keep it separate from the spokes.
 - New endpoints must not be shadowed by earlier-registered routes (FastAPI matches in order — see the `/generate/loot` vs `/{kind}` outage).
 
-### 5.4 Flutter Spoke Conventions
-- State via Provider + ChangeNotifier (`CombatStore` injected at the root); screens organized `lib/api/`, `lib/screens/`, `lib/storage/`, `lib/theme/`, `lib/config/`, `lib/models/`.
-- Riverpod/Provider-free: manual DI via constructors (see `main.dart`).
-- WebSocket streaming for live GM chat (`/stream` endpoint).
-- Theme: `PathfinderTheme` (gold/crimson/parchment palette).
+### 5.4 Native Kotlin Spoke Conventions
+- State via `ViewModel` + `StateFlow`, observed with `collectAsStateWithLifecycle()`; screens organized `ui/<feature>/`, `ui/viewmodel/`, `ui/navigation/`, `ui/theme/`, `data/local/`, `data/network/`, `data/repository/`, `service/`.
+- No DI framework: manual constructor injection, screens self-supply ViewModels through `ViewModelProvider.Factory` helpers.
+- Retrofit endpoints and WS frames must match `shared/openapi.yaml` byte-for-byte. Hub at `http://10.0.2.2:8000` (emulator) or laptop LAN IP (device) — never `127.0.0.1:11450` (Ollama, laptop-only).
+- Theme: `PathfinderGodTheme` + `rpgPanel` (gold/crimson/parchment palette, serif display type).
+- Single `:app` module. AGP 9.0.1 built-in Kotlin (no `kotlin.android` plugin, no kapt), KSP 2.3.4 + Room 2.7.0, compile/target 34, min 26.
 
 ### 5.5 API Versioning
-- `shared/openapi.yaml` is the contract. Regenerate Dart models via `openapi-generator` if schema changes.
+- `shared/openapi.yaml` is the contract. Hand-write `@Serializable` Retrofit models in `HubApi.kt` if schema changes; regenerate the doc table in `docs/api.md` to match.
 - Backward-compatible additions only. Breaking changes = new versioned endpoint.
 
 ---

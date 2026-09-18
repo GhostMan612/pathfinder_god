@@ -86,7 +86,7 @@ acceptable; keep separate DBs only if migration risk demands it.
   upgrade; repeat only for cache tables, never for characters.
 - `EncounterEntity` — `id, theme, threat, monsters_json, target_xp,
   created_at`.
-- **Rules FTS5 — resolved as-built.** The app bundles `pathfinder_rag.db.gz`
+- **Rules FTS5 — resolved as-built.** The app bundles `pathfinder_rag.db` raw (a `.gz` name must not be used — AGP decompresses gzipped assets at build time and renames the entry, breaking the runtime open path)
   because `sqlite3_flutter_libs` ships FTS5, which AOSP SQLite lacks.
   Native side runs Room on `mil.nga:sqlite-android:3450200` (SQLite 3.45
   with FTS5) through the hand-rolled `NgaSQLiteOpenHelperFactory` bridge

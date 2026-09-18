@@ -83,7 +83,11 @@ browse models, search rules, run generators, roll dice, chat with the God, watch
 
 ## Cloning
 
+The native rulebook asset is stored with Git LFS — install it once
+(`git lfs install`), otherwise you'll get a pointer file instead of the database:
+
 ```bash
+git lfs install
 git clone https://github.com/GhostMan612/pathfinder_god.git
 ```
 
@@ -92,7 +96,6 @@ git clone https://github.com/GhostMan612/pathfinder_god.git
 Migration complete (Phase 22): the Flutter spoke is deleted; `spoke_kt/` is the client.
 Terminal UI: pure 2D Jetpack Compose — no Unity/Godot, no native render surface.
 Current: hub `pytest hub/tests/`: 107/107 · `assembleDebug`: BUILD SUCCESSFUL.
-Known gap: the native rulebook asset is not yet bundled — the Oracle gates on extraction until it ships.
 History: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 
 ---

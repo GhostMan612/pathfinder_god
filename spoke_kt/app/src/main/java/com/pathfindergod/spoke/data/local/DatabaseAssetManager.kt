@@ -8,12 +8,11 @@ package com.pathfindergod.spoke.data.local
 import android.content.Context
 import java.io.File
 import java.io.FileOutputStream
-import java.util.zip.GZIPInputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 object DatabaseAssetManager {
-    const val ASSET_PATH = "rules/pathfinder_rag.db.gz"
+    const val ASSET_PATH = "rules/pathfinder_rag.db"
     const val BUNDLE_VERSION = 2
 
     suspend fun ensureExtracted(context: Context): File =
@@ -27,17 +26,8 @@ object DatabaseAssetManager {
             val tmp = File.createTempFile("rules", ".db", out.parentFile)
             try {
                 context.assets.open(ASSET_PATH).use { raw ->
-                    GZIPInputStream(raw).use { gz ->
-                        FileOutputStream(tmp).use { dst ->
-                            val buffer = ByteArray(8192)
-                            while (true) {
-                                val read = gz.read(buffer)
-                                if (read < 0) {
-                                    break
-                                }
-                                dst.write(buffer, 0, read)
-                            }
-                        }
+                    FileOutputStream(tmp).use { dst ->
+                        raw.copyTo(dst)
                     }
                 }
                 if (!tmp.renameTo(out)) {
