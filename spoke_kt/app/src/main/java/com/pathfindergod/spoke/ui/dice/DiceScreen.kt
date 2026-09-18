@@ -5,6 +5,7 @@
 
 package com.pathfindergod.spoke.ui.dice
 
+import android.os.Build
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,6 +20,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -26,6 +28,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import com.pathfindergod.spoke.service.AudioService
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.pathfindergod.spoke.ui.theme.GoldAccent
@@ -36,6 +42,12 @@ import com.pathfindergod.spoke.ui.theme.rpgPanel
 @Composable
 fun DiceScreen() {
     val engine = remember { DiceEngine() }
+    val context = LocalContext.current
+    val audio = remember { AudioService(context.applicationContext) }
+    val haptics = LocalHapticFeedback.current
+    DisposableEffect(Unit) {
+        onDispose { audio.release() }
+    }
     var selected by remember { mutableStateOf(Die.D20) }
     var mode by remember { mutableStateOf(Advantage.STRAIGHT) }
     var record by remember { mutableStateOf<RollRecord?>(null) }
@@ -50,6 +62,14 @@ fun DiceScreen() {
             face = record?.kept?.firstOrNull() ?: selected.sides,
             rollToken = rollToken,
             modifier = Modifier.size(180.dp).align(Alignment.CenterHorizontally),
+            onImpact = {
+                if (Build.VERSION.SDK_INT >= 27) {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                } else {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                }
+                audio.playClatter()
+            },
         )
         Text(
             text = record?.let { "${it.total}" } ?: "—",

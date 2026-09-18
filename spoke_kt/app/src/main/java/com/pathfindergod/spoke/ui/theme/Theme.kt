@@ -30,6 +30,7 @@ fun PathfinderGodTheme(
 ) {
     MaterialTheme(
         colorScheme = GodColors,
+        typography = GodTypography,
         content = content,
     )
 }

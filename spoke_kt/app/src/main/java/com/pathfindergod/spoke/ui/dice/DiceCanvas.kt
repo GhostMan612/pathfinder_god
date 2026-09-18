@@ -16,7 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import com.pathfindergod.spoke.ui.theme.GoldAccent
@@ -33,15 +33,17 @@ fun DiceCanvas(
     face: Int,
     rollToken: Int,
     modifier: Modifier = Modifier,
+    onImpact: () -> Unit = {},
 ) {
     val rotation = remember { Animatable(0f) }
     val scale = remember { Animatable(1f) }
+    val drop = remember { Animatable(0f) }
     LaunchedEffect(rollToken) {
         if (rollToken == 0) return@LaunchedEffect
         launch {
-            rotation.snapTo(-180f)
+            rotation.snapTo(0f)
             rotation.animateTo(
-                360f,
+                1440f,
                 spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessLow),
             )
         }
@@ -51,20 +53,33 @@ fun DiceCanvas(
                 1f,
                 spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium),
             )
+            onImpact()
         }
-    }
-    Canvas(modifier = modifier) {
-        val radius = size.minDimension / 2f * scale.value
-        val center = Offset(size.width / 2f, size.height / 2f)
-        rotate(rotation.value, center) {
-            val path = diePath(die, center, radius)
-            drawPath(path = path, color = ParchmentSurface)
-            drawPath(
-                path = path,
-                color = GoldAccent,
-                style = Stroke(width = radius * 0.08f),
+        launch {
+            drop.snapTo(-260f)
+            drop.animateTo(
+                0f,
+                spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium),
             )
         }
+    }
+    Canvas(
+        modifier = modifier.graphicsLayer {
+            rotationZ = rotation.value
+            scaleX = scale.value
+            scaleY = scale.value
+            translationY = drop.value
+        },
+    ) {
+        val radius = size.minDimension / 2f
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val path = diePath(die, center, radius)
+        drawPath(path = path, color = ParchmentSurface)
+        drawPath(
+            path = path,
+            color = GoldAccent,
+            style = Stroke(width = radius * 0.08f),
+        )
         drawContext.canvas.nativeCanvas.apply {
             val paint = android.graphics.Paint().apply {
                 color = TextPrimary.toArgb()
