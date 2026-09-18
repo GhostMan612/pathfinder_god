@@ -19,6 +19,9 @@ interface EncounterDao {
     @Query("SELECT * FROM encounters ORDER BY created_at DESC")
     suspend fun getAll(): List<EncounterEntity>
 
+    @Query("SELECT * FROM encounters WHERE id = :id")
+    suspend fun getById(id: String): EncounterEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: EncounterEntity)
 

@@ -18,11 +18,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import com.pathfindergod.spoke.service.ExportService
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.pathfindergod.spoke.data.local.CharacterEntity
@@ -68,6 +73,7 @@ fun CharacterDetailScreen(
     entity: CharacterEntity,
     onBack: () -> Unit,
 ) {
+    val context = LocalContext.current
     val derived = remember(entity.derived) { flatEntries(entity.derived).toMap() }
     val abilities = remember(entity.abilities) { flatEntries(entity.abilities).toMap() }
     val proficiencies = remember(entity.proficiencies) { flatEntries(entity.proficiencies) }
@@ -96,7 +102,7 @@ fun CharacterDetailScreen(
                     color = ParchmentSurface,
                 )
             }
-            Column(modifier = Modifier.padding(start = 16.dp)) {
+            Column(modifier = Modifier.weight(1f).padding(start = 16.dp)) {
                 Text(
                     text = entity.name,
                     style = GodTypography.headlineSmall,
@@ -108,6 +114,14 @@ fun CharacterDetailScreen(
                     color = TextSecondary,
                 )
             }
+            Icon(
+                imageVector = Icons.Filled.Share,
+                contentDescription = "Share sheet",
+                tint = GoldAccent,
+                modifier = Modifier
+                    .clickable { ExportService.shareCharacter(context, entity) }
+                    .padding(8.dp),
+            )
         }
         Row(
             modifier = Modifier.rpgPanel().fillMaxWidth().padding(vertical = 12.dp),

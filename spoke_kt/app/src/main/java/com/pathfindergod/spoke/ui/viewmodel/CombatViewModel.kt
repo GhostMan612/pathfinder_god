@@ -6,9 +6,17 @@
 package com.pathfindergod.spoke.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.pathfindergod.spoke.data.local.EncounterEntity
+import com.pathfindergod.spoke.data.network.EncounterMonster
+import com.pathfindergod.spoke.data.repository.EncounterRepository
+import com.pathfindergod.spoke.ui.dice.DiceEngine
+import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
 
 data class CombatCondition(
     val name: String,
@@ -36,9 +44,21 @@ data class CombatUiState(
     val isProcessing: Boolean = false,
 )
 
-class CombatViewModel : ViewModel() {
+class CombatViewModel(
+    private val encounters: EncounterRepository,
+) : ViewModel() {
+    private val json = Json { ignoreUnknownKeys = true }
     private val _state = MutableStateFlow(CombatUiState())
     val state: StateFlow<CombatUiState> = _state.asStateFlow()
+
+    private val _vault = MutableStateFlow(emptyList<EncounterEntity>())
+    val vault: StateFlow<List<EncounterEntity>> = _vault.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            encounters.observeEncounters().collect { _vault.value = it }
+        }
+    }
 
     val activeCombatant: Combatant?
         get() = _state.value.combatants.getOrNull(_state.value.activeIndex)
@@ -154,5 +174,45 @@ class CombatViewModel : ViewModel() {
 
     fun clearEncounter() {
         _state.value = CombatUiState()
+    }
+
+    fun loadEncounter(id: String) {
+        viewModelScope.launch {
+            val target = try {
+                encounters.getEncounters().firstOrNull { it.id == id }
+            } catch (_: Exception) {
+                null
+            } ?: return@launch
+            val monsters = try {
+                json.decodeFromString<List<EncounterMonster>>(target.monstersJson)
+            } catch (_: Exception) {
+                emptyList()
+            }
+            if (monsters.isEmpty()) return@launch
+            val dice = DiceEngine()
+            val ladder = monsters.flatMap { monster ->
+                List(monster.count.coerceIn(1, 12)) { index ->
+                    val hp = 10 + monster.level * 5
+                    Combatant(
+                        id = UUID.randomUUID().toString(),
+                        name = if (monster.count > 1) {
+                            "${monster.name} ${index + 1}"
+                        } else {
+                            monster.name
+                        },
+                        isPc = false,
+                        initiative = dice.roll("1d20").total,
+                        currentHp = hp,
+                        maxHp = hp,
+                    )
+                }
+            }.sortedByDescending { it.initiative }
+            _state.value = CombatUiState(
+                combatants = ladder,
+                activeIndex = 0,
+                currentRound = 1,
+                lastNotes = "",
+            )
+        }
     }
 }

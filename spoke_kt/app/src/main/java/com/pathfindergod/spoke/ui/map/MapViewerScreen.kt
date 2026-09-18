@@ -15,6 +15,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -28,6 +31,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import com.pathfindergod.spoke.service.ExportService
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -78,6 +83,7 @@ private fun MapCanvas(
     map: MapEntity,
     onBack: () -> Unit,
 ) {
+    val context = LocalContext.current
     var gmLayer by rememberSaveable { mutableStateOf(true) }
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
@@ -112,6 +118,20 @@ private fun MapCanvas(
                     modifier = Modifier.clickable { gmLayer = false }.padding(4.dp),
                 )
             }
+            Icon(
+                imageVector = Icons.Filled.Share,
+                contentDescription = "Share map",
+                tint = GoldAccent,
+                modifier = Modifier
+                    .clickable {
+                        ExportService.shareMapImage(
+                            context,
+                            if (gmLayer) map.gmBase64Png else map.playerBase64Png,
+                            map.prompt,
+                        )
+                    }
+                    .padding(4.dp),
+            )
         }
         Text(
             text = map.prompt,

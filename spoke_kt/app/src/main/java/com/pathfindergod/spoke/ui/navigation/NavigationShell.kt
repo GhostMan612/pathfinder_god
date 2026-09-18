@@ -32,6 +32,7 @@ import com.pathfindergod.spoke.ui.character.CharacterDetailScreen
 import com.pathfindergod.spoke.ui.character.CharacterListScreen
 import com.pathfindergod.spoke.ui.character.rememberCharacterViewModel
 import com.pathfindergod.spoke.ui.combat.CombatTrackerScreen
+import com.pathfindergod.spoke.ui.combat.rememberCombatViewModel
 import com.pathfindergod.spoke.ui.campaign.CampaignScreen
 import com.pathfindergod.spoke.ui.campaign.rememberCampaignViewModel
 import com.pathfindergod.spoke.ui.dice.DiceScreen
@@ -101,7 +102,9 @@ fun NavigationShell() {
                     LootScreen(viewModel = rememberLootViewModel())
                 }
                 NavigationItem.RULES -> RuleSearchScreen()
-                NavigationItem.COMBAT -> CombatTrackerScreen()
+                NavigationItem.COMBAT -> {
+                    CombatTrackerScreen(viewModel = rememberCombatViewModel())
+                }
                 NavigationItem.CAMPAIGN -> {
                     CampaignScreen(viewModel = rememberCampaignViewModel())
                 }
