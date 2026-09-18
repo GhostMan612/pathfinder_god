@@ -1,11 +1,14 @@
 <!-- As Above, So Below. As Within, So Without. The Future Dictates the Past and the Past is Always Present. -->
 # Pathfinder God — Kotlin/AGDK Port Specification (Muse Spark 1.3)
+> **STATUS: COMPLETE (Phase 22, 2026-09-18).** The Flutter spoke is deleted;
+> `spoke_kt/` is the client. This document is now a build record — as-built
+> wins over any forward-looking passage below.
 
-Target: rewrite the Flutter Spoke (`spoke/lib`, 39 files) as a 100% native
-Kotlin Android app (package `com.pathfindergod`, label "Pathfinder God")
-with a pure 2D Jetpack Compose UI — the terminal architecture (no Unity,
-no Godot, no native render surface). AGDK libraries (Oboe, frame-pacing)
-are used only where they serve the 2D UI.
+Record: the Flutter Spoke is rewritten as a 100% native Kotlin Android app
+(package `com.pathfindergod`, label "Pathfinder God") with a pure 2D Jetpack
+Compose UI — the terminal architecture (no Unity, no Godot, no native render
+surface). Audio shipped on SoundPool/MediaPlayer; frame-pacing AARs stay on
+the BOM for jank telemetry.
 The Python Hub is untouched; `shared/openapi.yaml` plus the existing REST/WS
 shapes remain the wire contract.
 
@@ -159,7 +162,7 @@ What survives from AGDK is libraries only, applied to the 2D UI:
 - UI architecture (locked): pure 2D Jetpack Compose is terminal. No
   Unity/Godot integration at any milestone — §§4–5 describe libraries,
   ViewModels, and Compose screens only.
-- Modules: `:app` only (single-module scaffold, as built). Pinned as-built:
+- Modules: `:app` only (single-module app, as built). Pinned as-built:
   AGP 9.0.1 (built-in Kotlin — no `kotlin.android` plugin, no kapt),
   KSP 2.3.4 + Room 2.7.0 (2.6.1's processor crashes on new Kotlin),
   Compose BOM 2024.10.01 (newer BOMs demand compileSdk 35; directive
@@ -173,13 +176,15 @@ What survives from AGDK is libraries only, applied to the 2D UI:
   MockWebServer for `/combat/end-turn` dual payload + `/map/generate`
   dual layers, screenshot tests for `RpgPanel` 9-patch equivalents
   (port `stone_border/parchment/gothic_stone` center-slices 1:1).
-- Rollout (strangler, contract-first): milestones M1 data+network
-  (Room + Retrofit + discovery, behind the Flutter app via shared hub),
-  M2 screens in Navigation order (Dice → Combat → Sheet → Rulebook →
-  Map → Settings), M3 Oboe audio pilot + Compose dice-motion port,
-  M4 Compose performance hardening (jank telemetry, baseline profiles).
-  Acceptance per milestone: `connectedAndroidTest` green, hub
-  `pytest` untouched, wire payloads byte-identical to `openapi.yaml`.
+- Rollout (done): M1 data+network (Room + Retrofit, behind the shared hub) —
+  done; M2 screens (Dice → Combat → Hero → Rules → Map → Campaign → Setup →
+  God → Encounter, all nine tabs) — done; UI sprints Phases 12–21 (Glass
+  shell, dice physics, roster, ladder, tether, vault, chronicler, oracle,
+  bazaar, encounter, FileProvider export, vault→tracker bridge) — done.
+  Superseded without execution: Oboe migration (SoundPool serves), AGDK
+  surface milestone (no engine per terminal decision), baseline profiles.
+  Acceptance held: hub `pytest` green, wire payloads byte-identical to
+  `openapi.yaml`.
 - Risks: platform SQLite without FTS5 (§2 — mitigated by the NGA
   bridge); MediaPipe Gemma 3n has no AGDK shortcut — keep the
   `flutter_gemma` equivalent via MediaPipe LLM Inference AAR and the

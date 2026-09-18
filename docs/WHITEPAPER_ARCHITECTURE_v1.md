@@ -1,4 +1,8 @@
+<!-- As Above, So Below. As Within, So Without. The Future Dictates the Past and the Past is Always Present. -->
 # Pathfinder God — Technical Architecture Whitepaper v1.0
+
+> SUPERSEDED (Phase 22, 2026-09-18): the Flutter `spoke/` this paper describes
+> is deleted; the native Kotlin `spoke_kt/` client replaces it. Body frozen as history.
 
 **Date:** 2026-08-30  
 **Addendum:** 2026-09-14 (v0.6.1 database truth pass, v0.6.2 zero-config discovery) — see [Addendum](#addendum--v061v062-2026-09-14). Body below is the frozen v1.0 text; figures marked [v1.0] are superseded where the addendum says so.  

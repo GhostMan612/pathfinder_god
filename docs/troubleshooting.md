@@ -1,3 +1,4 @@
+<!-- As Above, So Below. As Within, So Without. The Future Dictates the Past and the Past is Always Present. -->
 # Troubleshooting (phone + laptop)
 
 Start here before digging into logs. Most problems are one of the five below.
@@ -29,13 +30,13 @@ should return JSON.
 The bundled database extracts on first launch (20MB → 58MB, ~30 seconds, spinner
 in the Rules tab). If it fails: force-stop the app, clear storage, relaunch on
 good Wi-Fi (extraction is local, but first launch shouldn't be interrupted).
-Developers: extraction logs come over `flutter logs` (`RulebookDb:` lines).
+Developers: watch `adb logcat` across first launch; the Oracle gates until extraction succeeds.
 
-## 5. Chat stalls or dies when the phone sleeps
+## 5. Link drops or won't connect
 
-Android Doze kills idle sockets. The app auto-reconnects (3 tries, `retrying`
-notice, history re-sent). If it keeps failing, the hub probably restarted —
-reopen the chat and resend.
+The foreground service retries with backoff and the status dot in Setup → Tether
+shows the live state. If it never reaches CONNECTED, the laptop IP changed or the
+hub restarted — re-enter the URL and press CONNECT.
 
 ## 6. "No entry" for something that should exist
 
@@ -55,5 +56,5 @@ backfill run picks it up.
 |---|---|
 | Hub won't start / 500s | `tools/command_center/logs/hub.log` |
 | Ollama/model issues | `tools/command_center/logs/ollama.log` |
-| App extraction/search | `flutter logs`, filter `RulebookDb` / `HubClient` |
+| App extraction/search | `adb logcat` during first launch |
 | API shapes | `http://localhost:8000/docs` (hub running) |

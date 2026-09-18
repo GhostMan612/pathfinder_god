@@ -1,3 +1,4 @@
+<!-- As Above, So Below. As Within, So Without. The Future Dictates the Past and the Past is Always Present. -->
 # Architecture
 
 ## The shape
@@ -19,8 +20,8 @@
                         │  HTTP (REST) + WebSocket (/stream)
                         │  mDNS auto-discovery · LAN now · Tailscale later
         ┌───────────────┴──────────────────────────┐
-        │  SPOKE — phone (Flutter / Android)        │
-        │  dice · character sheet · GM chat · rules │
+        │  SPOKE — phone (native Kotlin / Android)  │
+        │  dice · sheet · ladder · vaults · oracle  │
         └───────────────────────────────────────────┘
 ```
 
@@ -34,8 +35,8 @@ best tool:
 
 - **Python** on the hub — reuses the existing RAG/agent code and has the best local-LLM
   ecosystem.
-- **Flutter** on the phone — native performance on a budget device, and a themable UI for the
-  Pathfinder look and feel.
+- **Kotlin** on the phone — Jetpack Compose 2D UI in a single `:app` module, Room for
+  vaults, Retrofit/OkHttp for the hub contract; no game engine anywhere in the lane.
 
 The hub package holds the RAG, the 2e→1e edition fallback, and the 2-tier LLM
 fallback (Ollama → raw excerpts). The two halves share almost no logic beyond that.
@@ -100,6 +101,6 @@ emulator `10.0.2.2:8000`, last-known URL. Manual IP entry remains as backup.
 - ~~Offline rules on the phone~~ — **DONE**: bundled FTS5 DB + offline chatbot + local dice.
 - ~~Windows GM console~~ — **DONE**: standalone PySide6 exe (`tools/command_center/dist/`,
   git-ignored; build with PyInstaller from `command_center.spec`).
-- **iOS / web:** both the Flutter app and the HTTP hub extend to these with no architectural
-  change.
+- **Other clients:** the HTTP hub extends to any platform with no architectural
+  change; the native client is Android-only.
 ```
