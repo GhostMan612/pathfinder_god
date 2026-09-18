@@ -22,6 +22,12 @@ import org.sqlite.database.sqlite.SQLiteStatement as NgaStatement
 import org.sqlite.database.sqlite.SQLiteTransactionListener as NgaTransactionListener
 
 class NgaSQLiteOpenHelperFactory : SupportSQLiteOpenHelper.Factory {
+    companion object {
+        init {
+            System.loadLibrary("sqliteX")
+        }
+    }
+
     override fun create(
         configuration: SupportSQLiteOpenHelper.Configuration,
     ): SupportSQLiteOpenHelper {
