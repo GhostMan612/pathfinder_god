@@ -20,6 +20,7 @@ data/*.sqlite3
 *.jks
 google-services.json
 SPEC_SHEET*
+data/*.pdf
 # Session working docs (never pushed by workflow law)
 blueprints/
 _archive/

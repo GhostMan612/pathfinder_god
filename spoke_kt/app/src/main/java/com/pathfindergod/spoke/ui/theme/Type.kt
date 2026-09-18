@@ -30,6 +30,12 @@ val GodTypography = Typography(
         fontSize = 22.sp,
         letterSpacing = 1.sp,
     ),
+    titleMedium = TextStyle(
+        fontFamily = FontFamily.Serif,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 20.sp,
+        letterSpacing = 0.5.sp,
+    ),
     bodyMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.Normal,
