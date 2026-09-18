@@ -12,8 +12,13 @@ import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteOpenHelper
 
 @Database(
-    entities = [CharacterEntity::class, EncounterEntity::class, MapEntity::class],
-    version = 1,
+    entities = [
+        CharacterEntity::class,
+        EncounterEntity::class,
+        MapEntity::class,
+        CampaignEntity::class,
+    ],
+    version = 2,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -22,6 +27,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun encounterDao(): EncounterDao
 
     abstract fun mapDao(): MapDao
+
+    abstract fun campaignDao(): CampaignDao
 
     companion object {
         const val FILE_NAME = "pathfinder_spoke.db"

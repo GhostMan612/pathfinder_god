@@ -32,6 +32,8 @@ import com.pathfindergod.spoke.ui.character.CharacterDetailScreen
 import com.pathfindergod.spoke.ui.character.CharacterListScreen
 import com.pathfindergod.spoke.ui.character.rememberCharacterViewModel
 import com.pathfindergod.spoke.ui.combat.CombatTrackerScreen
+import com.pathfindergod.spoke.ui.campaign.CampaignScreen
+import com.pathfindergod.spoke.ui.campaign.rememberCampaignViewModel
 import com.pathfindergod.spoke.ui.dice.DiceScreen
 import com.pathfindergod.spoke.ui.map.MapListScreen
 import com.pathfindergod.spoke.ui.map.MapViewerScreen
@@ -88,6 +90,9 @@ fun NavigationShell() {
             when (items[selected]) {
                 NavigationItem.DICE -> DiceScreen()
                 NavigationItem.COMBAT -> CombatTrackerScreen()
+                NavigationItem.CAMPAIGN -> {
+                    CampaignScreen(viewModel = rememberCampaignViewModel())
+                }
                 NavigationItem.MAP -> {
                     val mapVm = rememberMapViewModel()
                     val mapState by mapVm.state.collectAsStateWithLifecycle()

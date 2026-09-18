@@ -74,6 +74,18 @@ data class MapGenerateResponse(
 )
 
 @Serializable
+data class SummarizeRequest(
+    val events: List<String>,
+    @SerialName("campaign_name") val campaignName: String,
+)
+
+@Serializable
+data class SummarizeResponse(
+    val summary: String = "",
+    @SerialName("event_count") val eventCount: Int = 0,
+)
+
+@Serializable
 data class LootResponse(
     val valid: Boolean,
     val item: Map<String, JsonElement>? = null,
@@ -96,4 +108,7 @@ interface HubApi {
 
     @POST("generate/character")
     suspend fun generateCharacter(@Body request: GenerateRequest): GenerateResponse
+
+    @POST("campaign/summarize-session")
+    suspend fun summarizeSession(@Body request: SummarizeRequest): SummarizeResponse
 }
