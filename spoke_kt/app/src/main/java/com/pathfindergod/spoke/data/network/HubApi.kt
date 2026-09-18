@@ -74,6 +74,33 @@ data class MapGenerateResponse(
 )
 
 @Serializable
+data class EncounterRequest(
+    @SerialName("party_level") val partyLevel: Int,
+    @SerialName("party_size") val partySize: Int,
+    val threat: String,
+    val theme: String,
+)
+
+@Serializable
+data class EncounterMonster(
+    val name: String = "",
+    val count: Int = 1,
+    val level: Int = 0,
+    @SerialName("xp_each") val xpEach: Int = 0,
+    @SerialName("total_xp") val totalXp: Int = 0,
+    @SerialName("source_book") val sourceBook: String = "",
+)
+
+@Serializable
+data class EncounterResponse(
+    @SerialName("target_xp") val targetXp: Int = 0,
+    @SerialName("total_xp") val totalXp: Int = 0,
+    val threat: String = "",
+    val theme: String = "",
+    val monsters: List<EncounterMonster> = emptyList(),
+)
+
+@Serializable
 data class SummarizeRequest(
     val events: List<String>,
     @SerialName("campaign_name") val campaignName: String,
@@ -111,4 +138,7 @@ interface HubApi {
 
     @POST("campaign/summarize-session")
     suspend fun summarizeSession(@Body request: SummarizeRequest): SummarizeResponse
+
+    @POST("encounter/generate")
+    suspend fun generateEncounter(@Body request: EncounterRequest): EncounterResponse
 }
