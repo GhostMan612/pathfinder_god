@@ -4,13 +4,10 @@
 // ============================================================
 
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
-import 'package:provider/provider.dart';
 
 import '../api/hub_client.dart';
 import '../models/combatant.dart';
 import '../models/encounter.dart';
-import '../services/audio_service.dart';
 import '../services/combat_store.dart';
 import '../theme/app_theme.dart';
 import '../widgets/rpg_panel.dart';
@@ -335,7 +332,7 @@ class _EncounterBuilderScreenState extends State<EncounterBuilderScreen> {
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           itemCount: r.monsters.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 8),
+          separatorBuilder: (_, _) => const SizedBox(height: 8),
           itemBuilder: (_, i) {
             final m = r.monsters[i];
             return _MonsterCard(monster: m);
@@ -383,7 +380,7 @@ class _EncounterBuilderScreenState extends State<EncounterBuilderScreen> {
 
 class _MonsterCard extends StatefulWidget {
   final EncounterMonster monster;
-  const _MonsterCard({super.key, required this.monster});
+  const _MonsterCard({required this.monster});
 
   @override
   State<_MonsterCard> createState() => _MonsterCardState();

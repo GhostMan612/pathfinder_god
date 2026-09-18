@@ -3,8 +3,6 @@
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
 
-import 'dart:convert';
-
 /// A monster in a generated encounter.
 class EncounterMonster {
   final String name;

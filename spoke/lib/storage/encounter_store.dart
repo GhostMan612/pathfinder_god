@@ -56,9 +56,6 @@ class EncounterStore {
     required int partySize,
   }) async {
     final db = await _database;
-    final monstersJson = jsonEncode(
-      monsters.map((m) => m.toJson()).toList(),
-    );
     await db.insert(
       'encounters',
       {
