@@ -10,7 +10,7 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.pathfindergod.kt"
+        applicationId = "com.pathfindergod.spoke"
         minSdk = 26
         targetSdk = 34
         versionCode = 1
