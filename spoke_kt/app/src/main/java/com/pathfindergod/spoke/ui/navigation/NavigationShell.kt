@@ -27,8 +27,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pathfindergod.spoke.ui.character.CharacterDetailScreen
+import com.pathfindergod.spoke.ui.character.CharacterDetailScreen
 import com.pathfindergod.spoke.ui.character.CharacterListScreen
 import com.pathfindergod.spoke.ui.character.rememberCharacterViewModel
+import com.pathfindergod.spoke.ui.combat.CombatTrackerScreen
 import com.pathfindergod.spoke.ui.dice.DiceScreen
 import com.pathfindergod.spoke.ui.theme.GoldAccent
 import com.pathfindergod.spoke.ui.theme.TextPrimary
@@ -76,6 +78,7 @@ fun NavigationShell() {
         ) {
             when (items[selected]) {
                 NavigationItem.DICE -> DiceScreen()
+                NavigationItem.COMBAT -> CombatTrackerScreen()
                 NavigationItem.HERO -> {
                     val heroVm = rememberCharacterViewModel()
                     val heroState by heroVm.state.collectAsStateWithLifecycle()
