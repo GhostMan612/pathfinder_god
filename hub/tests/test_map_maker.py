@@ -10,8 +10,7 @@ import json
 
 import pytest
 
-from app.agents.map_maker import MapMakerAgent, MapLayout, MapRoom
-
+from app.agents.map_maker import MapLayout, MapMakerAgent, MapRoom
 
 LAYOUT_JSON = json.dumps(
     {

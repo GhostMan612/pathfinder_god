@@ -6,31 +6,38 @@
 """
 Campaign API — REST endpoints for campaign state, notes, and continuity.
 """
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Response, Request
-from pydantic import BaseModel, Field
-from typing import Optional
-from datetime import datetime
-
-from app.api.deps import get_repo
-from app.db.repository import CampaignRepository
-from app.agents.continuity import ContinuityKeeper, ContinuityAgent
-from app.llm.orchestrator import LLMOrchestrator
-from app.llm.ollama_client import OllamaClient
-from app.config import get_settings
-from app.api.security import get_audit_logger, get_current_user, require_auth, get_client_ip, AuditLogger
-
 import json
 import logging
+from datetime import datetime
+
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Request,
+    Response,
+)
+from pydantic import BaseModel, Field
+
+from app.agents.continuity import ContinuityAgent, ContinuityKeeper
+from app.api.deps import get_repo
+from app.api.security import (
+    AuditLogger,
+    get_client_ip,
+    require_auth,
+)
+from app.config import get_settings
+from app.db.repository import CampaignRepository
+from app.llm.ollama_client import OllamaClient
+from app.llm.orchestrator import LLMOrchestrator
+
 logger = logging.getLogger(__name__)
 
 audit_logger = AuditLogger()
 
 router = APIRouter(prefix="/campaign", tags=["campaign"])
 
-
-# ──────────────────────────────────────────────────────────────
-# Request/Response Models
-# ──────────────────────────────────────────────────────────────
 
 class CampaignNote(BaseModel):
     prompt: str
@@ -64,16 +71,16 @@ class CampaignExport(BaseModel):
 
 
 class CampaignImport(BaseModel):
-    campaign: Optional[dict] = None
-    party: Optional[list[dict]] = None
-    npcs: Optional[list[dict]] = None
-    locations: Optional[list[dict]] = None
-    items: Optional[list[dict]] = None
-    quests: Optional[list[dict]] = None
-    party_members: Optional[list[dict]] = None
-    sessions: Optional[list[dict]] = None
-    notes: Optional[list[dict]] = None
-    decisions: Optional[list[dict]] = None
+    campaign: dict | None = None
+    party: list[dict] | None = None
+    npcs: list[dict] | None = None
+    locations: list[dict] | None = None
+    items: list[dict] | None = None
+    quests: list[dict] | None = None
+    party_members: list[dict] | None = None
+    sessions: list[dict] | None = None
+    notes: list[dict] | None = None
+    decisions: list[dict] | None = None
     replace_existing: bool = True
 
 
@@ -87,22 +94,19 @@ class SummarizeSessionResponse(BaseModel):
     event_count: int
 
 
-# ──────────────────────────────────────────────────────────────
-# Endpoints
-# ──────────────────────────────────────────────────────────────
-
 @router.get("", response_model=CampaignStateResponse)
 async def get_campaign(
     campaign_id: int = 1,
     repo: CampaignRepository = Depends(get_repo),
     user: dict = Depends(require_auth),
+    request: Request = None,
 ) -> CampaignStateResponse:
     """Get current campaign state (party + session notes)."""
     audit_logger.log_data_access(
         user_id=user.get("sub", "unknown"),
         resource="campaign",
         action="read",
-        ip=get_client_ip(request) if 'request' in locals() else "unknown"
+        ip=get_client_ip(request) if request else "unknown"
     )
     state = repo.get_campaign_state(campaign_id)
     return CampaignStateResponse(**state)
@@ -115,6 +119,7 @@ async def add_campaign_note(
     campaign_id: int = 1,
     repo: CampaignRepository = Depends(get_repo),
     user: dict = Depends(require_auth),
+    request: Request = None,
 ) -> CampaignStateResponse:
     """
     Add a note to the campaign log.
@@ -124,15 +129,13 @@ async def add_campaign_note(
         user_id=user.get("sub", "unknown"),
         resource="campaign_note",
         action="create",
-        ip=get_client_ip(request) if 'request' in locals() else "unknown"
+        ip=get_client_ip(request) if request else "unknown"
     )
     
     session_num = repo.get_latest_session_num(campaign_id) + 1
 
-    # Add the note to the session log
     repo.add_session_note(campaign_id, session_num, note.prompt, note.response)
 
-    # Background task: process continuity (entity extraction, summary, facts)
     orchestrator = LLMOrchestrator(repo)
     continuity_keeper = ContinuityKeeper(repo, orchestrator)
     async def _safe_process():
@@ -142,7 +145,6 @@ async def add_campaign_note(
             logger.warning(f"Continuity processing failed: {e}")
     background_tasks.add_task(_safe_process)
 
-    # Return updated state
     state = repo.get_campaign_state(campaign_id)
     return CampaignStateResponse(**state)
 
@@ -162,15 +164,10 @@ async def reset_campaign(
         ip=get_client_ip(request)
     )
     repo.reset_campaign(campaign_id)
-    # Re-create default campaign
     repo.get_or_create_campaign(campaign_id)
     state = repo.get_campaign_state(campaign_id)
     return CampaignStateResponse(**state)
 
-
-# ──────────────────────────────────────────────────────────────
-# Session Summarization — Campaign Journal
-# ──────────────────────────────────────────────────────────────
 
 @router.post("/summarize-session", response_model=SummarizeSessionResponse)
 async def summarize_session(request: SummarizeSessionRequest) -> SummarizeSessionResponse:
@@ -188,10 +185,6 @@ async def summarize_session(request: SummarizeSessionRequest) -> SummarizeSessio
     return SummarizeSessionResponse(summary=journal.summary, event_count=journal.event_count)
 
 
-# ──────────────────────────────────────────────────────────────
-# Export/Import — Campaign Backup & Restore
-# ──────────────────────────────────────────────────────────────
-
 @router.get("/export", response_model=CampaignExport, tags=["campaign", "export"])
 async def export_campaign(
     campaign_id: int = 1,
@@ -207,13 +200,11 @@ async def export_campaign(
         ip=get_client_ip(request)
     )
     
-    # Gather all campaign data
     campaign = repo.get_or_create_campaign(campaign_id)
     party = repo.get_party(campaign_id)
     npcs = repo.get_npcs(campaign_id)
     locations = repo.get_locations(campaign_id)
     
-    # Get items, quests, sessions, party_members, notes, decisions
     with repo._conn() as conn:
         items = [dict(r) for r in conn.execute("SELECT * FROM items WHERE campaign_id = ?", (campaign_id,)).fetchall()]
         quests = [dict(r) for r in conn.execute("SELECT * FROM quests WHERE campaign_id = ?", (campaign_id,)).fetchall()]
@@ -387,11 +378,11 @@ async def download_backup(
         ip=get_client_ip(request)
     )
     
-    # Get full export
     export = await export_campaign(campaign_id, repo, user, request)
     
-    from fastapi.responses import Response
     import json
+
+    from fastapi.responses import Response
     
     filename = f"pathfinder_campaign_{campaign_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
     
@@ -401,10 +392,6 @@ async def download_backup(
         headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
 
-
-# ──────────────────────────────────────────────────────────────
-# NPC Management (for Spoke Character sync)
-# ──────────────────────────────────────────────────────────────
 
 class NPCRequest(BaseModel):
     name: str
@@ -445,10 +432,6 @@ async def create_npc(
     )
     return {"id": npc_id, "name": npc.name}
 
-
-# ──────────────────────────────────────────────────────────────
-# Party / Characters
-# ──────────────────────────────────────────────────────────────
 
 class PartyMemberRequest(BaseModel):
     name: str

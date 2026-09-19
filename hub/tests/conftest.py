@@ -6,18 +6,19 @@
 from __future__ import annotations
 
 import sqlite3
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app import main
 from app.config import Settings
 from app.service import GodService
 from app.state.campaign import CampaignStore
-import app.main as main
 
-
-# Sample rules across both editions, matching the primary `rules` FTS5 schema.
 _SAMPLE_ROWS = [
     ("2e", "action", "Flanking",
      "Core Rulebook",
@@ -71,19 +72,13 @@ def _create_test_client(rules_db_dir: Path) -> TestClient:
             for word in ["The ", "God ", "speaks."]:
                 yield ("ollama", word)
 
-    # Also fake the orchestrator's ReAct tool loop (qwen2.5 path) —
-    # prevents tests from hitting real /api/chat which needs Ollama.
     from unittest.mock import AsyncMock
 
     async def fake_agentic_chat(prompt, system, original_prompt, edition, tools):
-        # Simulate tool_calls for validate_action / lookup_rule then final narrative
         return "FAKE AGENTIC ANSWER with tool loop (level dc cited)"
 
     svc._orchestrator = getattr(svc, "_orchestrator", None) or getattr(svc, "orchestrator", None)
-    # GodService uses self.orchestrator or self._llm; patch both
     try:
-        from app.llm.orchestrator import LLMOrchestrator
-        # If service exposes orchestrator, mock its _agentic_chat
         if hasattr(svc, "orchestrator"):
             svc.orchestrator._agentic_chat = fake_agentic_chat
         if hasattr(svc, "_orchestrator") and svc._orchestrator is not None:
@@ -91,11 +86,9 @@ def _create_test_client(rules_db_dir: Path) -> TestClient:
     except Exception:
         pass
 
-    # Patch ollama_client.chat too for direct /generate tests
     try:
         from app.llm.ollama_client import OllamaClient
         svc._llm = FakeLLM()
-        # Monkey-patch OllamaClient.chat globally for this process
         OllamaClient.chat = AsyncMock(return_value={"role": "assistant", "content": "FAKE CHAT", "tool_calls": []})
     except Exception:
         pass
@@ -103,10 +96,8 @@ def _create_test_client(rules_db_dir: Path) -> TestClient:
     if not hasattr(svc, "_llm") or svc._llm is None:
         svc._llm = FakeLLM()
     else:
-        # Ensure existing LLM stays fake
         svc._llm = FakeLLM()
 
-    # Swap the module globals the route handlers close over.
     main.settings = test_settings
     main.service = svc
     main.campaign = CampaignStore(test_settings.campaign_state_path)
@@ -137,6 +128,5 @@ def client(rules_db_dir: Path):
 def authenticated_client(rules_db_dir: Path) -> TestClient:
     """Client with a valid API key for authenticated endpoints."""
     client = _create_test_client(rules_db_dir)
-    # Add a valid API key to the client's headers
     client.headers["X-API-Key"] = "pfg_test_key_12345"
     return client

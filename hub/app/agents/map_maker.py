@@ -15,12 +15,11 @@ import base64
 import io
 import json
 import logging
-import re
 from dataclasses import dataclass
 from typing import Any
 
-from app.llm.ollama_client import OllamaClient
 from app.config import get_settings
+from app.llm.ollama_client import OllamaClient
 
 try:
     from PIL import Image, ImageDraw, ImageFont

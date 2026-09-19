@@ -5,15 +5,15 @@
 
 """Encounter Generator API — LLM + deterministic XP budget."""
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.agents.encounter_builder import EncounterBuilderAgent, BuildResult
-from app.llm.ollama_client import OllamaClient
+from app.agents.encounter_builder import BuildResult, EncounterBuilderAgent
+from app.api.deps import get_repo
 from app.config import get_settings
 from app.db.repository import CampaignRepository
+from app.llm.ollama_client import OllamaClient
 from app.rag.retriever import Retriever
-from app.api.deps import get_repo
 
 router = APIRouter(prefix="/encounter", tags=["encounter"])
 

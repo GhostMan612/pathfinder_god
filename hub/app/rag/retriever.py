@@ -9,7 +9,6 @@ RAG Retriever — Hybrid vector + FTS5 search for rule context.
 
 import logging
 import sqlite3
-from typing import Any
 
 from app.config import get_settings
 from app.db.repository import CampaignRepository

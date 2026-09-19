@@ -5,9 +5,8 @@
 
 """Tests for CombatTrackerAgent deterministic PF2e combat math."""
 
-import pytest
 
-from app.agents.combat_tracker import CombatTrackerAgent, StrikeResult
+from app.agents.combat_tracker import CombatTrackerAgent
 
 
 class TestCombatTrackerAgent:

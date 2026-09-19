@@ -8,12 +8,12 @@
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from app.api.deps import get_repo
-from app.db.repository import CampaignRepository
-from app.agents.loot_generator import LootGeneratorAgent, LootBuildResult
+from app.agents.loot_generator import LootBuildResult, LootGeneratorAgent
 from app.agents.rules_lawyer import RulesLawyerAgent
-from app.llm.ollama_client import OllamaClient
+from app.api.deps import get_repo
 from app.config import get_settings
+from app.db.repository import CampaignRepository
+from app.llm.ollama_client import OllamaClient
 
 router = APIRouter(prefix="/generate", tags=["gm"])
 

@@ -28,7 +28,8 @@ logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 try:
-    from fleet import DomainLimiter, FetchError, fetch as fleet_fetch
+    from fleet import DomainLimiter, FetchError
+    from fleet import fetch as fleet_fetch
 except Exception:  # fleet unavailable (tests without aiohttp) — caller degrades
     DomainLimiter = None  # type: ignore
     FetchError = Exception  # type: ignore

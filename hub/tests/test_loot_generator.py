@@ -13,7 +13,6 @@ from fastapi.testclient import TestClient
 from app.agents.loot_generator import LootGeneratorAgent
 from app.agents.rules_lawyer import RulesLawyerAgent
 
-
 VALID_LOOT = {
     "name": "Widow's Caress",
     "item_type": "weapon",
@@ -151,10 +150,10 @@ class TestLootRoute:
         self, tmp_path, monkeypatch
     ):
         """POST /generate/loot must hit the loot router, not generic /{kind}."""
-        from app.main import create_app
         from app.api.deps import get_repo
         from app.db.repository import CampaignRepository
         from app.llm.ollama_client import OllamaClient
+        from app.main import create_app
 
         async def fake_generate(self, **kwargs):
             return json.dumps(VALID_LOOT)

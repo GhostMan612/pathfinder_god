@@ -24,7 +24,6 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-
 # --- Edition handling ------------------------------------------------------
 
 _1E_ALIASES = {"1e", "pf1", "pf1e", "pathfinder 1e", "pathfinder1", "pathfinder first edition"}

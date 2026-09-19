@@ -7,10 +7,8 @@
 Ask/Stream endpoints — GM Q&A with WebSocket streaming.
 """
 
-import json
-from typing import AsyncGenerator
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from app.api.deps import get_repo

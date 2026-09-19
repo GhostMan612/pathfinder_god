@@ -14,16 +14,17 @@ The GM Storyteller can call these agent tools:
 
 import json
 import logging
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import AsyncGenerator
 
+from app.agents.npc_compiler import NPC_COMPILER_TOOLS, NPCCompilerAgent
+from app.agents.rules_lawyer import RULES_LAWYER_TOOLS, RulesLawyerAgent
 from app.config import get_settings
 from app.db.repository import CampaignRepository
 from app.llm.ollama_client import OllamaClient
-from app.rag.retriever import Retriever
 from app.rag.raw_fallback import search_rules
-from app.agents.rules_lawyer import RulesLawyerAgent, RULES_LAWYER_TOOLS
-from app.agents.npc_compiler import NPCCompilerAgent, NPC_COMPILER_TOOLS
+from app.rag.retriever import Retriever
+
 # ContinuityKeeper imported lazily to avoid circular import
 
 logger = logging.getLogger(__name__)

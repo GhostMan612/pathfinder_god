@@ -16,8 +16,7 @@ Outputs JSON importable by Foundry VTT / Pathbuilder.
 
 import json
 import logging
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 from app.config import get_settings
 from app.db.repository import CampaignRepository

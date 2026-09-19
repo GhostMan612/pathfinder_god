@@ -8,9 +8,9 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.agents.map_maker import MapMakerAgent, BuildResult
-from app.llm.ollama_client import OllamaClient
+from app.agents.map_maker import MapMakerAgent
 from app.config import get_settings
+from app.llm.ollama_client import OllamaClient
 
 router = APIRouter(prefix="/map", tags=["map"])
 

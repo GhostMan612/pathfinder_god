@@ -8,9 +8,11 @@ Ollama Client — Async HTTP client for local LLM inference.
 """
 
 import json
-import httpx
 import logging
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Any
+
+import httpx
 
 from app.config import get_settings
 

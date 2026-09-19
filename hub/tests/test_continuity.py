@@ -12,7 +12,6 @@ import pytest
 from app.agents.continuity import ContinuityAgent, ContinuityKeeper
 from app.db.repository import CampaignRepository
 
-
 CANNED_SUMMARY = (
     "The mist parted over the ruined tavern as the party closed in. "
     "Steel rang against chitin while the pit trap claimed its due.\n\n"

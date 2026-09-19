@@ -7,16 +7,16 @@
 Generate endpoints — Typed generators (character, npc, monster, boss, map, campaign, encounter).
 """
 
-from fastapi import APIRouter, HTTPException, Path, Depends
+from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel
 
-from app.api.deps import get_repo
-from app.db.repository import CampaignRepository
-from app.llm.orchestrator import LLMOrchestrator
-from app.agents.character_builder import CharacterBuilderAgent, BuildResult
+from app.agents.character_builder import BuildResult, CharacterBuilderAgent
 from app.agents.rules_lawyer import RulesLawyerAgent
-from app.llm.ollama_client import OllamaClient
+from app.api.deps import get_repo
 from app.config import get_settings
+from app.db.repository import CampaignRepository
+from app.llm.ollama_client import OllamaClient
+from app.llm.orchestrator import LLMOrchestrator
 
 router = APIRouter(prefix="/generate", tags=["gm"])
 

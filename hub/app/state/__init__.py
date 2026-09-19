@@ -4,6 +4,6 @@
 # ============================================================
 """Campaign state persistence."""
 
-from .campaign import CampaignStore, CampaignState
+from .campaign import CampaignState, CampaignStore
 
-__all__ = ["CampaignStore", "CampaignState"]
+__all__ = ["CampaignState", "CampaignStore"]

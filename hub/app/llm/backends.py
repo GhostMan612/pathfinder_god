@@ -29,7 +29,7 @@ class LLMResult:
     """The outcome of a generation, tagged with which backend produced it."""
 
     text: str
-    backend: str  # "ollama" | "raw-excerpts"
+    backend: str
 
 
 def _raw_excerpts(hits: list[RuleHit]) -> str:
@@ -59,7 +59,6 @@ class LLMRouter:
     def __init__(self, settings: Settings) -> None:
         self._s = settings
 
-    # -- buffered (whole answer at once) -----------------------------------
 
     async def complete(
         self,
@@ -75,7 +74,6 @@ class LLMRouter:
 
         return LLMResult(text=_raw_excerpts(hits or []), backend="raw-excerpts")
 
-    # -- streaming (token by token, for WS /stream) ------------------------
 
     async def stream(
         self,
@@ -97,7 +95,6 @@ class LLMRouter:
 
         yield ("raw-excerpts", _raw_excerpts(hits or []))
 
-    # -- Ollama ------------------------------------------------------------
 
     def _ollama_options(self) -> dict:
         return {
@@ -120,7 +117,7 @@ class LLMRouter:
             if resp.status_code == 200:
                 return resp.json().get("response", "")
             print(f"[Ollama] HTTP {resp.status_code}")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"[Ollama] error: {exc}")
         return None
 
@@ -137,28 +134,26 @@ class LLMRouter:
             "options": self._ollama_options(),
         }
         try:
-            # trust_env=False forces Python to ignore Windows proxy settings
-            async with httpx.AsyncClient(timeout=self._s.ollama_timeout_s, trust_env=False) as client:
-                async with client.stream("POST", url, json=payload) as resp:
-                    if resp.status_code != 200:
-                        err = await resp.aread()
-                        print(f"[Ollama] stream HTTP {resp.status_code}: {err.decode('utf-8', errors='ignore')}")
-                        return
-                    async for line in resp.aiter_lines():
-                        if not line:
-                            continue
-                        try:
-                            obj = json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
-                        chunk = obj.get("response")
-                        if chunk:
-                            yield chunk
-                        if obj.get("done"):
-                            break
+            async with httpx.AsyncClient(timeout=self._s.ollama_timeout_s, trust_env=False) as client, client.stream("POST", url, json=payload) as resp:
+                if resp.status_code != 200:
+                    err = await resp.aread()
+                    print(f"[Ollama] stream HTTP {resp.status_code}: {err.decode('utf-8', errors='ignore')}")
+                    return
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    chunk = obj.get("response")
+                    if chunk:
+                        yield chunk
+                    if obj.get("done"):
+                        break
         except Exception as exc:
-            print(f"\n--- OLLAMA CRASH LOG ---")
+            print("\n--- OLLAMA CRASH LOG ---")
             print(f"Target URL: {url}")
             print(f"Error Details: {exc}")
             traceback.print_exc()
-            print(f"------------------------\n")
+            print("------------------------\n")

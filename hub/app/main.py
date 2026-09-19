@@ -7,18 +7,30 @@
 FastAPI application factory for Pathfinder God Hub.
 """
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import health, ask, generate, rules, campaign, monitoring, combat, encounter, maps, loot
+from app.api import (
+    ask,
+    campaign,
+    combat,
+    encounter,
+    generate,
+    health,
+    loot,
+    maps,
+    monitoring,
+    rules,
+)
+from app.api.monitoring import MetricsMiddleware
 from app.api.security import (
     RateLimitMiddleware,
-    SecurityHeadersMiddleware,
     RequestLoggingMiddleware,
+    SecurityHeadersMiddleware,
 )
 from app.config import settings
 from app.db.repository import CampaignRepository
-from app.api.monitoring import MetricsMiddleware
 
 
 @asynccontextmanager

@@ -4,6 +4,6 @@
 # ============================================================
 """The GM 'brains': mode detection and prompt construction."""
 
-from .gm import detect_mode, build_prompt, MODE_INSTRUCTIONS
+from .gm import MODE_INSTRUCTIONS, build_prompt, detect_mode
 
-__all__ = ["detect_mode", "build_prompt", "MODE_INSTRUCTIONS"]
+__all__ = ["MODE_INSTRUCTIONS", "build_prompt", "detect_mode"]

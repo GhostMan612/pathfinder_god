@@ -9,21 +9,19 @@ Provides liveness, readiness, and detailed health checks.
 """
 from __future__ import annotations
 
-import time
 import platform
 import sys
-from typing import Optional
+import time
 from datetime import datetime
 
 import psutil
-from fastapi import APIRouter, Depends, HTTPException, Response
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi import APIRouter, Depends
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy import text
 
 from app.config import Settings, get_settings
 from app.db.repository import CampaignRepository, get_repo
-from app.rag.retriever import Retriever
 
 router = APIRouter(tags=["monitoring"])
 
@@ -307,32 +305,32 @@ async def metrics():
     """
     metrics = get_metrics()
     lines = [
-        f"# HELP http_requests_total Total HTTP requests",
-        f"# TYPE http_requests_total counter",
+        "# HELP http_requests_total Total HTTP requests",
+        "# TYPE http_requests_total counter",
         f"http_requests_total {_request_count}",
-        f"# HELP http_requests_per_second Requests per second",
-        f"# TYPE http_requests_per_second gauge",
+        "# HELP http_requests_per_second Requests per second",
+        "# TYPE http_requests_per_second gauge",
         f"http_requests_per_second {_request_count / (time.time() - _start_time) if time.time() > _start_time else 0:.2f}",
-        f"# HELP http_request_duration_ms Average response time in milliseconds",
-        f"# TYPE http_request_duration_ms gauge",
+        "# HELP http_request_duration_ms Average response time in milliseconds",
+        "# TYPE http_request_duration_ms gauge",
         f"http_request_duration_ms {_total_response_time / _request_count if _request_count > 0 else 0:.2f}",
-        f"# HELP http_error_rate Error rate",
-        f"# TYPE http_error_rate gauge",
+        "# HELP http_error_rate Error rate",
+        "# TYPE http_error_rate gauge",
         f"http_error_rate {_error_count / _request_count if _request_count > 0 else 0:.4f}",
-        f"# HELP process_uptime_seconds Process uptime in seconds",
-        f"# TYPE process_uptime_seconds gauge",
+        "# HELP process_uptime_seconds Process uptime in seconds",
+        "# TYPE process_uptime_seconds gauge",
         f"process_uptime_seconds {time.time() - _start_time:.1f}",
-        f"# HELP process_memory_mb Process memory usage in MB",
-        f"# TYPE process_memory_mb gauge",
+        "# HELP process_memory_mb Process memory usage in MB",
+        "# TYPE process_memory_mb gauge",
         f"process_memory_mb {psutil.Process().memory_info().rss / 1024 / 1024:.1f}",
-        f"# HELP process_cpu_percent Process CPU usage",
-        f"# TYPE process_cpu_percent gauge",
+        "# HELP process_cpu_percent Process CPU usage",
+        "# TYPE process_cpu_percent gauge",
         f"process_cpu_percent {psutil.cpu_percent()}",
-        f"# HELP system_memory_percent System memory usage",
-        f"# TYPE system_memory_percent gauge",
+        "# HELP system_memory_percent System memory usage",
+        "# TYPE system_memory_percent gauge",
         f"system_memory_percent {psutil.virtual_memory().percent}",
-        f"# HELP system_disk_percent System disk usage",
-        f"# TYPE system_disk_percent gauge",
+        "# HELP system_disk_percent System disk usage",
+        "# TYPE system_disk_percent gauge",
         f"system_disk_percent {psutil.disk_usage('/').percent}",
     ]
     

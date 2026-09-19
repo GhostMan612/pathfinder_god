@@ -28,7 +28,7 @@ class DiceTerm:
 
 @dataclass
 class TermResult:
-    term: "DiceTerm"
+    term: DiceTerm
     rolls: list[int]
     kept: list[int]
     subtotal: int
@@ -37,7 +37,7 @@ class TermResult:
 @dataclass
 class DiceResult:
     notation: str
-    terms: list["TermResult"]
+    terms: list[TermResult]
     total: int
 
     @property
@@ -70,7 +70,7 @@ class DiceRoller:
     def __init__(self, rng: random.Random | None = None):
         self._rng = rng or random.SystemRandom()
 
-    def roll(self, notation: str) -> "DiceResult":
+    def roll(self, notation: str) -> DiceResult:
         terms = self.parse(notation)
         results = []
         total = 0
@@ -80,7 +80,7 @@ class DiceRoller:
             total += r.subtotal
         return DiceResult(notation.strip(), results, total)
 
-    def _roll_term(self, term: "DiceTerm") -> "TermResult":
+    def _roll_term(self, term: DiceTerm) -> TermResult:
         if term.is_flat:
             v = term.sign * term.flat
             return TermResult(term, [], [], v)
@@ -96,7 +96,7 @@ class DiceRoller:
         return TermResult(term, rolls, kept, term.sign * s)
 
     @staticmethod
-    def parse(notation: str) -> list["DiceTerm"]:
+    def parse(notation: str) -> list[DiceTerm]:
         cleaned = notation.replace(" ", "").lower()
         if not cleaned:
             raise ValueError("empty notation")
@@ -114,7 +114,7 @@ class DiceRoller:
         return terms
 
 
-def _parse_body(sign: int, body: str) -> "DiceTerm":
+def _parse_body(sign: int, body: str) -> DiceTerm:
     if body.isdigit():
         return DiceTerm(sign=sign, count=0, sides=0, flat=int(body))
 

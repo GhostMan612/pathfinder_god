@@ -8,15 +8,14 @@
 import pytest
 
 from app.agents.encounter_builder import (
-    EncounterBuilderAgent,
-    THREAT_BUDGET_4,
-    THREAT_ADJ_PER_PLAYER,
     CREATURE_XP_BY_LEVEL_DIFF,
+    THREAT_ADJ_PER_PLAYER,
+    THREAT_BUDGET_4,
+    EncounterBuilderAgent,
 )
-
+from app.db.repository import CampaignRepository
 from app.llm.ollama_client import OllamaClient
 from app.rag.retriever import Retriever
-from app.db.repository import CampaignRepository
 
 
 class TestXPBudgetMath:
@@ -118,9 +117,6 @@ class TestEncounterBuilderAgent:
     def test_calculate_budget_delegates(self):
         """Agent delegates to calculate_budget."""
         from app.agents.encounter_builder import EncounterBuilderAgent
-        from app.llm.ollama_client import OllamaClient
-        from app.rag.retriever import Retriever
-        from app.db.repository import CampaignRepository
 
         # This is a structural test - just verify the agent can be instantiated
         # with proper dependencies
@@ -135,9 +131,6 @@ class TestEncounterBuilderAgent:
     def test_creature_xp_delegates(self):
         """Agent delegates to creature_xp."""
         from app.agents.encounter_builder import EncounterBuilderAgent
-        from app.llm.ollama_client import OllamaClient
-        from app.rag.retriever import Retriever
-        from app.db.repository import CampaignRepository
 
         agent = EncounterBuilderAgent(
             llm=OllamaClient("http://test"),

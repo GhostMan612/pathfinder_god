@@ -4,6 +4,6 @@
 # ============================================================
 """LLM backends with graceful 3-tier fallback."""
 
-from .backends import LLMRouter, LLMResult
+from .backends import LLMResult, LLMRouter
 
-__all__ = ["LLMRouter", "LLMResult"]
+__all__ = ["LLMResult", "LLMRouter"]

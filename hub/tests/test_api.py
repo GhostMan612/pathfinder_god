@@ -10,14 +10,12 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-
-# API key for authenticated endpoints
 TEST_API_KEY = "pfg_test_key_12345"
 
 
 @pytest.fixture(autouse=True)
 def _hermetic_hub(tmp_path: Path, monkeypatch):
-    import app.main as main
+    from app import main
     from app.api.deps import get_repo
     from app.db.repository import CampaignRepository
     from app.llm.ollama_client import OllamaClient
@@ -40,7 +38,7 @@ def _hermetic_hub(tmp_path: Path, monkeypatch):
 
 @pytest.fixture
 def client(rules_db_dir: Path):
-    import app.main as main
+    from app import main
 
     return TestClient(main.app)
 
@@ -48,15 +46,14 @@ def client(rules_db_dir: Path):
 @pytest.fixture
 def authenticated_client(rules_db_dir: Path):
     """Client with a valid API key for authenticated endpoints."""
-    import app.main as main
     from fastapi.testclient import TestClient
+
+    from app import main
 
     client = TestClient(main.app)
     client.headers["X-API-Key"] = "pfg_test_key_12345"
     return client
 
-
-# --- Public endpoints (no auth required) ---
 
 def test_health(client):
     r = client.get("/health")
@@ -75,17 +72,14 @@ def test_rules_search(client):
 
 
 def test_rules_search_edition_filter(client):
-    # 2e only
     r = client.get("/rules/search", params={"q": "flanking", "edition": "2e"})
     assert r.status_code == 200
     assert all(h["system"] == "2E" for h in r.json()["results"])
 
-    # 1e only
     r = client.get("/rules/search", params={"q": "flanking", "edition": "1e"})
     assert r.status_code == 200
     assert all(h["system"] == "1E" for h in r.json()["results"])
 
-    # both - returns 2E results (test DB behavior)
     r = client.get("/rules/search", params={"q": "flanking", "edition": "both"})
     assert r.status_code == 200
     systems = {h["system"] for h in r.json()["results"]}
@@ -108,8 +102,6 @@ def test_ask_local_only_backend(client):
     assert r.status_code == 200
     assert r.json()["backend"] in ("ollama", "raw-excerpts")
 
-
-# --- Authenticated endpoints (require API key) ---
 
 def test_ask_returns_answer(authenticated_client):
     r = authenticated_client.post("/ask", json={"query": "explain flanking", "edition": "2e"})
@@ -203,31 +195,3 @@ def test_ask_with_history(authenticated_client):
     })
     assert r.status_code == 200
     assert "answer" in r.json()
-
-
-def test_ask_local_only_backend(authenticated_client):
-    r = authenticated_client.post("/ask", json={"query": "test", "edition": "2e"})
-    assert r.status_code == 200
-    assert r.json()["backend"] in ("ollama", "raw-excerpts")
-
-
-def test_generate_invalid_kind_returns_400(authenticated_client):
-    r = authenticated_client.post("/generate/notakind", json={"prompt": "test"})
-    assert r.status_code == 400
-
-
-def test_rules_search_empty_query(authenticated_client):
-    r = authenticated_client.get("/rules/search", params={"q": "", "edition": "2e"})
-    assert r.status_code == 200
-    assert r.json()["results"] == []
-
-
-def test_generate_invalid_kind_returns_400(client):
-    r = client.post("/generate/notakind", json={"prompt": "test"})
-    assert r.status_code == 400
-
-
-def test_rules_search_empty_query(client):
-    r = client.get("/rules/search", params={"q": "", "edition": "2e"})
-    assert r.status_code == 200
-    assert r.json()["results"] == []

@@ -4,6 +4,6 @@
 # ============================================================
 """Retrieval-augmented generation over the local Pathfinder rules databases."""
 
-from .search import RuleHit, Retriever, normalize_edition
+from .search import Retriever, RuleHit, normalize_edition
 
-__all__ = ["RuleHit", "Retriever", "normalize_edition"]
+__all__ = ["Retriever", "RuleHit", "normalize_edition"]

@@ -17,15 +17,14 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any
 
 from app.agents.rules_lawyer import (
-    RulesLawyerAgent,
     CharacterSheetModel,
+    RulesLawyerAgent,
     ValidationResult,
 )
-from app.llm.ollama_client import OllamaClient
 from app.config import get_settings
+from app.llm.ollama_client import OllamaClient
 
 logger = logging.getLogger(__name__)
 
@@ -180,7 +179,11 @@ class CharacterBuilderAgent:
 # Synchronous wrapper for RulesLawyerAgent.validate_action to avoid async in build()
 # This mirrors the logic in rules_lawyer.py but sync
 def _sync_validate_action(lawyer: RulesLawyerAgent, action: str, character_sheet: dict) -> ValidationResult:
-    from app.agents.rules_lawyer import ACTION_SKILL, CharacterSheetModel, ValidationResult
+    from app.agents.rules_lawyer import (
+        ACTION_SKILL,
+        CharacterSheetModel,
+        ValidationResult,
+    )
     key = (action or "").strip().lower()
     first = key.split()[0] if key else ""
     skill = ACTION_SKILL.get(key) or ACTION_SKILL.get(first)

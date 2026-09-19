@@ -11,9 +11,7 @@ import json
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass, fields
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
 
 from app.config import settings
 
@@ -586,7 +584,7 @@ class CampaignRepository:
             ]
 
 
-def get_repo(data_dir: Optional[str] = None) -> CampaignRepository:
+def get_repo(data_dir: str | None = None) -> CampaignRepository:
     """Factory function to create a CampaignRepository instance."""
     if data_dir is None:
         from app.config import settings
