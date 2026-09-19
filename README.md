@@ -73,13 +73,20 @@ browse models, search rules, run generators, roll dice, chat with the God, watch
 
 ## Data & licensing
 
-- Rules DB: 44,620 rows built from open sources (Paizo PRD text via OGL, Pf2ools
-  MIT/CUP JSON, Community Use scrapes). Build scripts + source registry live in
-  `hub/scripts/`; the `.db` files themselves are git-ignored and reproducible.
-  Details: [`docs/database.md`](docs/database.md).
-- Personal use is fine. **Commercial redistribution rights for the bundled rules
-  DB are unverified** — resolve before any public release. Adventure-path prose
-  (Product Identity) is deliberately *not* scraped.
+- Rules DB: 44,620 rows built from open sources — Paizo PRD text under the
+  **Open Game License 1.0a**, Pf2ools JSON under **MIT**, and targeted
+  gap-fill scrapes under Paizo's **Community Use Policy**. Build scripts and
+  the source registry live in `hub/scripts/`; the `.db` files themselves are
+  git-ignored and reproducible.
+- **Personal / non-commercial use is unrestricted.** Adventure-path prose and
+  Golarion lore (Product Identity) are deliberately *not* scraped — mechanics
+  only.
+- **Commercial redistribution** of the bundled DB is limited by the CUP-sourced
+  rows; a commercially distributable build requires a Paizo license or a
+  rebuild excluding CUP sources (see
+  [`docs/database.md`](docs/database.md#redistribution-terms)). The *code* in
+  this repository is yours to license as you see fit — the caveat applies only
+  to the rules data.
 
 ## Cloning
 

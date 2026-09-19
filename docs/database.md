@@ -29,8 +29,22 @@ category, source_book`). Full column contract: [`../data/SCHEMA.md`](../data/SCH
 
 Fetched copies live under `hub/scripts/external/` (git-ignored, reproducible).
 **Deliberately excluded:** adventure-path prose and Golarion lore (Product
-Identity) — mechanics only. Personal use is fine; **commercial redistribution
-rights are unverified**.
+Identity) — mechanics only.
+
+### Redistribution terms
+
+| Content origin | License | Commercial redistribution |
+|---|---|---|
+| Paizo PRD (mechanics) | OGL 1.0a | Permitted with attribution + OGL notice |
+| Pf2ools JSON | MIT | Permitted |
+| pfsqlite YAML | Community Use | **Not permitted without a Paizo commercial license** |
+| AoN / d20pfsrd scrapes | CUP | **Not permitted without a Paizo commercial license** |
+
+**Personal / non-commercial use is unrestricted.** Any *public or commercial*
+distribution of a DB containing CUP-sourced rows requires either a commercial
+license from Paizo or a rebuild that strips CUP-tagged rows. Build scripts
+honor `sources.yaml` priorities, so a CUP-free DB can be produced by excluding
+those sources during `rebuild_rags.py`.
 
 ## Search ranking (hub + phone, identical tiers)
 
