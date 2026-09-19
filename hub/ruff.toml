@@ -1,0 +1,14 @@
+[lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path"]
+
+[lint]
+ignore = [
+    "BLE001", # Allow catching generic Exceptions for LLM fallbacks
+    "S110",   # Allow try/except/pass
+    "S112",   # Allow try/except/continue
+    "DTZ003", # Allow standard datetime.utcnow()
+    "RUF059", # Allow unused unpacked variables in tests
+    "RUF022", # Allow unsorted __all__ lists
+    "SIM102", # Allow nested if statements
+    "F841",   # Allow unused variables
+]

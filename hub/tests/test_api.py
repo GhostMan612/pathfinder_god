@@ -14,11 +14,20 @@ TEST_API_KEY = "pfg_test_key_12345"
 
 
 @pytest.fixture(autouse=True)
-def _hermetic_hub(tmp_path: Path, monkeypatch):
+def _hermetic_hub(tmp_path: Path, monkeypatch, rules_db_dir: Path):
+    import app.config
     from app import main
     from app.api.deps import get_repo
+    from app.config import Settings, get_settings
     from app.db.repository import CampaignRepository
     from app.llm.ollama_client import OllamaClient
+
+    test_settings = Settings(
+        data_dir=rules_db_dir,
+        campaign_state_path=tmp_path / "campaign_state.json"
+    )
+
+    monkeypatch.setattr(app.config, "get_settings", lambda: test_settings)
 
     async def fake_generate(self, **kwargs):
         return "Fake answer from the God."
@@ -29,9 +38,11 @@ def _hermetic_hub(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(OllamaClient, "generate", fake_generate)
     monkeypatch.setattr(OllamaClient, "stream", fake_stream)
+    
     main.app.dependency_overrides[get_repo] = lambda: CampaignRepository(
         str(tmp_path / "campaign.db")
     )
+    main.app.dependency_overrides[get_settings] = lambda: test_settings
     yield
     main.app.dependency_overrides.clear()
 
