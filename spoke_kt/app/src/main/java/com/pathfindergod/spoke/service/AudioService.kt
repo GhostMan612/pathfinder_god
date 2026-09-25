@@ -14,10 +14,10 @@ import android.media.SoundPool
 class AudioService(context: Context) {
 
     companion object {
-        const val SFX_CLATTER = "audio/dice_heavy.ogg"
-        const val SFX_CRIT = "audio/dice_crit_chime.wav"
-        const val BGM_TAVERN = "audio/bgm_tavern_rowdy.mp3"
-        const val BGM_INN = "audio/bgm_inn.ogg"
+        const val SFX_CLATTER = "audio/dice_roll.ogg"
+        const val SFX_CRIT = "audio/dice_crit.wav"
+        const val BGM_TAVERN = "audio/bgm_tavern.mp3"
+        const val BGM_INN = "audio/bgm_inn.mp3"
     }
 
     private val assets = context.assets
