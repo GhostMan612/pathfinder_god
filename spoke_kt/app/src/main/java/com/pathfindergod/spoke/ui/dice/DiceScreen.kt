@@ -64,13 +64,20 @@ fun DiceScreen() {
             face = record?.kept?.firstOrNull() ?: selected.sides,
             rollToken = rollToken,
             modifier = Modifier.size(180.dp).align(Alignment.CenterHorizontally),
+            impact = record?.impact ?: Impact.NORMAL,
             onImpact = {
-                if (Build.VERSION.SDK_INT >= 27) {
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                } else {
+                val dramatic = record?.impact != null &&
+                    record?.impact != Impact.NORMAL
+                if (dramatic || Build.VERSION.SDK_INT < 27) {
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                } else {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 }
-                audio.playClatter()
+                if (record?.impact == Impact.CRITICAL_SUCCESS) {
+                    audio.playCritChime()
+                } else {
+                    audio.playClatter()
+                }
             },
         )
         Text(
