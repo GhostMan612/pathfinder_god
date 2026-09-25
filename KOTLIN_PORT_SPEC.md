@@ -1,5 +1,5 @@
 <!-- As Above, So Below. As Within, So Without. The Future Dictates the Past and the Past is Always Present. -->
-# Pathfinder God — Kotlin/AGDK Port Specification (Muse Spark 1.3)
+# Pathfinder God — Kotlin Port Specification (Muse Spark 1.3)
 > **STATUS: COMPLETE (Phase 22, 2026-09-18).** The Flutter spoke is deleted;
 > `spoke_kt/` is the client. This document is now a build record — as-built
 > wins over any forward-looking passage below.
@@ -138,38 +138,35 @@ acceptable; keep separate DBs only if migration risk demands it.
 - Offline tiers preserved: bundled FTS5 → hub → miss queue → on-demand
   scrape; `GET /rules/fetch` results upserted locally.
 
-## 4. Native Performance (AGDK libraries, no engine)
+## 4. Native Performance (no AGDK, no engine)
 
 Terminal decision: the UI is pure 2D Jetpack Compose. No Unity, no Godot,
 no native render surface, no JNI bridge skeleton — earlier drafts reserved
 a `GodotBridge.kt` seam and a Vulkan/Filament dice pilot; both are deleted
 from the plan. `MainActivity` stays a standard Compose
 `ComponentActivity` (not `GameActivity` — there is no surface to host).
-What survives from AGDK is libraries only, applied to the 2D UI:
+The AGDK artifacts (`games-activity`, `games-frame-pacing`) were removed
+from the build entirely: nothing referenced them. As built:
 
-- Audio: migrate dice SFX to **Oboe** (`AAudio`, low-latency stream,
-  `PerformanceMode::LowLatency`) reusing the pooled-player design
-  (4 voices) and the existing CC0/CC-BY asset set; BGM stays on
-  `MediaPlayer` loop.
-- Dice motion: port the `dice_physics.dart` tumble curves to Compose
-  `Animatable`/`Transition` canvas drawing (deterministic result stays
-  in Kotlin; presentation only) — no 3D scene, no swapchain.
-- Jank telemetry: **Tuning Fork** + `games-frame-pacing` AARs stay on the
-  BOM for frame-time histograms around the Compose dice/map canvases.
+- Audio: dice SFX on framework **SoundPool** (4-voice pool) and BGM loops
+  on `MediaPlayer`, using the restored CC0/CC-BY asset set — no Oboe.
+- Dice motion: `dice_physics.dart` tumble curves ported to Compose
+  `Animatable` canvas drawing with haptic + clatter impact hooks.
+- Jank telemetry: standard Android Studio profilers (no native surface
+  to pace).
 
 ## 5. Build, Test, Rollout
 
 - UI architecture (locked): pure 2D Jetpack Compose is terminal. No
-  Unity/Godot integration at any milestone — §§4–5 describe libraries,
-  ViewModels, and Compose screens only.
+  Unity/Godot integration at any milestone — §§4–5 describe ViewModels
+  and Compose screens only.
 - Modules: `:app` only (single-module app, as built). Pinned as-built:
   AGP 9.0.1 (built-in Kotlin — no `kotlin.android` plugin, no kapt),
   KSP 2.3.4 + Room 2.7.0 (2.6.1's processor crashes on new Kotlin),
   Compose BOM 2024.10.01 (newer BOMs demand compileSdk 35; directive
   holds 34), SDK floor compileSdk/targetSdk 34 + minSdk 26 (as built in
   `app/build.gradle.kts`), `mil.nga:sqlite-android:3450200`,
-  Retrofit 2.11/OkHttp 4.12,
-  AGDK games-activity/frame-pacing. `androidx.sqlite` 2.5 interfaces are
+  Retrofit 2.11/OkHttp 4.12. `androidx.sqlite` 2.5 interfaces are
   Kotlin properties (`override val/var`, `Array<out Any?>` bind args).
 - Tests: JUnit5 + Turbine (`CombatViewModel` end-turn notes event,
   `GodChatViewModel` retry frame clears text), Robolectric for DAOs,
@@ -183,6 +180,7 @@ What survives from AGDK is libraries only, applied to the 2D UI:
   bazaar, encounter, FileProvider export, vault→tracker bridge) — done.
   Superseded without execution: Oboe migration (SoundPool serves), AGDK
   surface milestone (no engine per terminal decision), baseline profiles.
+  AGDK artifacts removed from the build (nothing referenced them).
   Acceptance held: hub `pytest` green, wire payloads byte-identical to
   `openapi.yaml`.
 - Risks: platform SQLite without FTS5 (§2 — mitigated by the NGA
