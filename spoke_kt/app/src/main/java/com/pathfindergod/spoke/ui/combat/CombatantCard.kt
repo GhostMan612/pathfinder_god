@@ -5,20 +5,33 @@
 
 package com.pathfindergod.spoke.ui.combat
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -52,11 +65,52 @@ fun CombatantCard(
     onRemoveCondition: (String) -> Unit,
 ) {
     var picking by rememberSaveable { mutableStateOf(false) }
+    val fraction = if (combatant.maxHp > 0) {
+        (combatant.currentHp.toFloat() / combatant.maxHp).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+    val barColor = if (fraction < 0.5f) CritRed else GoldAccent
+    val ghost by animateFloatAsState(
+        targetValue = fraction,
+        animationSpec = tween(durationMillis = 700, delayMillis = 350),
+    )
+    val border by animateColorAsState(
+        targetValue = if (isActive) GoldAccent else GoldAccent.copy(alpha = 0.35f),
+        animationSpec = tween(400),
+    )
+    var lastHp by remember { mutableStateOf(combatant.currentHp) }
+    var floater by remember { mutableStateOf<Int?>(null) }
+    val rise = remember { Animatable(0f) }
+    val shake = remember { Animatable(0f) }
+    LaunchedEffect(combatant.currentHp) {
+        val delta = combatant.currentHp - lastHp
+        lastHp = combatant.currentHp
+        if (delta != 0) {
+            floater = delta
+            launch {
+                rise.snapTo(0f)
+                rise.animateTo(1f, tween(900))
+                floater = null
+            }
+            if (delta < 0) {
+                launch {
+                    shake.snapTo(-12f)
+                    shake.animateTo(
+                        0f,
+                        spring(Spring.DampingRatioHighBouncy, Spring.StiffnessMedium),
+                    )
+                }
+            }
+        }
+    }
     Column(
-        modifier = modifier.rpgPanel(
-            fill = if (isActive) ParchmentSurface else VoidBackground,
-            border = if (isActive) GoldAccent else GoldAccent.copy(alpha = 0.35f),
-        ).fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+        modifier = modifier
+            .graphicsLayer { translationX = shake.value }
+            .rpgPanel(
+                fill = if (isActive) ParchmentSurface else VoidBackground,
+                border = border,
+            ).fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(
@@ -105,23 +159,52 @@ fun CombatantCard(
                     }
                 }
             }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = "${combatant.currentHp}/${combatant.maxHp}",
-                    style = GodTypography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = if (combatant.maxHp > 0 && combatant.currentHp * 2 < combatant.maxHp) {
-                        CritRed
-                    } else {
-                        TextPrimary
-                    },
-                )
-                Text(
-                    text = "HP",
-                    style = GodTypography.labelLarge,
-                    color = TextSecondary,
-                )
+            Box(contentAlignment = Alignment.TopCenter) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "${combatant.currentHp}/${combatant.maxHp}",
+                        style = GodTypography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (combatant.maxHp > 0 && combatant.currentHp * 2 < combatant.maxHp) {
+                            CritRed
+                        } else {
+                            TextPrimary
+                        },
+                    )
+                    Text(
+                        text = "HP",
+                        style = GodTypography.labelLarge,
+                        color = TextSecondary,
+                    )
+                }
+                val amount = floater
+                if (amount != null && rise.value < 1f) {
+                    Text(
+                        text = if (amount > 0) "+$amount" else "$amount",
+                        style = GodTypography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (amount > 0) GoldAccent else CritRed,
+                        modifier = Modifier.graphicsLayer {
+                            translationY = -rise.value * 44f
+                            alpha = 1f - rise.value
+                        },
+                    )
+                }
             }
+        }
+        Box(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+            Box(
+                modifier = Modifier.fillMaxWidth().height(8.dp)
+                    .background(TextSecondary.copy(alpha = 0.25f)),
+            )
+            Box(
+                modifier = Modifier.fillMaxWidth(ghost).height(8.dp)
+                    .background(barColor.copy(alpha = 0.45f)),
+            )
+            Box(
+                modifier = Modifier.fillMaxWidth(fraction).height(8.dp)
+                    .background(barColor),
+            )
         }
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
