@@ -86,8 +86,8 @@ $env:JAVA_HOME='C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1
 ## Dependencies (spoke_kt)
 - Compose BOM 2024.10.01 (ui, material3, icons-extended, animation), activity-compose, lifecycle-viewmodel-compose
 - Room 2.7.0 (KSP 2.3.4) + `mil.nga:sqlite-android:3450200` (Android SQLite lacks FTS5 — never the platform driver)
-- Retrofit 2.11/OkHttp 4.12 + kotlinx-serialization converter
-- Audio is framework `SoundPool` + `MediaPlayer` (no Oboe dependency; AGDK artifacts removed — nothing referenced them)
+- Retrofit 2.11/OkHttp 4.12 + kotlinx-serialization converter; AGDK games-activity/frame-pacing
+- Audio is framework `SoundPool` + `MediaPlayer` (no Oboe dependency)
 
 ## Gotchas
 - Android emulator → hub at `http://10.0.2.2:8000` (not localhost)
