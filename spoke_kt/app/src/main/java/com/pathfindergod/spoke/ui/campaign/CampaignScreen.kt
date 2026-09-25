@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import com.pathfindergod.spoke.ui.motion.StaggerIn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -151,17 +153,18 @@ fun CampaignScreen(
                     modifier = Modifier.fillMaxWidth().weight(1f).padding(top = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    items(notes, key = { it.hashCode() }) { note ->
-                        Text(
-                            text = note,
-                            style = GodTypography.bodyMedium,
-                            color = TextPrimary,
-                            modifier = Modifier
-                                .animateItem()
-                                .rpgPanel()
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                        )
+                    itemsIndexed(notes, key = { _, note -> note.hashCode() }) { index, note ->
+                        StaggerIn(index = index, modifier = Modifier.animateItem()) {
+                            Text(
+                                text = note,
+                                style = GodTypography.bodyMedium,
+                                color = TextPrimary,
+                                modifier = Modifier
+                                    .rpgPanel()
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                            )
+                        }
                     }
                 }
                 Box(

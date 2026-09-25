@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import com.pathfindergod.spoke.ui.motion.StaggerIn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardOptions
@@ -180,15 +181,16 @@ fun CombatTrackerScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 itemsIndexed(state.combatants, key = { _, combatant -> combatant.id }) { index, combatant ->
-                    CombatantCard(
-                        combatant = combatant,
-                        isActive = index == state.activeIndex,
-                        modifier = Modifier.animateItem(),
-                        onDamage = { viewModel.updateHp(combatant.id, -5) },
-                        onHeal = { viewModel.updateHp(combatant.id, 5) },
-                        onAddCondition = { viewModel.addCondition(combatant.id, it) },
-                        onRemoveCondition = { viewModel.removeCondition(combatant.id, it) },
-                    )
+                    StaggerIn(index = index, modifier = Modifier.animateItem()) {
+                        CombatantCard(
+                            combatant = combatant,
+                            isActive = index == state.activeIndex,
+                            onDamage = { viewModel.updateHp(combatant.id, -5) },
+                            onHeal = { viewModel.updateHp(combatant.id, 5) },
+                            onAddCondition = { viewModel.addCondition(combatant.id, it) },
+                            onRemoveCondition = { viewModel.removeCondition(combatant.id, it) },
+                        )
+                    }
                 }
             }
         }
@@ -235,19 +237,21 @@ fun CombatTrackerScreen(
                         )
                     } else {
                         LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
-                            items(vault, key = { it.id }) { saved ->
-                                Text(
-                                    text = "${saved.threat} · ${saved.theme}",
-                                    style = GodTypography.bodyMedium,
-                                    color = TextPrimary,
-                                    modifier = Modifier
-                                        .clickable {
-                                            viewModel.loadEncounter(saved.id)
-                                            summoning = false
-                                        }
-                                        .fillMaxWidth()
-                                        .padding(vertical = 8.dp),
-                                )
+                            itemsIndexed(vault, key = { _, saved -> saved.id }) { index, saved ->
+                                StaggerIn(index = index) {
+                                    Text(
+                                        text = "${saved.threat} · ${saved.theme}",
+                                        style = GodTypography.bodyMedium,
+                                        color = TextPrimary,
+                                        modifier = Modifier
+                                            .clickable {
+                                                viewModel.loadEncounter(saved.id)
+                                                summoning = false
+                                            }
+                                            .fillMaxWidth()
+                                            .padding(vertical = 8.dp),
+                                    )
+                                }
                             }
                         }
                     }

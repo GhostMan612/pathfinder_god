@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import com.pathfindergod.spoke.ui.motion.StaggerIn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -155,12 +157,14 @@ fun DiceScreen() {
             modifier = Modifier.fillMaxWidth().weight(1f),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            items(history) { entry ->
-                Text(
-                    text = "${entry.notation} → ${entry.total}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextSecondary,
-                )
+            itemsIndexed(history) { index, entry ->
+                StaggerIn(index = index) {
+                    Text(
+                        text = "${entry.notation} → ${entry.total}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary,
+                    )
+                }
             }
         }
     }

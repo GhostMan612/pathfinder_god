@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import com.pathfindergod.spoke.ui.motion.StaggerIn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -182,8 +184,10 @@ private fun OracleBody(
                 modifier = Modifier.fillMaxWidth().weight(1f).padding(top = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(state.results, key = { it.rowId }) { rule ->
-                    RuleCard(rule = rule, modifier = Modifier.animateItem())
+                itemsIndexed(state.results, key = { _, rule -> rule.rowId }) { index, rule ->
+                    StaggerIn(index = index, modifier = Modifier.animateItem()) {
+                        RuleCard(rule = rule)
+                    }
                 }
             }
         }

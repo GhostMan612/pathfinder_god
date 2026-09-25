@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import com.pathfindergod.spoke.ui.motion.StaggerIn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -97,13 +99,17 @@ fun CharacterListScreen(
                 modifier = Modifier.fillMaxSize().padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(state.characters, key = { it.id }) { character ->
-                    CharacterCard(
-                        character = character,
-                        modifier = Modifier.animateItem(),
-                        onSelect = { onSelect(character.id) },
-                        onDelete = { viewModel.delete(character.id) },
-                    )
+                itemsIndexed(
+                    state.characters,
+                    key = { _, character -> character.id },
+                ) { index, character ->
+                    StaggerIn(index = index, modifier = Modifier.animateItem()) {
+                        CharacterCard(
+                            character = character,
+                            onSelect = { onSelect(character.id) },
+                            onDelete = { viewModel.delete(character.id) },
+                        )
+                    }
                 }
             }
         }

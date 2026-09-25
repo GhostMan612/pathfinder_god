@@ -5,6 +5,13 @@
 
 package com.pathfindergod.spoke.ui.navigation
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,7 +34,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.pathfindergod.spoke.ui.character.CharacterDetailScreen
 import com.pathfindergod.spoke.ui.character.CharacterDetailScreen
 import com.pathfindergod.spoke.ui.character.CharacterListScreen
 import com.pathfindergod.spoke.ui.character.rememberCharacterViewModel
@@ -87,13 +93,22 @@ fun NavigationShell() {
             }
         },
     ) { padding ->
-        Box(
+        AnimatedContent(
+            targetState = selected,
+            transitionSpec = {
+                val direction = if (targetState > initialState) 1 else -1
+                (slideInHorizontally(spring(stiffness = 400f)) { it / 3 * direction } +
+                    fadeIn()) togetherWith
+                    (slideOutHorizontally(spring(stiffness = 400f)) { -it / 3 * direction } +
+                        fadeOut())
+            },
+            label = "tabs",
             modifier = Modifier
                 .fillMaxSize()
                 .background(VoidBackground)
                 .padding(padding),
-        ) {
-            when (items[selected]) {
+        ) { tab ->
+            when (items[tab]) {
                 NavigationItem.DICE -> DiceScreen()
                 NavigationItem.ENCOUNTER -> {
                     EncounterScreen(viewModel = rememberEncounterViewModel())

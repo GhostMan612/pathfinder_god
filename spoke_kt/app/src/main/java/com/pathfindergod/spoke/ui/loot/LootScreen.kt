@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import com.pathfindergod.spoke.ui.motion.StaggerIn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
@@ -190,12 +192,10 @@ private fun HoardList(
         modifier = modifier.fillMaxWidth().padding(top = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        items(items, key = { it.name + it.level }) { item ->
-            LootCard(
-                item = item,
-                craftDc = craftDc,
-                modifier = Modifier.animateItem(),
-            )
+        itemsIndexed(items, key = { _, item -> item.name + item.level }) { index, item ->
+            StaggerIn(index = index, modifier = Modifier.animateItem()) {
+                LootCard(item = item, craftDc = craftDc)
+            }
         }
     }
 }

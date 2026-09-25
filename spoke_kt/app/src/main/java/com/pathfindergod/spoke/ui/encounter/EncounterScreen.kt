@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import com.pathfindergod.spoke.ui.motion.StaggerIn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
@@ -189,8 +191,13 @@ fun EncounterScreen(
                         )
                     }
                 }
-                items(state.activeMonsters, key = { it.name + it.level }) { monster ->
-                    MonsterCard(monster = monster, modifier = Modifier.animateItem())
+                itemsIndexed(
+                    state.activeMonsters,
+                    key = { _, monster -> monster.name + monster.level },
+                ) { index, monster ->
+                    StaggerIn(index = index, modifier = Modifier.animateItem()) {
+                        MonsterCard(monster = monster)
+                    }
                 }
                 if (state.encounters.isNotEmpty()) {
                     item(key = "vault") {
@@ -201,14 +208,15 @@ fun EncounterScreen(
                             modifier = Modifier.padding(top = 8.dp),
                         )
                     }
-                    state.encounters.forEach { saved ->
+                    state.encounters.forEachIndexed { index, saved ->
                         item(key = "vault-${saved.id}") {
-                            VaultRow(
-                                encounter = saved,
-                                modifier = Modifier.animateItem(),
-                                onSelect = { viewModel.inspect(saved) },
-                                onDelete = { viewModel.delete(saved.id) },
-                            )
+                            StaggerIn(index = index, modifier = Modifier.animateItem()) {
+                                VaultRow(
+                                    encounter = saved,
+                                    onSelect = { viewModel.inspect(saved) },
+                                    onDelete = { viewModel.delete(saved.id) },
+                                )
+                            }
                         }
                     }
                 }

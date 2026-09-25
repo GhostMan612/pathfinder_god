@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.itemsIndexed
+import com.pathfindergod.spoke.ui.motion.StaggerIn
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -133,13 +135,17 @@ fun MapListScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    items(state.maps, key = { it.id }) { map ->
-                        MapCard(
-                            map = map,
-                            modifier = Modifier.animateItem(),
-                            onSelect = { onSelect(map.id) },
-                            onDelete = { viewModel.delete(map.id) },
-                        )
+                    itemsIndexed(
+                        state.maps,
+                        key = { _, map -> map.id },
+                    ) { index, map ->
+                        StaggerIn(index = index, modifier = Modifier.animateItem()) {
+                            MapCard(
+                                map = map,
+                                onSelect = { onSelect(map.id) },
+                                onDelete = { viewModel.delete(map.id) },
+                            )
+                        }
                     }
                 }
             }
