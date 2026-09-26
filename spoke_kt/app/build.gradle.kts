@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.pathfindergod.spoke"
-    compileSdk = 34
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.pathfindergod.spoke"
@@ -57,6 +57,9 @@ dependencies {
     implementation("androidx.room:room-ktx:2.7.0")
     ksp("androidx.room:room-compiler:2.7.0")
     implementation("mil.nga:sqlite-android:3450200")
+
+    implementation("com.google.android.filament:filament-android:1.76.0")
+    implementation("com.google.android.filament:filamat-android:1.76.0")
 
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
     implementation("com.squareup.retrofit2:converter-kotlinx-serialization:2.11.0")

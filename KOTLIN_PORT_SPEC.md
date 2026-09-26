@@ -165,9 +165,9 @@ What survives from AGDK is libraries only, applied to the 2D UI:
 - Modules: `:app` only (single-module app, as built). Pinned as-built:
   AGP 9.0.1 (built-in Kotlin — no `kotlin.android` plugin, no kapt),
   KSP 2.3.4 + Room 2.7.0 (2.6.1's processor crashes on new Kotlin),
-  Compose BOM 2024.10.01 (newer BOMs demand compileSdk 35; directive
-  holds 34), SDK floor compileSdk/targetSdk 34 + minSdk 26 (as built in
-  `app/build.gradle.kts`), `mil.nga:sqlite-android:3450200`,
+  Compose BOM 2024.10.01, SDK floor compileSdk 37 (Filament 1.76 demands
+  it) + targetSdk 34 + minSdk 26 (as built in `app/build.gradle.kts`),
+  `mil.nga:sqlite-android:3450200`, Filament + filamat 1.76.0,
   Retrofit 2.11/OkHttp 4.12,
   AGDK games-activity/frame-pacing. `androidx.sqlite` 2.5 interfaces are
   Kotlin properties (`override val/var`, `Array<out Any?>` bind args).

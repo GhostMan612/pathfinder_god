@@ -67,7 +67,7 @@ $env:JAVA_HOME='C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1
 - **Separation**: every micro-agent (GM, encounter, loot, continuity, maps) runs on the Python Hub. Kotlin is strictly state-management (`ViewModel`/`StateFlow`) + rendering (Compose) — no LLM, no rules logic on-device beyond the bundled FTS5 read path.
 - **Contract is law**: `shared/openapi.yaml` (26 paths) — Retrofit endpoints and WS frames must match it byte-for-byte. Emulator → `http://10.0.2.2:8000`; real device → laptop LAN IP.
 - **Local-only**: Hub LLM is Ollama (`127.0.0.1:11450`) → raw FTS5 excerpts. No cloud tiers, no API keys anywhere in the lane.
-- **Owner**: `.opencode/agent/native-dev.md` (AGP 9.0.1 + KSP 2.3.4 + Room 2.7.0, NGA sqlite-android for FTS5, compile/target 34, min 26).
+- **Owner**: `.opencode/agent/native-dev.md` (AGP 9.0.1 + KSP 2.3.4 + Room 2.7.0, NGA sqlite-android for FTS5, Filament 1.76, compile 37 / target 34, min 26).
 - **Terminal UI**: pure 2D Jetpack Compose. No Unity/Godot, no native render surface — game-feel comes from Compose canvas animation + SoundPool audio, not an engine.
 
 ## Current State

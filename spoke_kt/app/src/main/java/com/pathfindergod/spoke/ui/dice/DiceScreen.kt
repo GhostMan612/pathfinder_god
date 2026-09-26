@@ -27,6 +27,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,6 +35,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.pathfindergod.spoke.service.AudioService
+import com.pathfindergod.spoke.ui.pit.FilamentPit
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.pathfindergod.spoke.ui.theme.GoldAccent
@@ -55,31 +57,76 @@ fun DiceScreen() {
     var record by remember { mutableStateOf<RollRecord?>(null) }
     var history by remember { mutableStateOf(emptyList<RollRecord>()) }
     var rollToken by remember { mutableIntStateOf(0) }
+    var pit by rememberSaveable { mutableStateOf(false) }
+    val fireImpact: () -> Unit = {
+        val dramatic = record?.impact != null &&
+            record?.impact != Impact.NORMAL
+        if (dramatic || Build.VERSION.SDK_INT < 27) {
+            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        } else {
+            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        }
+        if (record?.impact == Impact.CRITICAL_SUCCESS) {
+            audio.playCritChime()
+        } else {
+            audio.playClatter()
+        }
+    }
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        DiceCanvas(
-            die = selected,
-            face = record?.kept?.firstOrNull() ?: selected.sides,
-            rollToken = rollToken,
-            modifier = Modifier.size(180.dp).align(Alignment.CenterHorizontally),
-            impact = record?.impact ?: Impact.NORMAL,
-            onImpact = {
-                val dramatic = record?.impact != null &&
-                    record?.impact != Impact.NORMAL
-                if (dramatic || Build.VERSION.SDK_INT < 27) {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                } else {
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        if (pit && selected == Die.D20) {
+            FilamentPit(
+                rollToken = rollToken,
+                impact = record?.impact ?: Impact.NORMAL,
+                modifier = Modifier.size(220.dp).align(Alignment.CenterHorizontally),
+                onImpact = fireImpact,
+            )
+        } else {
+            DiceCanvas(
+                die = selected,
+                face = record?.kept?.firstOrNull() ?: selected.sides,
+                rollToken = rollToken,
+                modifier = Modifier.size(180.dp).align(Alignment.CenterHorizontally),
+                impact = record?.impact ?: Impact.NORMAL,
+                onImpact = fireImpact,
+            )
+        }
+        if (selected == Die.D20) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(
+                    8.dp,
+                    Alignment.CenterHorizontally,
+                ),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .rpgPanel()
+                        .clickable { pit = false }
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                ) {
+                    Text(
+                        text = "Canvas",
+                        color = if (!pit) GoldAccent else TextSecondary,
+                        fontWeight = if (!pit) FontWeight.Bold else FontWeight.Normal,
+                    )
                 }
-                if (record?.impact == Impact.CRITICAL_SUCCESS) {
-                    audio.playCritChime()
-                } else {
-                    audio.playClatter()
+                Box(
+                    modifier = Modifier
+                        .rpgPanel()
+                        .clickable { pit = true }
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                ) {
+                    Text(
+                        text = "Pit",
+                        color = if (pit) GoldAccent else TextSecondary,
+                        fontWeight = if (pit) FontWeight.Bold else FontWeight.Normal,
+                    )
                 }
-            },
-        )
+            }
+        }
         Text(
             text = record?.let { "${it.total}" } ?: "—",
             style = MaterialTheme.typography.displayLarge,
@@ -101,7 +148,10 @@ fun DiceScreen() {
                 Box(
                     modifier = Modifier
                         .rpgPanel()
-                        .clickable { selected = die }
+                        .clickable {
+                            selected = die
+                            if (die != Die.D20) pit = false
+                        }
                         .padding(horizontal = 10.dp, vertical = 8.dp),
                 ) {
                     Text(
