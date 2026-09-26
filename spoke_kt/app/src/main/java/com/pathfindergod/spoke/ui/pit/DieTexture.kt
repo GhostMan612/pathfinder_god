@@ -21,7 +21,7 @@ object DieTexture {
     private const val INK = 0xFF2B2118.toInt()
     private const val GOLD = 0xFFC8A846.toInt()
 
-    fun build(numbers: IntArray): Bitmap {
+    fun build(numbers: IntArray, kinds: IntArray): Bitmap {
         val bitmap = Bitmap.createBitmap(WIDTH, HEIGHT, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         val fill = Paint().apply { style = Paint.Style.FILL }
@@ -38,16 +38,21 @@ object DieTexture {
             isAntiAlias = true
             typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
         }
-        for (face in 0 until DieMeshBuilder.FACE_COUNT) {
+        for (face in numbers.indices) {
             val col = face % DieMeshBuilder.COLS
             val row = face / DieMeshBuilder.COLS
             val left = col * TILE.toFloat()
             val top = row * TILE.toFloat()
             fill.color = if (face % 2 == 0) PARCHMENT_A else PARCHMENT_B
             canvas.drawRect(left, top, left + TILE, top + TILE, fill)
+            val corners = when (kinds[face]) {
+                DieMeshBuilder.QUAD -> 4
+                DieMeshBuilder.PENT -> 5
+                else -> 3
+            }
             val path = android.graphics.Path().apply {
-                for (corner in 0 until 3) {
-                    val (fx, fy) = DieMeshBuilder.tileCorner(corner)
+                for (corner in 0 until corners) {
+                    val (fx, fy) = DieMeshBuilder.tileCorner(kinds[face], corner)
                     val x = left + fx * TILE
                     val y = top + fy * TILE
                     if (corner == 0) moveTo(x, y) else lineTo(x, y)

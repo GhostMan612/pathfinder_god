@@ -24,7 +24,7 @@ Point the app at the hub once: **Setup → Tether**, enter the laptop's LAN addr
 
 | Tab | What | Needs the hub? |
 |---|---|---|
-| Dice | Notation engine (`2d6+3`, `kh`, advantage) + spring-physics canvas, haptics + SFX | No — fully offline |
+| Dice | Notation engine (`2d6+3`, `kh`, advantage) + spring canvas or Filament 3D pit (all six dice), haptics + SFX | No — fully offline |
 | God | Loot bazaar: level/budget/theme commissions, rune-validated drops | Yes |
 | Hero | Roster + sheet (AC/HP/abilities/proficiencies/feats), Room-backed, shareable | No — local |
 | Rules | FTS5 oracle: live search + 1e/2e chips, expandable hits | No — on-device extract |

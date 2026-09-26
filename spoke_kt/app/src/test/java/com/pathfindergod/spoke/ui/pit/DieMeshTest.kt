@@ -5,6 +5,7 @@
 
 package com.pathfindergod.spoke.ui.pit
 
+import com.pathfindergod.spoke.ui.dice.Die
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -12,74 +13,118 @@ import kotlin.math.sqrt
 
 class DieMeshTest {
 
-    @Test
-    fun layoutCounts() {
-        val mesh = DieMeshBuilder.build()
-        assertEquals(20 * 9, mesh.positions.size)
-        assertEquals(20 * 6, mesh.uvs.size)
-        assertEquals(60, mesh.indices.size)
-        assertEquals(20, mesh.faceNumbers.size)
-        mesh.indices.forEachIndexed { i, s -> assertEquals(i.toShort(), s) }
-    }
+    private data class Expectation(
+        val faces: Int,
+        val numbers: List<Int>,
+        val pairSum: Int?,
+    )
+
+    private val expectations = mapOf(
+        Die.D4 to Expectation(4, (1..4).toList(), null),
+        Die.D6 to Expectation(6, (1..6).toList(), 7),
+        Die.D8 to Expectation(8, (1..8).toList(), 9),
+        Die.D10 to Expectation(10, (0..9).toList(), 9),
+        Die.D12 to Expectation(12, (1..12).toList(), 13),
+        Die.D20 to Expectation(20, (1..20).toList(), 21),
+    )
 
     @Test
-    fun numbersFormOppositePairs() {
-        val mesh = DieMeshBuilder.build()
-        assertEquals((1..20).toList(), mesh.faceNumbers.sorted().toList())
-        val normals = faceNormals(mesh)
-        for (i in 0 until 20) {
-            val mate = (0 until 20).first { k ->
-                k != i && dot(normals[i], normals[k]) < -0.999f
-            }
-            assertEquals(21, mesh.faceNumbers[i] + mesh.faceNumbers[mate])
+    fun everyDieBuildsCleanly() {
+        for (die in Die.entries) {
+            val mesh = DieMeshBuilder.build(die)
+            val expect = expectations.getValue(die)
+            assertEquals(expect.faces, expect.faces.let { mesh.faceNumbers.size })
+            assertEquals(expect.numbers.sorted(), mesh.faceNumbers.sorted().toList())
+            val tris = mesh.indices.size / 3
+            assertEquals(tris * 9, mesh.positions.size)
+            assertEquals(tris * 6, mesh.uvs.size)
+            assertEquals(expect.faces, mesh.faceKinds.size)
+            assertEquals(expect.faces, mesh.facePoints.size)
+            mesh.uvs.forEach { uv -> assertTrue("$die uv $uv", uv >= 0f && uv <= 1f) }
         }
     }
 
     @Test
     fun facesWoundOutward() {
-        val mesh = DieMeshBuilder.build()
-        for (face in 0 until 20) {
-            val a = vert(mesh, face, 0)
-            val b = vert(mesh, face, 1)
-            val c = vert(mesh, face, 2)
-            val n = normal(a, b, c)
-            val cx = (a[0] + b[0] + c[0]) / 3f
-            val cy = (a[1] + b[1] + c[1]) / 3f
-            val cz = (a[2] + b[2] + c[2]) / 3f
-            assertTrue(n[0] * cx + n[1] * cy + n[2] * cz > 0f)
+        for (die in Die.entries) {
+            val mesh = DieMeshBuilder.build(die)
+            mesh.facePoints.forEach { corners ->
+                val n = newell(corners)
+                val c = centroidOf(corners)
+                assertTrue(
+                    "$die outward ${n[0] * c[0] + n[1] * c[1] + n[2] * c[2]}",
+                    n[0] * c[0] + n[1] * c[1] + n[2] * c[2] > 0f,
+                )
+            }
         }
     }
 
     @Test
-    fun uvsInsideUnitSquare() {
-        val mesh = DieMeshBuilder.build()
-        mesh.uvs.forEach { uv -> assertTrue(uv >= 0f && uv <= 1f) }
+    fun quadFacesArePlanar() {
+        for (die in listOf(Die.D6, Die.D10, Die.D12)) {
+            val mesh = DieMeshBuilder.build(die)
+            mesh.facePoints.forEach { corners ->
+                val a = corners[0]
+                val b = corners[1]
+                val c = corners[2]
+                val d = corners[3 % corners.size]
+                val volume = scalarTriple(sub(b, a), sub(c, a), sub(d, a))
+                assertTrue("$die planar $volume", kotlin.math.abs(volume) < 1e-4f)
+            }
+        }
     }
 
-    private fun vert(mesh: DieMesh, face: Int, corner: Int): FloatArray {
-        val o = (face * 3 + corner) * 3
-        return floatArrayOf(mesh.positions[o], mesh.positions[o + 1], mesh.positions[o + 2])
+    @Test
+    fun oppositeFacesSumCorrectly() {
+        for (die in Die.entries) {
+            val sum = expectations.getValue(die).pairSum ?: continue
+            val mesh = DieMeshBuilder.build(die)
+            val normals = mesh.facePoints.map { newell(it) }
+            for (i in mesh.faceNumbers.indices) {
+                val mate = normals.indices.first { k ->
+                    k != i && dot(normals[i], normals[k]) < -0.999f
+                }
+                assertEquals(
+                    "$die faces $i/$mate",
+                    sum,
+                    mesh.faceNumbers[i] + mesh.faceNumbers[mate],
+                )
+            }
+        }
     }
 
-    private fun normal(a: FloatArray, b: FloatArray, c: FloatArray): FloatArray {
-        val ux = b[0] - a[0]
-        val uy = b[1] - a[1]
-        val uz = b[2] - a[2]
-        val vx = c[0] - a[0]
-        val vy = c[1] - a[1]
-        val vz = c[2] - a[2]
-        val n = floatArrayOf(
-            uy * vz - uz * vy,
-            uz * vx - ux * vz,
-            ux * vy - uy * vx,
-        )
-        val len = sqrt((n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).toDouble()).toFloat()
-        return floatArrayOf(n[0] / len, n[1] / len, n[2] / len)
+    private fun newell(corners: List<FloatArray>): FloatArray {
+        var nx = 0f
+        var ny = 0f
+        var nz = 0f
+        for (i in corners.indices) {
+            val a = corners[i]
+            val b = corners[(i + 1) % corners.size]
+            nx += (a[1] - b[1]) * (a[2] + b[2])
+            ny += (a[2] - b[2]) * (a[0] + b[0])
+            nz += (a[0] - b[0]) * (a[1] + b[1])
+        }
+        val len = sqrt((nx * nx + ny * ny + nz * nz).toDouble()).toFloat()
+        return floatArrayOf(nx / len, ny / len, nz / len)
     }
+
+    private fun centroidOf(corners: List<FloatArray>): FloatArray {
+        var x = 0f
+        var y = 0f
+        var z = 0f
+        corners.forEach { x += it[0]; y += it[1]; z += it[2] }
+        val n = corners.size.toFloat()
+        return floatArrayOf(x / n, y / n, z / n)
+    }
+
+    private fun sub(a: FloatArray, b: FloatArray): FloatArray =
+        floatArrayOf(a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+    private fun scalarTriple(a: FloatArray, b: FloatArray, c: FloatArray): Float =
+        a[0] * (b[1] * c[2] - b[2] * c[1]) -
+            a[1] * (b[0] * c[2] - b[2] * c[0]) +
+            a[2] * (b[0] * c[1] - b[1] * c[0])
 
     private fun dot(a: FloatArray, b: FloatArray): Float =
         a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-
-    private fun faceNormals(mesh: DieMesh): List<FloatArray> =
-        (0 until 20).map { f -> normal(vert(mesh, f, 0), vert(mesh, f, 1), vert(mesh, f, 2)) }
 }

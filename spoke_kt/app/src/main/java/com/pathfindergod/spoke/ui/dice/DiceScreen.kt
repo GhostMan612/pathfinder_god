@@ -76,8 +76,9 @@ fun DiceScreen() {
         modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (pit && selected == Die.D20) {
+        if (pit) {
             FilamentPit(
+                die = selected,
                 rollToken = rollToken,
                 impact = record?.impact ?: Impact.NORMAL,
                 modifier = Modifier.size(220.dp).align(Alignment.CenterHorizontally),
@@ -93,38 +94,36 @@ fun DiceScreen() {
                 onImpact = fireImpact,
             )
         }
-        if (selected == Die.D20) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(
-                    8.dp,
-                    Alignment.CenterHorizontally,
-                ),
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(
+                8.dp,
+                Alignment.CenterHorizontally,
+            ),
+        ) {
+            Box(
+                modifier = Modifier
+                    .rpgPanel()
+                    .clickable { pit = false }
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
             ) {
-                Box(
-                    modifier = Modifier
-                        .rpgPanel()
-                        .clickable { pit = false }
-                        .padding(horizontal = 14.dp, vertical = 6.dp),
-                ) {
-                    Text(
-                        text = "Canvas",
-                        color = if (!pit) GoldAccent else TextSecondary,
-                        fontWeight = if (!pit) FontWeight.Bold else FontWeight.Normal,
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .rpgPanel()
-                        .clickable { pit = true }
-                        .padding(horizontal = 14.dp, vertical = 6.dp),
-                ) {
-                    Text(
-                        text = "Pit",
-                        color = if (pit) GoldAccent else TextSecondary,
-                        fontWeight = if (pit) FontWeight.Bold else FontWeight.Normal,
-                    )
-                }
+                Text(
+                    text = "Canvas",
+                    color = if (!pit) GoldAccent else TextSecondary,
+                    fontWeight = if (!pit) FontWeight.Bold else FontWeight.Normal,
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .rpgPanel()
+                    .clickable { pit = true }
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
+            ) {
+                Text(
+                    text = "Pit",
+                    color = if (pit) GoldAccent else TextSecondary,
+                    fontWeight = if (pit) FontWeight.Bold else FontWeight.Normal,
+                )
             }
         }
         Text(
@@ -148,10 +147,7 @@ fun DiceScreen() {
                 Box(
                     modifier = Modifier
                         .rpgPanel()
-                        .clickable {
-                            selected = die
-                            if (die != Die.D20) pit = false
-                        }
+                        .clickable { selected = die }
                         .padding(horizontal = 10.dp, vertical = 8.dp),
                 ) {
                     Text(

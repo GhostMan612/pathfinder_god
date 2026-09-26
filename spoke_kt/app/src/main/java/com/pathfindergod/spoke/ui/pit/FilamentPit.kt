@@ -40,6 +40,7 @@ import com.google.android.filament.Texture
 import com.google.android.filament.TextureSampler
 import com.google.android.filament.VertexBuffer
 import com.google.android.filament.View as FilamentView
+import com.pathfindergod.spoke.ui.dice.Die
 import com.pathfindergod.spoke.ui.dice.Impact
 import com.pathfindergod.spoke.ui.theme.GodTypography
 import com.pathfindergod.spoke.ui.theme.TextSecondary
@@ -70,6 +71,7 @@ private class PitRig {
     var velY = 0f
     var settleAt = 0L
     var impacted = true
+    var currentDie: Die? = null
     var onImpact: () -> Unit = {}
     var lastNanos = 0L
     val frame = object : Choreographer.FrameCallback {
@@ -147,6 +149,7 @@ private fun rotYX(ry: Float, rx: Float): FloatArray {
 
 @Composable
 fun FilamentPit(
+    die: Die,
     rollToken: Int,
     impact: Impact = Impact.NORMAL,
     modifier: Modifier = Modifier,
@@ -200,9 +203,18 @@ fun FilamentPit(
     }
     LaunchedEffect(Unit) {
         try {
-            rig.boot(context) { failed = true }
+            rig.boot(context, die) { failed = true }
         } catch (_: Exception) {
             failed = true
+        }
+    }
+    LaunchedEffect(die) {
+        if (rig.engine != null && rig.currentDie != die) {
+            try {
+                rig.swapMesh(die)
+            } catch (_: Exception) {
+                failed = true
+            }
         }
     }
     LaunchedEffect(rollToken) {
@@ -214,15 +226,13 @@ fun FilamentPit(
     }
 }
 
-private fun PitRig.boot(context: android.content.Context, fail: () -> Unit) {
+private fun PitRig.boot(context: android.content.Context, die: Die, fail: () -> Unit) {
     try {
         Filament.init()
     } catch (_: Exception) {
         fail()
         return
     }
-    val mesh = DieMeshBuilder.build()
-    val bitmap = DieTexture.build(mesh.faceNumbers)
     val materialBytes = PitMaterial.buildOrLoad(context) ?: run {
         fail()
         return
@@ -241,6 +251,21 @@ private fun PitRig.boot(context: android.content.Context, fail: () -> Unit) {
     this.camera = camera
     view.scene = scene
     view.camera = camera
+    val material = Material.Builder()
+        .payload(ByteBuffer.wrap(materialBytes), materialBytes.size)
+        .build(engine)
+    this.material = material
+    val instance = material.createInstance()
+    this.instance = instance
+    installMesh(DieMeshBuilder.build(die))
+    currentDie = die
+    attach()
+}
+
+private fun PitRig.installMesh(mesh: DieMesh) {
+    val engine = engine ?: return
+    val instance = instance ?: return
+    val bitmap = DieTexture.build(mesh.faceNumbers, mesh.faceKinds)
     val positions = mesh.positions
     val uvs = mesh.uvs
     val interleaved = FloatBuffer.allocate(mesh.indices.size * 5)
@@ -281,12 +306,6 @@ private fun PitRig.boot(context: android.content.Context, fail: () -> Unit) {
         .build(engine)
     this.indexBuffer = indexBuffer
     indexBuffer.setBuffer(engine, indexData)
-    val material = Material.Builder()
-        .payload(ByteBuffer.wrap(materialBytes), materialBytes.size)
-        .build(engine)
-    this.material = material
-    val instance = material.createInstance()
-    this.instance = instance
     val texture = Texture.Builder()
         .width(DieTexture.WIDTH)
         .height(DieTexture.HEIGHT)
@@ -314,14 +333,27 @@ private fun PitRig.boot(context: android.content.Context, fail: () -> Unit) {
             TextureSampler.WrapMode.CLAMP_TO_EDGE,
         ),
     )
-    renderable = entityManager.create()
+    renderable = EntityManager.get().create()
     RenderableManager.Builder(1)
         .geometry(0, RenderableManager.PrimitiveType.TRIANGLES, vertexBuffer, indexBuffer)
         .material(0, instance)
         .culling(false)
         .build(engine, renderable)
-    scene.addEntity(renderable)
-    attach()
+    scene?.addEntity(renderable)
+}
+
+private fun PitRig.swapMesh(die: Die) {
+    val engine = engine ?: return
+    scene?.removeEntity(renderable)
+    engine.destroyEntity(renderable)
+    vertexBuffer?.let { engine.destroyVertexBuffer(it) }
+    vertexBuffer = null
+    indexBuffer?.let { engine.destroyIndexBuffer(it) }
+    indexBuffer = null
+    texture?.let { engine.destroyTexture(it) }
+    texture = null
+    installMesh(DieMeshBuilder.build(die))
+    currentDie = die
 }
 
 private fun PitRig.attach() {
