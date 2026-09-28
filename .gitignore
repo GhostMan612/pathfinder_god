@@ -72,10 +72,12 @@ spoke/ios/.symlinks/
 
 # Native Kotlin Spoke (spoke_kt)
 spoke_kt/.gradle/
+spoke_kt/.kotlin/
 spoke_kt/build/
 spoke_kt/app/build/
 spoke_kt/local.properties
 spoke_kt/*.iml
+spoke_kt/gradle/gradle-daemon-jvm.properties
 
 # ─── Editors / OS ─────────────────────────────────────────────────────────
 .idea/
