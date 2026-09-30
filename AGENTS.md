@@ -5,52 +5,16 @@
 ```
 C:\pathfinder_god\
 ├── hub/                 # Python FastAPI service (WORKING: /health /ask /stream /rules/search /generate)
-├── spoke_kt/            # Native Kotlin app, 9 destinations / 4-tab bar (see Native Lane)
+├── spoke_kt/            # Native Kotlin app, 9 tabs (see Native Lane)
 ├── shared/openapi.yaml  # API contract (source of truth)
 ├── data/                # SQLite DBs (pathfinder_rag.db 58MB / 44,620 rows, gitignored, laptop only)
 ├── docs/                # Setup + architecture guides
-├── blueprints/          # Session docs + phased blueprints (gitignored, local only)
-├── tools/               # command_center/ (PySide6 standalone exe) + UI placeholder generator
+├── blueprints/          # Session docs + phased blueprints
+├── tools/               # gen_audio.py (sound synth), command_center/ (PySide6 standalone exe)
 └── assets/              # Images, audio
 ```
 
-## ⛔ THE SHELL GATE — read before you touch anything
-
-> **During a plan, the shell must not be called at all.** Not once. Not "just to
-> check one thing". The plan is not finished, so there is nothing to verify *for*.
-> Verification is an **end-of-plan** activity, and calling it early makes the work
-> slower and produces stale signal you must re-derive.
->
-> | You want to… | Use | NEVER |
-> |---|---|---|
-> | see a file / line numbers / a value | `read` | `type`, `cat`, `Get-Content`, `head` |
-> | find where a symbol lives | `grep` | `Select-String`, `rg`, `findstr` |
-> | find a file by name | `glob` | `Get-ChildItem`, `ls`, `dir` |
-> | change text | `edit` | `Set-Content`, `sed -i`, `Out-File` |
-> | create a file | `write` | `New-Item`, heredoc |
-> | **does it compile? tests pass?** | **NOTHING — queue it** | the shell |
-> | **`git status` / `diff` / `commit`** | **NOTHING — queue it** | the shell |
-> | **probe / adb / screenshot** | **NOTHING — queue it** | the shell |
->
-> **Three named traps:** (1) "let me just check it compiles" — 20–90s every time,
-> and the compiler is blind to every bug class this repo actually has; (2) "one
-> quick git status" — does not change your next edit; (3) "one probe to see what's
-> going on" — every probe is verification, and verification is end-of-plan.
->
-> **The shape of a correct plan:** `read → edit → read → edit …` for the whole
-> work package, then **one** shell block: gate, repo guard, device checklist, commit.
->
-> **If this feels like it is costing correctness, that is the signal to report a
-> blocked item and wait — not to run the command.** Full text: `RULES.md` §1A.0.
->
-> Machine-enforced, not just prose: the agent `permission.bash` blocks `deny`
-> `cat`/`Get-Content`/`Select-String`/`Get-ChildItem`/`Test-Path`/`Set-Content`/
-> `Out-File`/`sed`. A denial is a refused call, not a warning.
-
 ## Key Commands
-
-> ⛔ **None of these may be run during a plan.** They are the end-of-plan batch.
-> See the shell gate above.
 
 ### Hub (Python) — working
 ```bash
@@ -81,7 +45,7 @@ $env:JAVA_HOME='C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1
 4. **Git: explicit paths only** — `git add <path>`, never `git add .` / `-A`
 5. **Synthetic data only** — no real names in code/tests
 6. **Every .py/.kt file needs Genesis header**:
-   ```
+   ```dart
    // ============================================================
    // As Above, So Below. As Within, So Without.
    // The Future Dictates the Past and the Past is Always Present.
@@ -94,42 +58,36 @@ $env:JAVA_HOME='C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1
 3. Session end: update `CHANGELOG.md`, tick `CHECKLIST.md`, flip `CHECKPOINTS.md` gates, refresh `CURRENT_STATE.md`, commit code (not blueprints)
 
 ## Architecture Notes
-- **Hub-Spoke**: Hub (laptop) does LLM + RAG + 500MB rules DB. Spoke (phone) is the 9-destination native client: dice, roster, ladder, vaults, journal, oracle.
+- **Hub-Spoke**: Hub (laptop) does LLM + RAG + 500MB rules DB. Spoke (phone) is the 9-tab native client: dice, roster, ladder, vaults, journal, oracle.
 - **API Contract**: `shared/openapi.yaml` v0.1.0 — both sides build against this.
 - **Local-Only Fallback**: Ollama (local) → Raw FTS5 excerpts (always works). No cloud tiers.
 - **Rules DB**: FTS5 in `data/pathfinder_rag.db` (gitignored). Rebuild via `hub/scripts/rebuild_rags.py`; the device extract ships at `spoke_kt/app/src/main/assets/rules/pathfinder_rag.db` (Git LFS — raw `.db`, AGP decompresses `.gz` assets at build time so gzip must not be used)
 
 ## Native Lane (`spoke_kt/`)
 - **Separation**: every micro-agent (GM, encounter, loot, continuity, maps) runs on the Python Hub. Kotlin is strictly state-management (`ViewModel`/`StateFlow`) + rendering (Compose) — no LLM, no rules logic on-device beyond the bundled FTS5 read path.
-- **Contract is law**: `shared/openapi.yaml` (26 paths) — Retrofit endpoints and WS frames must match it byte-for-byte. Emulator → `http://10.0.2.2:8000`; real device → laptop LAN IP. **Coverage is partial and deliberately so**: `HubApi.kt` declares 7 `@POST` paths (combat strike/end-turn, generate loot/map/character, campaign summarize-session, encounter generate). Rules search, health and the campaign CRUD are served locally/on-device or over a raw OkHttp probe; `/campaign/export` and `/campaign/import` are in the contract but **not called by the client**.
+- **Contract is law**: `shared/openapi.yaml` (26 paths) — Retrofit endpoints and WS frames must match it byte-for-byte. Emulator → `http://10.0.2.2:8000`; real device → laptop LAN IP.
 - **Local-only**: Hub LLM is Ollama (`127.0.0.1:11450`) → raw FTS5 excerpts. No cloud tiers, no API keys anywhere in the lane.
 - **Owner**: `.opencode/agent/native-dev.md` (AGP 9.0.1 + KSP 2.3.4 + Room 2.7.0, NGA sqlite-android for FTS5, Filament 1.76, compile 37 / target 34, min 26).
-- **Terminal UI**: Jetpack Compose is the whole app, with one deliberate exception — the 3D dice pit (Filament on a `SurfaceView` swapchain, WP-4) is the only native render surface. No Unity/Godot, no game engine, no JNI bridge. Everything else is Compose canvas animation + `SoundPool` audio. No NDK/CMake anywhere in the lane, so AGDK's Swappy is rejected outright.
-- **AGDK is wired (WP-5)**: `MainActivity` extends `androidx.games.activity.GameActivity` (games-activity 3.0.5) and forwards `onResume`/`onPause` to the pit through `PitFrameGovernor`. `GameActivity` extends `AppCompatActivity`, so `Theme.PathfinderGod` parents `Theme.AppCompat.NoActionBar` in **both** `res/values/themes.xml` and `res/values-v31/themes.xml`, and `androidx.appcompat` is a direct dependency. Never reparent the theme back to `android:Theme.Material` — the app then dies on launch with `IllegalStateException: You need to use a Theme.AppCompat theme (or descendant) with this activity`.
-- **High refresh is requested explicitly (WP-5)**: `PitFrameGovernor` derives the target from `display.mode` + same-resolution `display.supportedModes` (never hardcoded), then asks for it via `Window.setFrameRate(rate, FRAME_RATE_COMPATIBILITY_FIXED_SOURCE)` on API 30+ (with `LayoutParams.preferredRefreshRate` / `preferredDisplayModeId` as the universal floor) and `Surface.setFrameRate` on the pit surface. This is **required**, not an optimisation: Android 15+ throttles games to 60 Hz unless the app asks. The moto g - 2025 reports `supportedRefreshRates [120, 90, 60]` with the active mode at 60 Hz.
-- **Frame telemetry is debug-only**: `Choreographer.getFrameMetrics()` sampling (`PitFrameTelemetry`) is gated on `ApplicationInfo.FLAG_DEBUGGABLE` and logs one line per 240 frames under the `PitFrameGovernor` tag. `androidx.games:games-frame-pacing` stays pinned at 2.1.2 but is **not** called into — `ChoreographerWrapper` was left alone because its API could not be verified without a compiler in the WP-5 lane.
+- **Terminal UI**: pure 2D Jetpack Compose. No Unity/Godot, no native render surface — game-feel comes from Compose canvas animation + SoundPool audio, not an engine.
 
 ## Current State
-- **Spoke**: native Kotlin app, `com.pathfindergod.spoke` — 9 destinations, **4-tab bottom bar** (Dice, Combat, Hero, Rules) + Home dashboard + `MoreSheet` for the other five; `assembleDebug` green
-- **Offline Spoke**: rulebook asset bundled as a **raw `.db`** (19MB, Git LFS, no gzip) → `DatabaseAssetManager` copies it out on first launch and opens it with the NGA FTS5 driver; dice engine + haptics/SFX, Room vaults — works with laptop off
-- **Hub**: Working service on :8000 (Ollama `phi4-mini`, FTS5 rules); `pytest hub/tests/` 107/107 green (hermetic harness — passes with `data/` absent)
-- **Native spoke_kt**: the client — Room 2.7/KSP + NGA FTS5 + Retrofit + Compose BOM 2024.10.01 + navigation-compose 2.8.4; FileProvider export; vault→tracker bridge
-- **Android identity**: `com.pathfindergod.spoke`, label "Pathfinder God", circular branded icons
+- **Spoke**: 9-tab native app (Dice, God/loot, Hero, Rules, Combat, Encounter, Map, Campaign, Setup); `assembleDebug` green
+- **Offline Spoke**: rulebook asset bundled (19MB gz → FTS5 extract on first launch), dice engine + haptics/SFX, Room vaults — works with laptop off
+- **Hub**: Working service on :8000 (Ollama `phi4-mini`, FTS5 rules); `pytest hub/tests/` 107/107 green (hermetic harness)
+- **Native spoke_kt**: the client — Room 2.7/KSP + NGA FTS5 + Retrofit + Compose BOM 2024.10.01; FileProvider export; vault→tracker bridge
+- **Android identity**: `com.pathfindergod`, label "Pathfinder God", circular branded icons
 - **Command Center**: **Standalone exe** at `tools/command_center/dist/PathfinderGodCommandCenter.exe` (~48MB) — launches via `Start_CommandCenter.bat`, no venv required
 
 ## Verification Gates
 - `assembleDebug` green before any native commit
 - `pytest hub/tests/` green before any hub commit
 - Hub gates in `blueprints/CHECKPOINTS.md` (G1-1 through G1-10 for Phase 1)
-- BP-06 native gates G6-0..G6-9 in the same file; `pg-gate` runs the mechanical half. The Flutter-era G0/G4 gate rows are historical, not current.
 
 ## Dependencies (spoke_kt)
 - Compose BOM 2024.10.01 (ui, material3, icons-extended, animation), activity-compose, lifecycle-viewmodel-compose
-- navigation-compose 2.8.4 + material3-adaptive-navigation-suite 1.3.1 (the `NavigationSuiteScaffold`; the suite is a *separate* artifact and does not live in navigation-compose)
 - Room 2.7.0 (KSP 2.3.4) + `mil.nga:sqlite-android:3450200` (Android SQLite lacks FTS5 — never the platform driver)
-- Filament + filamat 1.76.0 (the dice pit only)
-- Retrofit 2.11/OkHttp 4.12 + kotlinx-serialization converter; androidx.appcompat 1.7.0 (required by `GameActivity`, not optional); AGDK games-activity 3.0.5 / games-frame-pacing 2.1.2 (pinned, **not called into**)
-- Audio is framework `SoundPool` + `MediaPlayer` + `VibrationEffect` (no Oboe dependency). Unit tests are **JUnit 4** — no Turbine, Robolectric or MockWebServer in the lane.
+- Retrofit 2.11/OkHttp 4.12 + kotlinx-serialization converter; AGDK games-activity/frame-pacing
+- Audio is framework `SoundPool` + `MediaPlayer` (no Oboe dependency)
 
 ## Gotchas
 - Android emulator → hub at `http://10.0.2.2:8000` (not localhost)
@@ -139,8 +97,4 @@ $env:JAVA_HOME='C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1
 - Android SQLite has no FTS5 → always query via the NGA bridge (`NgaSQLiteOpenHelperFactory`)
 - `./gradlew` daemons get reaped in this shell → always `--no-daemon` with a capped heap
 - `io.requery:sqlite-android` does not exist on Central — the fork is `mil.nga:sqlite-android`, do not "fix" it
-- `Modifier.rpgPanel` is a **deprecated shim** (`ui/designsystem/RpgPanelShim.kt`) with **zero call sites** — WP-1 migrated all 45. Do not "restore" it; use `GodCard` / `Modifier.godCard`
-- `AppPreferences.FILE_NAME` is deliberately still `"pathfinder_network"` (WP-6 rename from `NetworkPreferences.kt`) — renaming it silently drops every live install's hub URL and audio prefs
-- `Theme.PathfinderGod` must stay an AppCompat descendant while `MainActivity` is a `GameActivity`; a green `assembleDebug` does **not** prove this — the theme check only fails at launch, on device
-- A 60 Hz pit on a 120 Hz panel is usually the Android 15+ game throttle, not a Choreographer bug — check `dumpsys display` before touching frame code
 - **Command Center**: Use the standalone exe at `tools/command_center/dist/PathfinderGodCommandCenter.exe` (no venv needed). `Start_CommandCenter.bat` updated.
