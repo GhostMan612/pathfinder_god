@@ -26,8 +26,14 @@ data/*.pdf
 # Session working docs (never pushed by workflow law)
 blueprints/
 _archive/
-# Agent tooling runtime (node_modules bloat + machine-local config)
-.opencode/
+# Agent tooling: node_modules bloat is ignored, but the agent/command/skill/tools
+# layer is TRACKED. It was fully gitignored until 2026-09-30, and a rollback proved
+# why that was wrong: an ignored .opencode/ is deleted wholesale, so every agent,
+# command, skill and pg-* gate vanished while tracked source was restored. RULES.md
+# and AGENTS.md cite these files; an untracked agent layer makes them dangling.
+.opencode/node_modules/
+.opencode/.cache/
+.opencode/opencode.local.json
 
 # Campaign save files (runtime state, per-user)
 data/campaign_state*.json

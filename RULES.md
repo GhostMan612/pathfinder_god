@@ -37,12 +37,80 @@ Do not install software, modify system settings, or write to new locations outsi
 
 ---
 
-## 1A. CONTEXT & OUTPUT DISCIPLINE (from CLAUDE.md)
+## 1A. CONTEXT, TOOL ROUTING & OUTPUT DISCIPLINE (canonical — CLAUDE.md and every agent prompt defer to this section)
 
-- Filter all terminal output; pipe for failures only (`Select-String "error|fail"`), never ingest passing noise.
+This section is the single source of truth for tool routing and verification timing. If another file
+restates it and disagrees, this section wins. Do not copy the table into other files — link here.
+
+### §1A.1 — Intent → tool. A shell is a build tool, not a search tool.
+
+Decide by **intent**, not by convenience. Map the intent to the tool before touching anything.
+
+| Intent | Tool | Forbidden equivalent |
+|---|---|---|
+| Search file contents | `grep` | `Select-String`, `grep`, `rg`, `findstr` in a shell |
+| Find files by name/pattern | `glob` | `Get-ChildItem`, `ls`, `dir`, `Test-Path` |
+| Read a file | `read` | `cat`, `type`, `Get-Content`, `head`, `more`, `tail` |
+| Modify a file | `edit` / `write` | `Set-Content`, `Add-Content`, `Out-File`, `sed`, `echo >` |
+| Build / unit test / lint | **shell** `gradlew` | — |
+| Instrumented test, device | **shell** `adb` | — |
+| Version control | **shell** `git` | — |
+| Gate tools | `pg-gate`, `pg-repo-guard`, `pg-license`, `pg-build` | — |
+| Hub tests | **shell** `pytest` | — |
+
+A shell process is **never** justified for an answer `grep`, `glob`, or `read` can return.
+
+### §1A.2 — The three named traps
+
+These are the exact thoughts that precede a wasted shell call. Each one is a refusal.
+
+1. **"Let me just check it compiles."** — Verification happens **once per work package**, not per
+   edit, not mid-implementation. Implement the whole package, then gate it. A build after one edit
+   is forbidden. This is not a style preference: BP-06 shipped a work package that did not compile
+   precisely because each owner was expected to self-check and none of them could.
+2. **"One quick `git status` to see where I am."** — Git is batched at the end of a work package,
+   alongside the commit. Not used to re-orient mid-task; you already know what you just edited.
+3. **"One probe to see what's going on."** — No `curl`, no live HTTP probe, no `pg-hub-probe`, no
+   adb logcat, while implementing. If you believe a probe is required to make progress, that is a
+   **blocked item** (§1A.4), not a command to run.
+
+### §1A.3 — Batching
+
+One shell call that checks five related things beats five shell calls. Three failed attempts at a
+lookup means the wrong tool was chosen — stop and re-read §1A.1.
+
+### §1A.4 — Blocked-item escape hatch
+
+If a work package genuinely cannot be completed without mid-flight verification, the correct action
+is: **write down the blocked item, stop, and report it for a decision.** Do not run the command to
+unstick yourself. A reported blocker costs minutes. An unauthorised build costs the lane its
+verification discipline and produces unverifiable code that has to be re-derived.
+
+Format: `BLOCKED: <what is blocked> · <the exact command needed> · <why editing alone cannot resolve it>`
+
+### §1A.5 — Encoding hazard (PowerShell 5.1 and friends)
+
+Three common shell habits silently corrupt source on this platform:
+
+- `Get-Content | Set-Content` — round-trips through the console code page (cp1252), turning UTF-8
+  box-drawing and em-dashes into mojibake.
+- `sed -i` — rewrites line endings and can re-encode the whole file.
+- `python -c "..."` piped through PowerShell — the script itself is re-encoded before Python sees it.
+
+**Required instead:** use `edit` / `write` for all source changes. If a Python script is genuinely
+needed, write it to `%TEMP%` with `write` and invoke it by path, and inside it always pass
+`encoding="utf-8"` and `newline="\n"` explicitly. Never rely on the locale default.
+
+Known live instances of the anti-pattern, fixed by this law rather than by habit:
+- `scripts/gen_spec_sheet.py:142` — `gw.read_text()` with no `encoding=`
+- `hub/app/db/repository.py:129` — `schema_path.read_text()` with no `encoding=` (reads `schema.sql`,
+  which contains non-ASCII; this is a latent crash or corruption on a cp1252 host)
+
+### §1A.6 — Output discipline
+
+- Filter all terminal output; ingest failures only, never passing noise.
 - No massive file reads — probe large JSON/data files with short Python scripts instead.
-- Targeted verification only during development; full pipeline runs reserved for staged-commit verification.
-- Spawn subagents for deep exploration when available; return summaries, not raw dumps.
+- Spawn subagents for deep exploration; return summaries, not raw dumps.
 - Proactively compact context after each verified+committed phase.
 
 ---

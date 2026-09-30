@@ -1,0 +1,9 @@
+{
+  "name": "pathfinder-god-opencode",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Agent layer for Pathfinder God. The pg-* tools in ./tools import @opencode-ai/plugin; this pin is what makes a fresh clone able to run them. Do not add dependencies here without a blueprint gate.",
+  "dependencies": {
+    "@opencode-ai/plugin": "1.18.24"
+  }
+}

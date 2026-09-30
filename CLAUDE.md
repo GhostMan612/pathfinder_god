@@ -5,9 +5,14 @@ You are working on the Sovereign Mantle infrastructure. Absolute precision and a
 Follow these workflow rules strictly to prevent context window overloads:
 
 ## 1. CLI Execution & Testing
-*   **Filter All Terminal Output:** Never read massive CLI outputs, full test logs, or raw JSON payloads directly into the main context window. 
-*   **Pipe for Failures:** Always pipe test commands and broad searches through filters. For example, use `bash run_tests.sh 2>&1 | grep -A5 -E "FAIL|ERROR|Error|Expected|Received" | head -100`. Only ingest the actual failures, never the passing checks.
-*   **Stop Reactive Auto-Testing:** Do NOT run the full test suite after every minor file edit. Run targeted tests for the specific module you are editing. Only run the full `run_tests.sh` suite when a commit is fully staged and ready for final verification.
+> **RULES.md §1A is canonical.** It defines the intent→tool routing table, the three named traps
+> ("just check it compiles", "one quick git status", "one probe"), the blocked-item escape hatch,
+> and the PowerShell UTF-8 encoding law. Read it there; do not restate it here.
+>
+> This clause was the origin of the shell-per-edit habit and has been retired. Specifically
+> withdrawn: the `bash run_tests.sh 2>&1 | grep …` recipe. Grepping is the `grep` tool's job, not
+> the shell's — the shell is for builds, tests, git, and device commands, batched once per work
+> package.
 
 ## 2. Context Window & Token Management
 *   **Use Native Subagents:** For deep file exploration, large file analysis, or complex stack-trace debugging, you MUST spawn a built-in subagent. Let the subagent isolate the heavy reading and return only a concise, synthesized summary to the main thread.
