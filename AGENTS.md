@@ -34,8 +34,8 @@ $env:JAVA_HOME='C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1
 - Python: `C:\venv-hub\venv\Scripts\python.exe` (3.14.6) — use as-is
 - Ollama: `ollama serve` on `0.0.0.0:11434` (hub `.env` maps `127.0.0.1:11450`, model `phi4-mini`)
 - Android SDK: `C:\android\sdk` (Gradle 9.3.1 cached)
-- Native JDK: Temurin 17 at `C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1` (`$env:JAVA_HOME` per command) — Studio's bundled JBR is stripped, never use it
-- Native agents: `.opencode/agent/native-dev.md` owns `spoke_kt/` (AGP 9.0.1 + KSP + Room 2.7, compileSdk 34)
+- Native JDK: Temurin 17 at `C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1` (`$env:JAVA_HOME` per command) — the lane JDK, pinned via `kotlin.jvmToolchain(17)`. Studio's bundled JBR (`C:\android\Android Studio\jbr`) is a working OpenJDK 25, not a stripped/broken one, but it is deliberately not the lane JDK
+- Native agents: `.opencode/agent/native-dev.md` owns `spoke_kt/` (AGP 9.0.1 + KSP + Room 2.7, compileSdk 37 / targetSdk 34)
 
 ## Critical Rules (from RULES.md)
 

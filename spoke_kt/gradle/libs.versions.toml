@@ -1,0 +1,83 @@
+# ============================================================
+# As Above, So Below. As Within, So Without.
+# The Future Dictates the Past and the Past is Always Present.
+# ============================================================
+# Version catalog for the native spoke. This file ENCODES the versions that were
+# already in build.gradle.kts — it is a relocation, not an upgrade. Nothing here
+# may be bumped without a blueprint gate (RULES.md §5.4).
+#
+# Pins that must not drift: AGP 9.0.1 (built-in Kotlin — no kotlin.android, no
+# kapt), KSP 2.3.4, Room 2.7.0 (2.6.1's processor crashes on this Kotlin),
+# Compose BOM 2024.10.01, Filament 1.76.0, mil.nga:sqlite-android:3450200
+# (io.requery:sqlite-android does not exist on Central).
+
+[versions]
+agp = "9.0.1"
+ksp = "2.3.4"
+kotlin = "2.3.20"
+foojayResolver = "1.0.0"
+
+# Android SDK levels. compileSdk is 37 while targetSdk is deliberately held at 34
+# (see RULES.md §5.4); they are not required to match.
+compileSdk = "37"
+minSdk = "26"
+targetSdk = "34"
+
+# The JVM the Kotlin/Java toolchain is pinned to. Distinct from targetSdk: this is
+# what compiles the code. Resolved by the foojay resolver in settings.gradle.kts.
+jvmToolchain = "17"
+
+androidxActivityCompose = "1.9.3"
+androidxComposeBom = "2024.10.01"
+androidxCoreKtx = "1.13.1"
+androidxLifecycle = "2.8.7"
+agdkGamesActivity = "3.0.5"
+agdkGamesFramePacing = "2.1.2"
+filament = "1.76.0"
+junit = "4.13.2"
+kotlinxCoroutines = "1.10.1"
+kotlinxSerialization = "1.8.1"
+ngaSqliteAndroid = "3450200"
+okhttp = "4.12.0"
+retrofit = "2.11.0"
+room = "2.7.0"
+
+[libraries]
+agdk-games-activity = { group = "androidx.games", name = "games-activity", version.ref = "agdkGamesActivity" }
+agdk-games-frame-pacing = { group = "androidx.games", name = "games-frame-pacing", version.ref = "agdkGamesFramePacing" }
+androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "androidxActivityCompose" }
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "androidxCoreKtx" }
+androidx-lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "androidxLifecycle" }
+androidx-lifecycle-viewmodel = { group = "androidx.lifecycle", name = "lifecycle-viewmodel", version.ref = "androidxLifecycle" }
+androidx-lifecycle-viewmodel-compose = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "androidxLifecycle" }
+androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
+androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
+filament-android = { group = "com.google.android.filament", name = "filament-android", version.ref = "filament" }
+filamat-android = { group = "com.google.android.filament", name = "filamat-android", version.ref = "filament" }
+kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
+kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
+nga-sqlite-android = { group = "mil.nga", name = "sqlite-android", version.ref = "ngaSqliteAndroid" }
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+retrofit = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = "retrofit" }
+retrofit-serialization = { group = "com.squareup.retrofit2", name = "converter-kotlinx-serialization", version.ref = "retrofit" }
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+
+# Compose artifacts take their version from the BOM platform, so they carry no
+# version here by design.
+androidx-compose-animation = { group = "androidx.compose.animation", name = "animation" }
+androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "androidxComposeBom" }
+androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
+androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
+androidx-compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
+androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
+androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
+androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+foojay-resolver-convention = { id = "org.gradle.toolchains.foojay-resolver-convention", version.ref = "foojayResolver" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }

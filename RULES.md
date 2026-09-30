@@ -67,7 +67,7 @@ Do not install software, modify system settings, or write to new locations outsi
 | Law | Rule |
 |-----|------|
 | Long builds | Launch DETACHED (no `-Wait`) and poll logs — tool timeouts kill child processes. `Start-Process` on `.bat` may throw a cosmetic harness error; poll logs, don't trust it. |
-| Native builds | Build via user's env (`local.properties` → `C:\android\sdk`, cached Gradle dists, Temurin JDK 17 in temp). Android Studio's bundled JBR is stripped (no working `java.exe`) — never point `JAVA_HOME` at it. |
+| Native builds | Build via user's env (`local.properties` → `C:\android\sdk`, cached Gradle dists, Temurin JDK 17 in temp). **Temurin 17 is THE lane JDK**, pinned in `app/build.gradle.kts` via `kotlin.jvmToolchain(17)` and resolved on any machine by the foojay resolver in `settings.gradle.kts`. Correction (BP-06 C-5): Android Studio's bundled JBR is **not** stripped — `C:\android\Android Studio\jbr\bin\java.exe` is a working OpenJDK 25.0.3. It is still not the lane JDK, because Temurin 17 is what the lane and CI actually use; the point is that JBR works and is a *choice*, not a *forbidden path*. |
 | API names | Verify API/artifact names against package sources, not memory (`io.requery:sqlite-android` does not exist on Central; the maintained fork is `mil.nga:sqlite-android`). |
 | SQLite platform gap | Android's platform SQLite has no FTS5 — offline rules search must go through an FTS5-capable driver (native: NGA bindings via `NgaSQLiteOpenHelperFactory`), never the platform default. |
 
@@ -104,7 +104,7 @@ Big dreams go into blueprint sections with phased plans first. Ship vertical sli
 
 ### 5.2 Data & Build Boundaries
 - **500MB+ rules DBs** live in `data/` on laptop ONLY. Git-ignored. Never committed — except the raw device extract at `spoke_kt/app/src/main/assets/rules/pathfinder_rag.db` (Git LFS), which ships inside the APK by design.
-- **Native lane verification is `./gradlew assembleDebug`** in `spoke_kt/` (Temurin 17 via `$env:JAVA_HOME`, always `--no-daemon` — daemons get reaped in this shell). It is required before any native commit.
+- **Native lane verification is `./gradlew assembleDebug`** in `spoke_kt/` (Temurin 17 via `$env:JAVA_HOME`, always `--no-daemon` — daemons get reaped in this shell). It is required before any native commit. Lane JDK is Temurin 17 at `C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1`, pinned in `app/build.gradle.kts` (`kotlin.jvmToolchain(17)`) and auto-resolved by foojay on any machine. The machine-generated `gradle/gradle-daemon-jvm.properties` is gitignored and untracked — never commit it.
 - **No release artifacts.** Never commit APKs/AABs. The human runs Install/Run in Android Studio; agents stop at a green debug compile.
 - **Verification hand-off:** After scaffolding code, state what the human should expect when they press Run in Android Studio (e.g., "assembleDebug green; first launch extracts the 20MB rulebook"). If a build breaks on their side, debug from their pasted error output, never by rebuilding release locally.
 
@@ -120,7 +120,7 @@ Big dreams go into blueprint sections with phased plans first. Ship vertical sli
 - No DI framework: manual constructor injection, screens self-supply ViewModels through `ViewModelProvider.Factory` helpers.
 - Retrofit endpoints and WS frames must match `shared/openapi.yaml` byte-for-byte. Hub at `http://10.0.2.2:8000` (emulator) or laptop LAN IP (device) — never `127.0.0.1:11450` (Ollama, laptop-only).
 - Theme: `PathfinderGodTheme` + `rpgPanel` (gold/crimson/parchment palette, serif display type).
-- Single `:app` module. AGP 9.0.1 built-in Kotlin (no `kotlin.android` plugin, no kapt), KSP 2.3.4 + Room 2.7.0, compile/target 34, min 26.
+- Single `:app` module. AGP 9.0.1 built-in Kotlin (no `kotlin.android` plugin, no kapt), KSP 2.3.4 + Room 2.7.0, compile 37 / target 34 / min 26, jvmToolchain 17. `compileSdk` is 37 while `targetSdk` is deliberately held at 34 — they are not required to match, and "compile/target 34" was wrong (BP-06 C-4). All pinned versions live in `gradle/libs.versions.toml`.
 
 ### 5.5 API Versioning
 - `shared/openapi.yaml` is the contract. Hand-write `@Serializable` Retrofit models in `HubApi.kt` if schema changes; regenerate the doc table in `docs/api.md` to match.
