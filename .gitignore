@@ -26,8 +26,20 @@ data/*.pdf
 # Session working docs (never pushed by workflow law)
 blueprints/
 _archive/
-# Agent tooling runtime (node_modules bloat + machine-local config)
-.opencode/
+# Agent tooling — TRACKED, because the doctrine is the product here.
+# RULES.md §1A, the gate tools, and the agent definitions are the workflow.
+# A clone with no `.opencode/` gets prose that references files that aren't there
+# and gates that aren't installed. Commit the doctrine; ignore only runtime bloat.
+.opencode/node_modules/
+.opencode/package-lock.json
+.opencode/bun.lock
+.opencode/.env*
+.opencode/tmp/
+# Machine-local scratch, if any is ever added
+.opencode/logs/
+.opencode/*.log
+# NOTE: `.opencode/opencode.json` and `.opencode/.gitignore` ARE tracked
+# deliberately — opencode.json holds the permission denies that enforce §1A.
 
 # Campaign save files (runtime state, per-user)
 data/campaign_state*.json

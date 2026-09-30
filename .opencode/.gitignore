@@ -1,0 +1,7 @@
+# Only runtime bloat stays out. The doctrine and the tool manifest are TRACKED.
+node_modules/
+
+# NOTE (2026-09-30): this file previously ignored package.json, package-lock.json,
+# bun.lock, and itself. That meant the opencode plugin pin was unreproducible —
+# a fresh clone got the agent definitions but no declared tooling version.
+# The workflow is the product; its manifest ships with it.
