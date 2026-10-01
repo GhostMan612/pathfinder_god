@@ -278,11 +278,15 @@ async def save_npc_to_db_tool(npc_json: dict, repo: CampaignRepository) -> dict:
         campaign_id=1,
         name=npc_json["name"],
         alias=None,
-        role="npc",
+        # schema.sql CHECKs restrict role to ally|enemy|neutral|unknown and
+        # disposition to friendly|hostile|wary|unknown. "npc"/"neutral" both
+        # violated those, so every save raised IntegrityError and the GM was
+        # told the NPC had been stored when it had not.
+        role="neutral",
         level=npc_json["level"],
         ancestry=npc_json["ancestry"],
         class_=npc_json["class"],
-        disposition="neutral",
+        disposition="unknown",
         notes=json.dumps({"personality": npc_json.get("personality", ""), "hooks": npc_json.get("hooks", [])})
     )
     return {"id": npc_id, "saved": True}

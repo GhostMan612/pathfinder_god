@@ -4,24 +4,21 @@
 # ============================================================
 
 """
-Health check endpoint.
+Health check response model.
+
+This module used to declare its own ``GET /health`` returning a bare dict with
+four fields, and ``main.py`` registered this router *before* ``monitoring.router``,
+so FastAPI matched the four-field version first. ``shared/openapi.yaml`` requires
+six - it also lists ``timestamp`` and ``uptime_seconds``, because the exported
+schema came from ``monitoring.HealthResponse`` when the duplicate won.
+
+The spec and the served payload had therefore diverged: a strict Kotlin
+deserializer saw missing required fields on every health poll.
+
+The route now lives solely in ``monitoring.router``. This module keeps only the
+re-export so existing imports of ``app.api.health.HealthResponse`` keep working.
 """
 
-from fastapi import APIRouter
+from app.api.monitoring import HealthResponse
 
-from app.config import get_settings
-
-router = APIRouter()
-
-
-@router.get("/health", tags=["meta"])
-async def health() -> dict:
-    settings = get_settings()
-    return {
-        "status": "ok",
-        "version": settings.version,
-        "ollama_model": settings.ollama_model,
-        "databases_found": [
-            str(p.name) for p in settings.db_paths if p.exists()
-        ],
-    }
+__all__ = ["HealthResponse"]

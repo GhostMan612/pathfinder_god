@@ -229,7 +229,10 @@ class EncounterBuilderAgent:
 
         candidates: list[dict[str, Any]] = []
         for h in hits:
-            if h.get("system") != "2e":
+            # The rules table stores editions uppercase ('2E'/'1E'), confirmed
+            # against the live DB. Comparing against lowercase "2e" dropped
+            # every candidate, so /encounter/generate returned 400 for all input.
+            if str(h.get("system", "")).strip().lower() != "2e":
                 continue
             content = h.get("content", "")
             level = self._extract_level(content)

@@ -186,7 +186,11 @@ class CampaignRepository:
             if not row:
                 return None
             values = dict(row)
-            values["facts"] = json.loads(values.pop("facts_json")) if values.get("facts_json") else []
+            # pop unconditionally: leaving it inside the conditional meant a
+            # NULL facts_json skipped the pop and leaked into Session(**values)
+            # as an unexpected keyword argument.
+            raw_facts = values.pop("facts_json", None)
+            values["facts"] = json.loads(raw_facts) if raw_facts else []
             return Session(**values)
 
     def get_session(self, campaign_id: int, session_num: int) -> Session | None:
@@ -198,7 +202,8 @@ class CampaignRepository:
             if not row:
                 return None
             values = dict(row)
-            values["facts"] = json.loads(values.pop("facts_json")) if values.get("facts_json") else []
+            raw_facts = values.pop("facts_json", None)
+            values["facts"] = json.loads(raw_facts) if raw_facts else []
             return Session(**values)
 
     def get_latest_session_num(self, campaign_id: int) -> int:
@@ -239,15 +244,30 @@ class CampaignRepository:
             )
 
     def add_session_note(self, campaign_id: int, session_num: int, prompt: str, response: str) -> None:
-        """Append a note to the session's raw log."""
+        """Append a note to the session's raw log, creating the row if needed.
+
+        This used to be a bare UPDATE, so on a campaign with no sessions yet it
+        matched zero rows. The caller ignored rowcount and returned 200, and the
+        only thing that ever created the row was ContinuityKeeper, three LLM
+        calls later - so with Ollama down the note was lost for good.
+        """
         with self._conn() as conn:
+            self._ensure_campaign(conn, campaign_id)
             conn.execute(
                 """
-                UPDATE sessions
-                SET raw_log = COALESCE(raw_log, '') || '\n\nUSER: ' || ? || '\nGM: ' || ?
-                WHERE campaign_id = ? AND session_num = ?
+                INSERT INTO sessions (campaign_id, session_num, raw_log)
+                VALUES (?, ?, ?)
+                ON CONFLICT(campaign_id, session_num) DO UPDATE SET
+                    raw_log = COALESCE(sessions.raw_log, '')
+                               || '\n\nUSER: ' || ? || '\nGM: ' || ?
                 """,
-                (prompt, response, campaign_id, session_num),
+                (
+                    campaign_id,
+                    session_num,
+                    f"USER: {prompt}\nGM: {response}",
+                    prompt,
+                    response,
+                ),
             )
 
     # ──────────────────────────────────────────────────────────────

@@ -72,7 +72,9 @@ def create_app() -> FastAPI:
     )
 
     # Routers
-    app.include_router(health.router)
+    # /health is served by monitoring.router (HealthResponse has six fields and
+    # matches shared/openapi.yaml). app.api.health used to register a second,
+    # four-field /health ahead of it, which is the one that won.
     app.include_router(ask.router)
     app.include_router(ask.stream_router)
     app.include_router(loot.router)

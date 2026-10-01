@@ -196,13 +196,14 @@ class Retriever:
                 if has_system and edition in ("1e", "2e"):
                     cur = conn.execute(
                         "SELECT system, category, name, source_book, raw_content "
-                        "FROM rules WHERE system=? AND rules MATCH ? LIMIT ?",
+                        "FROM rules WHERE system=? AND rules MATCH ? "
+                        "ORDER BY rank LIMIT ?",
                         (edition.upper(), match_query, limit),
                     )
                 else:
                     cur = conn.execute(
                         "SELECT system, category, name, source_book, raw_content "
-                        "FROM rules WHERE rules MATCH ? LIMIT ?",
+                        "FROM rules WHERE rules MATCH ? ORDER BY rank LIMIT ?",
                         (match_query, limit),
                     )
                 rows = cur.fetchall()
