@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Compose UI tests need a host activity that they control.
+
+  ui-test-manifest declares androidx.activity.ComponentActivity, but pulling it
+  in via debugImplementation puts it in the APPLICATION manifest, which AGP does
+  not reliably merge into the instrumentation APK. The tests then fail with
+  "No compose hierarchies found in the app" even though logcat shows the activity
+  displayed.
+
+  Declaring it here, in the androidTest manifest, is the reliable route and keeps
+  the activity out of any shippable manifest.
+
+  This is deliberately NOT MainActivity: that extends the AGDK GameActivity, which
+  owns its own native surface and is not a valid Compose test host.
+
+  The theme is a plain platform theme, NOT Theme.PathfinderGod. That theme parents
+  Theme.AppCompat, and AppCompat themes throw on window creation unless the host is
+  an AppCompatActivity. The tests do not need it: the Compose theming comes from the
+  PathfinderGodTheme composable called inside setContent, not from the XML theme.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <activity
+            android:name="androidx.activity.ComponentActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+    </application>
+
+</manifest>

@@ -81,10 +81,12 @@ class NavigationA11yTest {
                 )
             }
         }
-        compose.onNodeWithTag(GodTags.TOP_BAR_BACK)
+        // The testTag sits on the inner IconButton; the merged node carries no tag, so the
+        // finder must walk the unmerged tree.
+        compose.onNodeWithTag(GodTags.TOP_BAR_BACK, useUnmergedTree = true)
             .assertWidthIsAtLeast(Dimens.minTouchTarget)
             .assertHeightIsAtLeast(Dimens.minTouchTarget)
-        compose.onNodeWithTag(GodTags.TOP_BAR_MORE)
+        compose.onNodeWithTag(GodTags.TOP_BAR_MORE, useUnmergedTree = true)
             .assertWidthIsAtLeast(Dimens.minTouchTarget)
             .assertHeightIsAtLeast(Dimens.minTouchTarget)
     }

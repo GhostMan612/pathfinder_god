@@ -60,7 +60,8 @@ class DesignSystemSemanticsTest {
         }
         val state = compose.onNodeWithTag(TAG).fetchSemanticsNode()
             .config.valueOrNull(StateDescription)
-        assertEquals("Selected", state?.firstOrNull())
+        // StateDescription is a SemanticsPropertyKey<String>, not a list.
+        assertEquals("Selected", state)
     }
 
     @Test
@@ -77,7 +78,7 @@ class DesignSystemSemanticsTest {
         }
         val state = compose.onNodeWithTag(TAG).fetchSemanticsNode()
             .config.valueOrNull(StateDescription)
-        assertEquals("Not selected", state?.firstOrNull())
+        assertEquals("Not selected", state)
     }
 
     @Test
@@ -127,14 +128,14 @@ class DesignSystemSemanticsTest {
         }
         var state = compose.onNodeWithTag(TAG).fetchSemanticsNode()
             .config.valueOrNull(StateDescription)
-        assertEquals("Collapsed", state?.firstOrNull())
+        assertEquals("Collapsed", state)
 
         compose.onNodeWithTag(TAG).performClick()
         compose.waitForIdle()
 
         state = compose.onNodeWithTag(TAG).fetchSemanticsNode()
             .config.valueOrNull(StateDescription)
-        assertEquals("Expanded", state?.firstOrNull())
+        assertEquals("Expanded", state)
     }
 
     @Test
