@@ -5,6 +5,7 @@
 
 package com.pathfindergod.spoke.ui.combat
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,15 +15,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import com.pathfindergod.spoke.ui.motion.StaggerIn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,26 +32,44 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.pathfindergod.spoke.R
 import com.pathfindergod.spoke.data.local.AppDatabase
-import com.pathfindergod.spoke.data.local.NetworkPreferences
+import com.pathfindergod.spoke.data.local.AppPreferences
+import com.pathfindergod.spoke.service.AudioService
 import com.pathfindergod.spoke.data.network.HubApiFactory
 import com.pathfindergod.spoke.data.repository.EncounterRepository
-import com.pathfindergod.spoke.ui.theme.ParchmentSurface
-import com.pathfindergod.spoke.ui.theme.GodTypography
+import com.pathfindergod.spoke.ui.designsystem.Dimens
+import com.pathfindergod.spoke.ui.designsystem.GodCard
+import com.pathfindergod.spoke.ui.designsystem.GodChip
+import com.pathfindergod.spoke.ui.designsystem.GodEmptyState
+import com.pathfindergod.spoke.ui.designsystem.GodLiveRegion
+import com.pathfindergod.spoke.ui.designsystem.GodPrimaryButton
+import com.pathfindergod.spoke.ui.designsystem.GodStatusText
+import com.pathfindergod.spoke.ui.designsystem.GodTags
+import com.pathfindergod.spoke.ui.designsystem.GodTextField
+import com.pathfindergod.spoke.ui.designsystem.GodTexture
+import com.pathfindergod.spoke.ui.designsystem.GodTone
+import com.pathfindergod.spoke.ui.designsystem.Spacing
+import com.pathfindergod.spoke.ui.designsystem.godTouchHeight
 import com.pathfindergod.spoke.ui.theme.GoldAccent
+import com.pathfindergod.spoke.ui.theme.ParchmentSurface
+import com.pathfindergod.spoke.ui.theme.StatusGreen
 import com.pathfindergod.spoke.ui.theme.TextPrimary
 import com.pathfindergod.spoke.ui.theme.TextSecondary
-import com.pathfindergod.spoke.ui.theme.rpgPanel
+import com.pathfindergod.spoke.ui.theme.VoidBackground
 import com.pathfindergod.spoke.ui.viewmodel.CombatViewModel
 import com.pathfindergod.spoke.ui.viewmodel.Combatant
 import java.util.UUID
@@ -66,11 +85,11 @@ private class CombatVmFactory(
 @Composable
 internal fun rememberCombatViewModel(): CombatViewModel {
     val context = LocalContext.current
-    val prefs = remember { NetworkPreferences(context) }
+    val prefs = remember { AppPreferences(context) }
     val repository = remember {
         EncounterRepository(
             AppDatabase.create(context.applicationContext),
-            HubApiFactory.create(prefs.restUrl()),
+            HubApiFactory.get(prefs.restUrl()),
         )
     }
     return viewModel(factory = remember { CombatVmFactory(repository) })
@@ -82,84 +101,114 @@ fun CombatTrackerScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val vault by viewModel.vault.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val audio = remember(context) { AudioService.get(context) }
     var summoning by rememberSaveable { mutableStateOf(false) }
     var name by rememberSaveable { mutableStateOf("") }
     var initiative by rememberSaveable { mutableStateOf("") }
     var hp by rememberSaveable { mutableStateOf("") }
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    val activeName = state.combatants.getOrNull(state.activeIndex)?.name
+    val turnAnnouncement = if (activeName == null) {
+        stringResource(R.string.a11y_turn_idle)
+    } else {
+        stringResource(R.string.a11y_turn_change, state.currentRound, activeName)
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(GodTexture.feltBrush())
+            .padding(Spacing.lg),
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "Round ${state.currentRound}",
-                style = GodTypography.titleLarge,
+                text = stringResource(R.string.combat_round_pattern, state.currentRound),
+                style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = GoldAccent,
+                modifier = Modifier.testTag(GodTags.COMBAT_ROUND),
             )
             Text(
-                text = "Summon",
-                style = GodTypography.titleMedium,
-                color = GoldAccent,
-                modifier = Modifier.clickable { summoning = true }.padding(8.dp),
-            )
-            Text(
-                text = state.combatants.getOrNull(state.activeIndex)?.name ?: "—",
-                style = GodTypography.titleMedium,
-                color = TextPrimary,
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TrackerField(
-                value = name,
-                onChange = { name = it },
-                label = "Name",
-                modifier = Modifier.weight(2f),
-            )
-            TrackerField(
-                value = initiative,
-                onChange = { initiative = it },
-                label = "Init",
-                numeric = true,
-                modifier = Modifier.weight(1f),
-            )
-            TrackerField(
-                value = hp,
-                onChange = { hp = it },
-                label = "HP",
-                numeric = true,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                text = "Add",
-                style = GodTypography.titleMedium,
-                fontWeight = FontWeight.Bold,
+                text = stringResource(R.string.combat_summon),
+                style = MaterialTheme.typography.titleMedium,
                 color = GoldAccent,
                 modifier = Modifier
-                    .rpgPanel()
-                    .clickable {
-                        if (name.isBlank()) return@clickable
-                        val maxHp = hp.toIntOrNull()?.coerceAtLeast(1) ?: 20
-                        viewModel.addCombatant(
-                            Combatant(
-                                id = UUID.randomUUID().toString(),
-                                name = name.trim(),
-                                isPc = true,
-                                initiative = initiative.toIntOrNull() ?: 10,
-                                currentHp = maxHp,
-                                maxHp = maxHp,
-                            ),
-                        )
-                        name = ""
-                        initiative = ""
-                        hp = ""
+                    .semantics {
+                        contentDescription = ""
                     }
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .clickable(
+                        onClickLabel = stringResource(R.string.a11y_combat_summon),
+                        role = Role.Button,
+                    ) { summoning = true }
+                    .godTouchHeight()
+                    .padding(Spacing.sm)
+                    .testTag(GodTags.COMBAT_SUMMON),
+            )
+            Text(
+                text = activeName ?: stringResource(R.string.value_unknown),
+                style = MaterialTheme.typography.titleMedium,
+                color = TextPrimary,
+                modifier = Modifier.testTag(GodTags.COMBAT_ACTIVE),
+            )
+        }
+        GodLiveRegion(
+            text = turnAnnouncement,
+            tag = GodTags.COMBAT_ACTIVE + ":announce",
+            modifier = Modifier.padding(top = Spacing.xs),
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = Spacing.md),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            GodTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = stringResource(R.string.combat_field_name),
+                numeric = false,
+                modifier = Modifier.weight(2f),
+            )
+            GodTextField(
+                value = initiative,
+                onValueChange = { initiative = it },
+                label = stringResource(R.string.combat_init_label),
+                numeric = true,
+                modifier = Modifier.weight(1f),
+            )
+            GodTextField(
+                value = hp,
+                onValueChange = { hp = it },
+                label = stringResource(R.string.combat_hp_label),
+                numeric = true,
+                modifier = Modifier.weight(1f),
+            )
+            GodChip(
+                label = stringResource(R.string.combat_add),
+                selected = true,
+                style = MaterialTheme.typography.titleMedium,
+                onClickLabel = stringResource(R.string.a11y_combat_add),
+                contentDescription = stringResource(R.string.a11y_combat_add),
+                testTag = GodTags.COMBAT_ADD,
+                onClick = {
+                    if (name.isBlank()) return@GodChip
+                    val maxHp = hp.toIntOrNull()?.coerceAtLeast(1) ?: 20
+                    viewModel.addCombatant(
+                        Combatant(
+                            id = UUID.randomUUID().toString(),
+                            name = name.trim(),
+                            isPc = true,
+                            initiative = initiative.toIntOrNull() ?: 10,
+                            currentHp = maxHp,
+                            maxHp = maxHp,
+                        ),
+                    )
+                    name = ""
+                    initiative = ""
+                    hp = ""
+                },
             )
         }
         if (state.combatants.isEmpty()) {
@@ -167,25 +216,22 @@ fun CombatTrackerScreen(
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(
-                    text = "No combatants — add the party and roll initiative.",
-                    style = GodTypography.titleMedium,
-                    color = TextSecondary,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(horizontal = 32.dp),
-                )
+                GodEmptyState(text = stringResource(R.string.combat_empty))
             }
         } else {
             LazyColumn(
-                modifier = Modifier.fillMaxWidth().weight(1f).padding(top = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth().weight(1f).padding(top = Spacing.md),
+                verticalArrangement = Arrangement.spacedBy(Dimens.gridSpacing),
             ) {
                 itemsIndexed(state.combatants, key = { _, combatant -> combatant.id }) { index, combatant ->
                     StaggerIn(index = index, modifier = Modifier.animateItem()) {
                         CombatantCard(
                             combatant = combatant,
                             isActive = index == state.activeIndex,
-                            onDamage = { viewModel.updateHp(combatant.id, -5) },
+                            onDamage = {
+                                audio.damage()
+                                viewModel.updateHp(combatant.id, -5)
+                            },
                             onHeal = { viewModel.updateHp(combatant.id, 5) },
                             onAddCondition = { viewModel.addCondition(combatant.id, it) },
                             onRemoveCondition = { viewModel.removeCondition(combatant.id, it) },
@@ -195,61 +241,56 @@ fun CombatTrackerScreen(
             }
         }
         if (state.lastNotes.isNotBlank()) {
-            Text(
+            GodStatusText(
                 text = state.lastNotes,
-                style = GodTypography.bodyMedium,
-                color = TextSecondary,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = Spacing.sm),
             )
         }
-        Box(
-            modifier = Modifier
-                .rpgPanel()
-                .clickable { viewModel.nextTurn() }
-                .fillMaxWidth()
-                .padding(top = 0.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = "END TURN",
-                style = GodTypography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = GoldAccent,
-                modifier = Modifier.padding(vertical = 14.dp),
-            )
-        }
+        GodPrimaryButton(
+            text = stringResource(R.string.combat_end_turn),
+            onClickLabel = stringResource(R.string.a11y_combat_end_turn),
+            onClick = { viewModel.nextTurn() },
+            testTag = GodTags.COMBAT_END_TURN,
+        )
         if (summoning) {
             AlertDialog(
                 onDismissRequest = { summoning = false },
                 title = {
                     Text(
-                        text = "Vault",
-                        style = GodTypography.titleMedium,
+                        text = stringResource(R.string.combat_vault),
+                        style = MaterialTheme.typography.titleMedium,
                         color = GoldAccent,
                     )
                 },
                 text = {
                     if (vault.isEmpty()) {
-                        Text(
-                            text = "Vault empty — conjure encounters first.",
-                            style = GodTypography.bodyMedium,
-                            color = TextSecondary,
-                        )
+                        GodStatusText(text = stringResource(R.string.combat_vault_empty))
                     } else {
                         LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
                             itemsIndexed(vault, key = { _, saved -> saved.id }) { index, saved ->
                                 StaggerIn(index = index) {
                                     Text(
-                                        text = "${saved.threat} · ${saved.theme}",
-                                        style = GodTypography.bodyMedium,
+                                        text = stringResource(
+                                            R.string.combat_pattern_threat_theme,
+                                            saved.threat,
+                                            saved.theme,
+                                        ),
+                                        style = MaterialTheme.typography.bodyMedium,
                                         color = TextPrimary,
                                         modifier = Modifier
-                                            .clickable {
+                                            .clickable(
+                                                onClickLabel = stringResource(
+                                                    R.string.a11y_vault_load,
+                                                    saved.theme,
+                                                ),
+                                                role = Role.Button,
+                                            ) {
                                                 viewModel.loadEncounter(saved.id)
                                                 summoning = false
                                             }
+                                            .godTouchHeight()
                                             .fillMaxWidth()
-                                            .padding(vertical = 8.dp),
+                                            .padding(vertical = Spacing.sm),
                                     )
                                 }
                             }
@@ -258,45 +299,21 @@ fun CombatTrackerScreen(
                 },
                 confirmButton = {
                     Text(
-                        text = "Close",
-                        style = GodTypography.titleMedium,
+                        text = stringResource(R.string.combat_close),
+                        style = MaterialTheme.typography.titleMedium,
                         color = GoldAccent,
-                        modifier = Modifier.clickable { summoning = false },
+                        modifier = Modifier
+                            .clickable(
+                                onClickLabel = stringResource(R.string.a11y_dialog_close),
+                                role = Role.Button,
+                            ) { summoning = false }
+                            .godTouchHeight()
+                            .padding(horizontal = Spacing.md, vertical = Spacing.sm)
+                            .testTag(GodTags.COMBAT_DIALOG_CLOSE),
                     )
                 },
                 containerColor = ParchmentSurface,
             )
         }
     }
-}
-
-@Composable
-private fun TrackerField(
-    value: String,
-    onChange: (String) -> Unit,
-    label: String,
-    modifier: Modifier = Modifier,
-    numeric: Boolean = false,
-) {
-    TextField(
-        value = value,
-        onValueChange = onChange,
-        label = { Text(text = label) },
-        singleLine = true,
-        keyboardOptions = if (numeric) {
-            KeyboardOptions(keyboardType = KeyboardType.Number)
-        } else {
-            KeyboardOptions.Default
-        },
-        colors = TextFieldDefaults.colors(
-            focusedTextColor = TextPrimary,
-            unfocusedTextColor = TextPrimary,
-            focusedContainerColor = Color.Transparent,
-            unfocusedContainerColor = Color.Transparent,
-            cursorColor = GoldAccent,
-            focusedLabelColor = TextSecondary,
-            unfocusedLabelColor = TextSecondary,
-        ),
-        modifier = modifier,
-    )
 }

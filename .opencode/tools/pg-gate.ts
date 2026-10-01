@@ -108,8 +108,22 @@ export default tool({
       const credits = read(path.join(root, "docs", "audio-credits.md"))
       const uncredited = assets.filter((a) => !credits.includes(a))
       add("audio-credited", uncredited.length === 0, uncredited.length === 0 ? "all credited in-repo" : `UNCREDITED: ${uncredited.join(", ")}`)
-      const inApp = allKt.some((f) => /Credits/i.test(f) && /CC BY/.test(read(f)))
-      add("in-app-credits", inApp, inApp ? "in-app credits screen with CC BY" : "in-app credits screen MISSING")
+      const creditsScreen = allKt.find((f) => /Credits/i.test(f))
+      const screenText = creditsScreen ? read(creditsScreen) : ""
+      const stringsText = read(path.join(root, "spoke_kt", "app", "src", "main", "res", "values", "strings.xml"))
+      const attributionInScreen = /CC BY/.test(screenText)
+      const attributionInStrings = /CC BY/.test(stringsText)
+      const attributionReferenced = /credits_license_by\d+/.test(screenText)
+      const inApp = Boolean(creditsScreen) && (attributionInScreen || (attributionInStrings && attributionReferenced))
+      add(
+        "in-app-credits",
+        inApp,
+        !creditsScreen
+          ? "in-app credits screen MISSING"
+          : inApp
+            ? `in-app credits screen with CC BY (${attributionInScreen ? "in screen" : "via strings.xml"})`
+            : "credits screen found but no CC BY attribution reachable",
+      )
       add("vibrationeffect", /VibrationEffect/.test(audio), /VibrationEffect/.test(audio) ? "present" : "HapticFeedbackType still in use")
       human.push("crit and fumble haptics distinguishable on device")
     }
@@ -117,8 +131,20 @@ export default tool({
     if (wp === 3) {
       add("navhost", /NavHost\(/.test(navCorpus), /NavHost\(/.test(navCorpus) ? "NavHost present" : "no NavHost")
       add("suite-scaffold", /NavigationSuiteScaffold/.test(navCorpus), /NavigationSuiteScaffold/.test(navCorpus) ? "present" : "not adopted")
-      const itemCount = (read(path.join(kotlin, "ui", "navigation", "NavigationItem.kt")).match(/Destination\(/g) ?? []).length
-      add("nav-le-four", itemCount > 0 && itemCount <= 5, `${itemCount} bottom-bar destinations (cap 3-5)`)
+      const navSource = read(path.join(kotlin, "ui", "navigation", "NavigationItem.kt"))
+      // The bottom bar is the NavigationItem enum, NOT the Destinations object.
+      // Destinations also holds overflow entries and sub-routes (hero detail,
+      // map viewer, audio credits), so counting Destination( calls counts the
+      // wrong thing. Count the enum's constants instead.
+      const enumStart = navSource.indexOf("enum class NavigationItem")
+      const enumEnd = enumStart < 0 ? -1 : navSource.indexOf("\n}", enumStart)
+      const enumBody = enumStart < 0 || enumEnd < 0 ? null : navSource.slice(enumStart, enumEnd)
+      // Match the enum constant lines directly; a capturing-group lookahead is
+      // fragile across formatting. Note the last constant ends in ";" not ",".
+      const itemCount = enumBody
+        ? (enumBody.split("\n").filter((l) => /^\s{2,}[A-Z][A-Z0-9_]*\s*\(/.test(l)).length)
+        : 0
+      add("nav-le-four", itemCount >= 3 && itemCount <= 5, `${itemCount} bottom-bar destinations (cap 3-5)`)
       add("insets", /safeDrawing/.test(navCorpus), /safeDrawing/.test(navCorpus) ? "safeDrawing consumed" : "insets hole open")
       human.push("all 9 destinations reachable in <=2 taps", "predictive back from every sub-screen")
     }
@@ -135,7 +161,8 @@ export default tool({
       add("settle-parity-tests", parity.length > 0, parity.length > 0 ? parity.join(", ") : "no 2D/3D parity test")
       add("lit-shading", /shadingModel\s*:\s*lit/.test(pitCorpus), /shadingModel\s*:\s*lit/.test(pitCorpus) ? "lit" : "unlit")
       add("lights", /LightManager|addLight/.test(pitCorpus), /LightManager|addLight/.test(pitCorpus) ? "present" : "none")
-      add("msaa", /SurfaceSwapChainConfig|\.samples\(/.test(pitCorpus), /SurfaceSwapChainConfig|\.samples\(/.test(pitCorpus) ? "configured" : "none")
+      const msaaConfigured = /SurfaceSwapChainConfig|\.samples\(|CONFIG_MSAA_\d+_SAMPLES|SwapChainFlags\.CONFIG_MSAA/.test(pitCorpus)
+      add("msaa", msaaConfigured, msaaConfigured ? "configured" : "none")
       human.push("all 6 solids", "UV/number orientation", "settle-to-face parity on device", "pit holds display refresh rate")
     }
 

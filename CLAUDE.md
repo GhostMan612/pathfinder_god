@@ -28,7 +28,7 @@ Follow these workflow rules strictly to prevent context window overloads:
 *   **Approval:** Wait for explicit approval before running `git commit` and `git push`, unless executing a strictly pre-approved sequential plan.
 
 ## 5. Build Boundary — HARD RULE
-*   **NEVER run full builds.** Do not execute `flutter build apk`, `flutter build appbundle`, `flutter run`, or any command that produces a compiled binary artifact. The human builds the app in Android Studio.
-*   **My lane ends at source correctness:** `flutter pub get` (dependency resolution), `flutter analyze`, and `flutter test` (host-side) are permitted and expected as code-quality gates. Anything that emits an APK/AAB/binary is out of scope.
+*   **NEVER run release builds.** `assembleRelease`, `bundleRelease` and `flutter build appbundle` are forbidden. The debug lane is the boundary; the human installs from Android Studio. Never commit an APK or AAB.
+*   **My lane ends at source correctness:** `gradlew assembleDebug` and `gradlew testDebugUnitTest` (host-side) are permitted and expected as code-quality gates. Anything that emits a signed release artifact is out of scope.
 *   **Verification hand-off:** After scaffolding code, state what the human should expect when they press Run in Android Studio (e.g., "analyze clean, tests pass; first Gradle sync will download X"). If a build breaks on their side, debug from their pasted error output, never by rebuilding locally.
 *   Commit messages must not claim build success — only analyze/test status.

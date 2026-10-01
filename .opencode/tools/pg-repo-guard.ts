@@ -13,7 +13,10 @@ const FORBIDDEN = [
   { re: /\.(apk|aab|keystore|jks)$/, why: "release/keystore artifact" },
   { re: /(^|\/)local\.properties$/, why: "machine-local SDK path" },
   { re: /(^|\/)blueprints\//, why: "gitignored by RULES.md 1.3" },
-  { re: /(^|\/)spoke\/(?!$)/, why: "deleted Flutter tree" },
+  // The deleted Flutter tree is `spoke/` at the repo ROOT, not any path segment
+  // ending in "spoke". Unanchored, this matched spoke_kt/... (the live native
+  // lane) and flagged all 90 Kotlin sources as forbidden. Anchor to the root.
+  { re: /^spoke\/(?!$)/, why: "deleted Flutter tree" },
   { re: /\.exe$/, why: "binary" },
 ]
 
