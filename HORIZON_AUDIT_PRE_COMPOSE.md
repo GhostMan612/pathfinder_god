@@ -5,6 +5,15 @@ The Future Dictates the Past and the Past is Always Present.
 
 # Horizon Audit — Pre-Compose Freeze
 
+> **STATUS: CLOSED — historical snapshot.** This audit predates the Compose shell
+> and reads `spoke_kt/` as unimplemented. Everything below was resolved: the
+> `God*` design system in `ui/designsystem/` replaced `rpgPanel` (WP-1), the
+> navigation is a 4-tab bar over 9 destinations (WP-3), and the Filament pit
+> landed (WP-4). **Every `spoke/lib/...` path in §5 is a deleted Flutter file.**
+> Live architecture: [`README.md`](README.md),
+> [`KOTLIN_PORT_SPEC.md`](KOTLIN_PORT_SPEC.md), `RULES.md` §5.4.
+> Re-run the audit against `spoke_kt/` before trusting any row here.
+
 Read-only sweep of `hub/` and `spoke_kt/` plus Flutter extraction inventory.
 Method: route-table diff, live route probe, signature inspection of cached
 AARs, compile-log forensics. No source modified.
@@ -92,7 +101,7 @@ expectations) unrelated to recent phases.
 | `spoke/lib/services/miss_queue.dart`, `backup_service.dart` | Offline queue + campaign export shapes for `WorkManager` + bundle sharing |
 | `spoke/lib/services/export_service.dart` | Markdown sheet layout + letter-PDF centering rules for `PrintedPdfDocument` |
 | `docs/audio-credits.md` + `audio_service.dart` | CC0/CC-BY asset list and 4-voice pool design for the Oboe migration |
-| `KOTLIN_PORT_SPEC.md` §§2/5 | Stale: still names `io.requery:sqlite-android`, Room 2.6.1/kapt, and pre-verification assumptions — refresh to `mil.nga:sqlite-android:3450200`, Room 2.7.0/KSP, SDK 34 Compose BOM 2024.10.01 |
+| `KOTLIN_PORT_SPEC.md` §§2/5 | ~~Stale: still names `io.requery:sqlite-android`, Room 2.6.1/kapt, and pre-verification assumptions~~ — **RESOLVED in BP-06**: the spec now names `mil.nga:sqlite-android:3450200`, Room 2.7.0/KSP, compileSdk 37 / targetSdk 34, Compose BOM 2024.10.01, and carries as-built correction blocks at §§1–5. |
 
 ## 6. Actionable Roadmap for "The Glass"
 

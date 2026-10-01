@@ -1,14 +1,19 @@
 <!-- As Above, So Below. As Within, So Without. The Future Dictates the Past and the Past is Always Present. -->
 # Pathfinder God — Kotlin/AGDK Port Specification (Muse Spark 1.3)
-> **STATUS: COMPLETE (Phase 22, 2026-09-18).** The Flutter spoke is deleted;
-> `spoke_kt/` is the client. This document is now a build record — as-built
-> wins over any forward-looking passage below.
+> **STATUS: COMPLETE (Phase 22, 2026-09-18) + BP-06 WP-0…WP-9.** The Flutter spoke is deleted;
+> `spoke_kt/` is the client. This document is a build record. Where a passage
+> below is still forward-looking, the **as-built** block at the head of that
+> section wins; the residual forward-looking parts are called out there.
 
 Record: the Flutter Spoke is rewritten as a 100% native Kotlin Android app
-(package `com.pathfindergod`, label "Pathfinder God") with a pure 2D Jetpack
-Compose UI — the terminal architecture (no Unity, no Godot, no native render
-surface). Audio shipped on SoundPool/MediaPlayer; frame-pacing AARs stay on
-the BOM for jank telemetry.
+(applicationId `com.pathfindergod.spoke`, label "Pathfinder God"). The UI is
+Jetpack Compose with exactly **one** first-party native render surface — the
+Filament 1.76 dice pit (swapchain on a `SurfaceView`, lit shading, directional
+key light + IBL, shadow-mapped ground plane; see §4). No Unity, no Godot, no
+game engine, no NDK/CMake. Audio ships on SoundPool/MediaPlayer; AGDK supplies
+the activity base and an explicit high-refresh request, and
+`games-frame-pacing` is pinned but **not called into** — jank telemetry is
+`Choreographer.getFrameMetrics()` sampled by `PitFrameTelemetry`.
 The Python Hub is untouched; `shared/openapi.yaml` plus the existing REST/WS
 shapes remain the wire contract.
 
@@ -17,6 +22,13 @@ shapes remain the wire contract.
 > contacted by the phone. Any reference to "Hub on 11450" means `:8000`.
 
 ## 0. Source Inventory (what is being ported)
+
+> **This section describes the deleted Flutter `spoke/` tree as it stood at the
+> start of the port.** Every path below is gone. Where the port diverged from
+> this inventory, the as-built blocks in §§1–5 and the notes inline here say so —
+> e.g. the `48 MB gz` rulebook asset shipped **raw** at ~19MB, `slm_guide`
+> (MediaPipe/Gemma 3n) was **never ported**, and the `haptics_service` was
+> replaced by `VibrationEffect` waveforms inside `AudioService.kt`.
 
 - `main.dart` — boot chain: reclaim temp files → FlutterGemma init →
   HubConfig load → AudioService/Haptics init → RulebookDb open →
@@ -41,13 +53,25 @@ shapes remain the wire contract.
 
 ## 1. Architecture Translation (Provider → ViewModel/StateFlow)
 
-Stack: single-`Activity` + Compose Navigation, Hilt DI, one `ViewModel`
+> **As-built corrections (BP-06):** there is **no DI framework** — no Hilt, no
+> Dagger, no kapt. Wiring is manual constructor injection plus
+> `ViewModelProvider.Factory` helpers (RULES.md §5.4). Preferences are
+> **`SharedPreferences`** in `data/local/AppPreferences.kt`, not `DataStore` —
+> and its `FILE_NAME` is still `"pathfinder_network"` (the file was renamed
+> `NetworkPreferences.kt` → `AppPreferences.kt` in WP-6, the key was not, so
+> live installs keep their hub URL and audio prefs). The screen→ViewModel map
+> below is close to as-built except that `GodChatViewModel` and
+> `CharacterSheetViewModel` are not separate classes: streaming is collected
+> from `HubWebSocketClient` into the Loot/Rule/Combat screens' own ViewModels,
+> and the sheet lives inside `CharacterDetailScreen`.
+
+Stack as planned: single-`Activity` + Compose Navigation, one `ViewModel`
 per screen, `StateFlow<UiState>` + `SharedFlow<Event>` for one-shots
 (snackbars, share sheets). Rules:
 
 | Flutter (current) | Kotlin (target) |
 |---|---|
-| `ChangeNotifierProvider(CombatStore)` in `main.dart` | Hilt `@Singleton CombatRepository` + `@HiltViewModel CombatViewModel`; `collectAsStateWithLifecycle()` in composables (replaces `Consumer`) |
+| `ChangeNotifierProvider(CombatStore)` in `main.dart` | ~~Hilt `@Singleton CombatRepository` + `@HiltViewModel CombatViewModel`~~ — **Hilt was never adopted**; manual constructor injection + `ViewModelProvider.Factory` (see the as-built block above). `collectAsStateWithLifecycle()` in composables (replaces `Consumer`) |
 | `CombatStore extends ChangeNotifier` + `notifyListeners()` | `MutableStateFlow<CombatUiState>`; single `data class CombatUiState(combatants, activeIndex, round, isProcessing)` — one emission per mutation, no listener leaks |
 | `FutureBuilder` boot gate | `AppViewModel: StateFlow<BootState>` (`Loading → Ready(models) / Failed`); splash API (`androidx.core.splashscreen`) until `Ready` |
 | `StatefulWidget` + `TextEditingController` (sheet, 26 fields) | `CharacterSheetViewModel` holding `MutableStateFlow<CharacterDraft>`; Compose `TextField(value/onValueChange)` — no controller disposal graph |
@@ -72,6 +96,16 @@ proficiency bonus `level+2/4/6/8`, AC/装甲 caps, spell DCs),
 
 ## 2. Database Migration (SQLite → Room)
 
+> **As-built corrections (BP-06):** the three stores were **not** merged into one
+> `SpokeDatabase`; `AppDatabase` (`pathfinder_spoke.db`, characters/maps/
+> encounters/campaigns/rolls) and `RulesDatabase` (`pathfinder_rag.db`, the
+> read-only FTS5 rules extract) both exist, the latter behind
+> `NgaSQLiteFactory`. The 2→3 upgrade is a **hand-written additive
+> `MIGRATION_2_3`**, not an `autoMigration` — `AppDatabase` is at `version = 3`
+> and registers the migration explicitly. Room's identity-hash check against the
+> *external* FTS5 table is resolved by keeping rules in a separate database, so
+> the "still unproven" spike below no longer applies to the rules screen.
+
 Keep the proven shape: normalized columns for query fields, JSON blobs
 for deep sub-documents (`kotlinx.serialization` `TypeConverter`s). One
 `SpokeDatabase` (`pathfinder_spoke.db`) absorbing the three files is
@@ -92,17 +126,30 @@ acceptable; keep separate DBs only if migration risk demands it.
   with FTS5) through the hand-rolled `NgaSQLiteOpenHelperFactory` bridge
   (`io.requery:sqlite-android` does not exist on Central — do not revert).
   `RuleFtsEntity` maps the real `rules` virtual table with `@RawQuery`
-  `MATCH` + `bm25()`. Still unproven: Room's identity-hash check against
-  the external table at first open — spike before the Glass rules screen.
-- Extraction flow to preserve: first launch gunzips 48 MB → app storage
-  once (`bundleVersion` marker file forces re-extract); `RoomDatabase.Callback`
-  is the wrong hook for a 58 MB asset — do it in `AppViewModel` boot
-  with progress events, same as today.
-- Tests: `room-testing` migrations (`2→3` portrait column present),
-  DAO round-trips for dual-layer `CachedMap`, FTS5 smoke query returning
-  the known `Flanking` row.
+  `MATCH` + `bm25()`, and lives in `RulesDatabase` (its own Room database), so
+  Room's identity-hash check never sees the external table. The "spike before
+  the Glass rules screen" risk is closed.
+- Extraction flow as-built: the asset is a **raw `.db`**, so there is no
+  gunzip. `DatabaseAssetManager.ensureExtracted` copies the asset
+  (`context.assets.open("rules/pathfinder_rag.db")` → temp file →
+  `renameTo`, on `Dispatchers.IO`) into `context.getDatabasePath(...)` once,
+  and a marker file `pathfinder_rag.db.v$BUNDLE_VERSION` (currently
+  `BUNDLE_VERSION = 2`) forces a re-copy. There is no `AppViewModel`; the rules
+  database is opened on demand from the screens that need it.
+- Tests: the migration is exercised by `MIGRATION_2_3` being registered on
+  `AppDatabase` (`version = 3`); there is no `room-testing` in this lane —
+  the lane is JUnit 4 only, and DAO/FTS5 assertions live in `hub/tests/` on the
+  Python side.
 
 ## 3. Network Resilience (OkHttp + ForegroundService)
+
+> **As-built corrections (BP-06):** base URL is `SharedPreferences`
+> (`AppPreferences`), not `DataStore`. The foreground service shipped as
+> `service/HubForegroundService.kt` (`FOREGROUND_SERVICE_DATA_SYNC`, declared
+> in the manifest) and owns the backoff reconnect, so the Doze drop is solved.
+> **Not shipped:** `WorkManager` / `MissQueueWorker` and `NsdManager` mDNS
+> discovery — neither is a dependency of this lane. Hub entry is manual in
+> **Setup → Tether** plus the hub `/health` probe; mDNS is a future item.
 
 - Base URL: `DataStore<Preferences>` key `hub_base_url`, default
   `http://10.0.2.2:8000` (emulator). `HttpUrl` builder mirrors
@@ -138,55 +185,99 @@ acceptable; keep separate DBs only if migration risk demands it.
 - Offline tiers preserved: bundled FTS5 → hub → miss queue → on-demand
   scrape; `GET /rules/fetch` results upserted locally.
 
-## 4. Native Performance (AGDK libraries, no engine)
+## 4. Native Performance (AGDK libraries, one render surface, no engine)
 
-Terminal decision: the UI is pure 2D Jetpack Compose. No Unity, no Godot,
-no native render surface, no JNI bridge skeleton — earlier drafts reserved
-a `GodotBridge.kt` seam and a Vulkan/Filament dice pilot; both are deleted
-from the plan. `MainActivity` stays a standard Compose
-`ComponentActivity` (not `GameActivity` — there is no surface to host).
-What survives from AGDK is libraries only, applied to the 2D UI:
+Terminal decision: the UI is Jetpack Compose. No Unity, no Godot, no game
+engine, no JNI bridge skeleton — earlier drafts reserved a `GodotBridge.kt` seam
+and are deleted from the plan. One narrow exception was taken in BP-06 WP-4: the
+dice pit is a first-party Filament 1.76 render surface (swapchain on a
+`SurfaceView`), because a lit, shadowed, settling die cannot be drawn
+convincingly with 2D canvas primitives. That surface is ours — no engine, no
+NDK/CMake, and therefore **no Swappy** (it is C++). What survives from AGDK is
+libraries plus the activity base:
 
-- Audio: migrate dice SFX to **Oboe** (`AAudio`, low-latency stream,
-  `PerformanceMode::LowLatency`) reusing the pooled-player design
-  (4 voices) and the existing CC0/CC-BY asset set; BGM stays on
-  `MediaPlayer` loop.
-- Dice motion: port the `dice_physics.dart` tumble curves to Compose
-  `Animatable`/`Transition` canvas drawing (deterministic result stays
-  in Kotlin; presentation only) — no 3D scene, no swapchain.
-- Jank telemetry: **Tuning Fork** + `games-frame-pacing` AARs stay on the
-  BOM for frame-time histograms around the Compose dice/map canvases.
+- AGDK activity base (WP-5): `MainActivity` extends
+  `androidx.games.activity.GameActivity` (games-activity 3.0.5). It is an
+  `AppCompatActivity`, so `Theme.PathfinderGod` parents
+  `Theme.AppCompat.NoActionBar` in both `res/values/` and
+  `res/values-v31/`, and `androidx.appcompat` is a direct dependency. A
+  platform `android:Theme.Material` parent compiles clean and then throws
+  `IllegalStateException: You need to use a Theme.AppCompat theme (or
+  descendant) with this activity` on launch — this pairing is a single
+  contract, never change one half without the other.
+- Explicit high-refresh request (WP-5): Android 15+ throttles games to
+  60 Hz unless the app asks, so `PitFrameGovernor` reads the target from
+  `display.mode` and same-resolution `display.supportedModes` (never a
+  hardcoded 120), then requests it with `Window.setFrameRate(rate,
+  FRAME_RATE_COMPATIBILITY_FIXED_SOURCE)` on API 30+, with
+  `LayoutParams.preferredRefreshRate` / `preferredDisplayModeId` as the
+  API-21+ floor and `Surface.setFrameRate` on the pit's own surface.
+  `Surface.setFrameRate` is also API 30, so it is not the pre-30
+  fallback — `preferredDisplayModeId` is.
+- Frame budget (WP-5): the integration step ceiling, the Filament
+  `Renderer.DisplayInfo` refresh rate and the jank threshold are all
+  derived from the live display mode (`PitRefreshPolicy`), not
+  hardcoded. `Choreographer` exposes no interval setter — vsync fixes the
+  interval — so "tuning the swap interval" means requesting the mode and
+  measuring against the budget it implies.
+- Jank telemetry (WP-5): `Choreographer.getFrameMetrics()` sampled by
+  `PitFrameTelemetry`, gated on `ApplicationInfo.FLAG_DEBUGGABLE`, one
+  log line per 240 frames. **Tuning Fork is not a dependency** and the
+  earlier "frame-time histograms around the Compose dice/map canvases"
+  claim was never true; the sampled surface is the Filament pit.
+  `androidx.games:games-frame-pacing` stays declared at 2.1.2 but is not
+  called into — `ChoreographerWrapper` is the intended consumer and was
+  left alone deliberately, because its API could not be verified without
+  a compiler in the WP-5 lane.
+- Audio: Oboe remains superseded without execution — `SoundPool` +
+  `MediaPlayer` serve; the low-latency AAudio stream buys nothing on the
+  dice SFX budget.
 
 ## 5. Build, Test, Rollout
 
-- UI architecture (locked): pure 2D Jetpack Compose is terminal. No
-  Unity/Godot integration at any milestone — §§4–5 describe libraries,
-  ViewModels, and Compose screens only.
+- UI architecture (locked): Jetpack Compose is terminal, **with the single
+  documented exception of the Filament dice pit** (§4). No Unity/Godot
+  integration at any milestone — §§4–5 describe libraries, ViewModels, the one
+  render surface, and Compose screens only.
 - Modules: `:app` only (single-module app, as built). Pinned as-built:
   AGP 9.0.1 (built-in Kotlin — no `kotlin.android` plugin, no kapt),
   KSP 2.3.4 + Room 2.7.0 (2.6.1's processor crashes on new Kotlin),
-  Compose BOM 2024.10.01, SDK floor compileSdk 37 (Filament 1.76 demands
+  Compose BOM 2024.10.01, navigation-compose 2.8.4 + material3-adaptive-
+  navigation-suite 1.3.1, SDK floor compileSdk 37 (Filament 1.76 demands
   it) + targetSdk 34 + minSdk 26 (as built in `app/build.gradle.kts`),
   `mil.nga:sqlite-android:3450200`, Filament + filamat 1.76.0,
-  Retrofit 2.11/OkHttp 4.12,
-  AGDK games-activity/frame-pacing. `androidx.sqlite` 2.5 interfaces are
+  Retrofit 2.11/OkHttp 4.12, androidx.appcompat 1.7.0 (GameActivity needs
+  it), AGDK games-activity/frame-pacing. `androidx.sqlite` 2.5 interfaces are
   Kotlin properties (`override val/var`, `Array<out Any?>` bind args).
-- Tests: JUnit5 + Turbine (`CombatViewModel` end-turn notes event,
-  `GodChatViewModel` retry frame clears text), Robolectric for DAOs,
-  MockWebServer for `/combat/end-turn` dual payload + `/map/generate`
-  dual layers, screenshot tests for `RpgPanel` 9-patch equivalents
-  (port `stone_border/parchment/gothic_stone` center-slices 1:1).
+  Every pin lives in `gradle/libs.versions.toml`; nothing bumps without a gate.
+- Tests: **JUnit 4** (`junit 4.13.2`) for the JVM lane. There is no Turbine,
+  no Robolectric, no MockWebServer and no JUnit 5 in this lane — the earlier
+  plan assumed all four. What actually exists: `DiceEngineTest` (34 cases after
+  the WP-6 rewrite), `PitSettleTest` / `PitGeometryTest` / `PitFramePolicyTest` /
+  `DieMeshTest` (centroid-normal settle, 2D↔3D parity, mip chain), and
+  `MapSamplingTest`; plus an `src/androidTest` source set of instrumented
+  accessibility tests that need a device. Hub side: `pytest hub/tests/` with a
+  hermetic conftest that patches every bound `get_settings`, so the suite is
+  green with `data/` absent.
 - Rollout (done): M1 data+network (Room + Retrofit, behind the shared hub) —
   done; M2 screens (Dice → Combat → Hero → Rules → Map → Campaign → Setup →
-  God → Encounter, all nine tabs) — done; UI sprints Phases 12–21 (Glass
-  shell, dice physics, roster, ladder, tether, vault, chronicler, oracle,
-  bazaar, encounter, FileProvider export, vault→tracker bridge) — done.
-  Superseded without execution: Oboe migration (SoundPool serves), AGDK
-  surface milestone (no engine per terminal decision), baseline profiles.
+  God → Encounter — **nine destinations**) — done. **The bottom bar is four
+  items, not nine** (BP-06 WP-3): Material 3 caps a navigation bar at 3–5, so
+  Dice · Combat · Hero · Rules are the tabs and Home plus the other five live
+  behind the dashboard and `MoreSheet`, all inside a `NavigationSuiteScaffold`.
+  UI sprints Phases 12–21 (Glass shell, dice physics, roster, ladder, tether,
+  vault, chronicler, oracle, bazaar, encounter, FileProvider export,
+  vault→tracker bridge) — done. Superseded without execution: Oboe migration
+  (SoundPool serves), baseline profiles, `games-frame-pacing`'s
+  `ChoreographerWrapper` (platform `FrameMetrics` telemetry serves), MediaPipe
+  /Gemma 3n on-device SLM (no such dependency in the lane). Executed in BP-06:
+  the AGDK `GameActivity` base + its AppCompat theme contract, the explicit
+  high-refresh request, the Filament pit, the `God*` design system, the audio
+  licence discharge, and the accessibility pass — the "AGDK surface milestone"
+  line below predates the Filament pit landing.
   Acceptance held: hub `pytest` green, wire payloads byte-identical to
   `openapi.yaml`.
 - Risks: platform SQLite without FTS5 (§2 — mitigated by the NGA
-  bridge); MediaPipe Gemma 3n has no AGDK shortcut — keep the
-  `flutter_gemma` equivalent via MediaPipe LLM Inference AAR and the
-  existing side-load + gated-download flow; 58 MB rules DB keeps the
-  `android:largeHeap` + scoped-storage extraction plan mandatory.
+  bridge); **MediaPipe Gemma 3n was never ported** — there is no LLM on-device
+  and no MediaPipe dependency, so the Guide tier remains hub-only; the
+  58 MB rules DB keeps the `android:largeHeap` + extraction plan mandatory.

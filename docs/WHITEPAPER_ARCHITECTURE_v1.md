@@ -1,8 +1,14 @@
 <!-- As Above, So Below. As Within, So Without. The Future Dictates the Past and the Past is Always Present. -->
 # Pathfinder God — Technical Architecture Whitepaper v1.0
 
-> SUPERSEDED (Phase 22, 2026-09-18): the Flutter `spoke/` this paper describes
-> is deleted; the native Kotlin `spoke_kt/` client replaces it. Body frozen as history.
+> SUPERSEDED (Phase 22, 2026-09-18; truth pass 2026-09-30): the Flutter `spoke/`
+> this paper describes is deleted; the native Kotlin `spoke_kt/` client replaces
+> it. Body frozen as history. **Current identity is
+> `com.pathfindergod.spoke`** (applicationId, namespace, and Kotlin package root);
+> every `com.pathfindergod` in this paper is the retired Flutter-era value. For
+> the live architecture see [`../README.md`](../README.md),
+> [`architecture.md`](architecture.md), [`../KOTLIN_PORT_SPEC.md`](../KOTLIN_PORT_SPEC.md)
+> and `RULES.md` §5.1/§5.4.
 
 **Date:** 2026-08-30  
 **Addendum:** 2026-09-14 (v0.6.1 database truth pass, v0.6.2 zero-config discovery) — see [Addendum](#addendum--v061v062-2026-09-14). Body below is the frozen v1.0 text; figures marked [v1.0] are superseded where the addendum says so.  
@@ -10,7 +16,7 @@
 **Authors:** Pathfinder God build team  
 **Classification:** Internal — shareable with Gemini / external reviewers for deep research help  
 **Repo:** `C:\pathfinder_god\` (Flutter `spoke/`, Python FastAPI `hub/`, contract `shared/openapi.yaml`, standalone `tools/command_center/`)  
-**Canonical rules:** `RULES.md` wins all conflicts. Lane ends at source correctness — `flutter analyze` + `flutter test` only; human builds APK in Android Studio.
+**Canonical rules:** `RULES.md` wins all conflicts. Lane ends at source correctness — ~~`flutter analyze` + `flutter test` only; human builds APK in Android Studio~~ — **SUPERSEDED: the native lane is `./gradlew assembleDebug` + `testDebugUnitTest` in `spoke_kt/` (Temurin 17, `--no-daemon`); see RULES.md §5.2 and CLAUDE.md §5.**
 
 ---
 
@@ -230,7 +236,7 @@ async def generate(prompt, edition, mode?, history?) -> LLMResult:
 
 **Stack:** Flutter 3.12.2 / Dart 3.12, `http ^1.6.0`, `web_socket_channel ^3.0.3`, `shared_preferences ^2.5.5`, `flutter_markdown_plus ^1.0.12` (migrated from discontinued `flutter_markdown`), `path ^1.9.1`, `path_provider ^2.1.5`, `sqflite ^2.4.3`, `sqflite_common_ffi ^2.3.0`, `sqlite3_flutter_libs ^0.5.42` (hold — `0.6.0` is EOL), `audioplayers ^6.1.0`, `openapi_generator 7.0.0`, `cupertino_icons`, `flutter_lints ^6.0.0`, `flutter_test`. Android min 21, Kotlin `com.pathfindergod`, label "Pathfinder God", circular branded icons `pf_logo` (`flutter_launcher_icons`, `flutter_native_splash`).
 
-**Package identity (unified):** `applicationId com.pathfindergod`, Kotlin `com.pathfindergod.MainActivity`, namespace `com.pathfindergod`.
+**Package identity (unified):** `applicationId com.pathfindergod`, Kotlin `com.pathfindergod.MainActivity`, namespace `com.pathfindergod`. — **SUPERSEDED: the shipped values are `applicationId com.pathfindergod.spoke`, namespace `com.pathfindergod.spoke`, entry point `com.pathfindergod.spoke.MainActivity`** (`spoke_kt/app/build.gradle.kts:13,17`, `spoke_kt/app/src/main/AndroidManifest.xml:31`).
 
 **DI `spoke/lib/main.dart:16`:**
 

@@ -93,9 +93,13 @@ are saved permanently, including offline next time.
 ## Phone bundling
 
 ```powershell
-# gzip -9 data/pathfinder_rag.db → spoke/assets/rules/pathfinder_rag.db.gz (Git LFS)
+# Copy the device extract in RAW. Do NOT gzip it:
+# AGP decompresses .gz assets at build time and renames the entry,
+# which breaks DatabaseAssetManager's runtime open path.
+copy data\pathfinder_rag.db spoke_kt\app\src\main\assets\rules\pathfinder_rag.db   # Git LFS
 ```
 
-Then bump `RulebookDb.bundleVersion` in `spoke/lib/services/rulebook_db.dart`
-or devices keep the stale extracted copy. Extraction streams 8KB natively
-(Kotlin `AssetManager→GZIP`), `Isolate` fallback, static open-lock.
+Then bump `DatabaseAssetManager.BUNDLE_VERSION` in
+`spoke_kt/app/src/main/java/com/pathfindergod/spoke/data/local/DatabaseAssetManager.kt`
+or devices keep the stale extracted copy. Extraction is a raw asset copy on
+`Dispatchers.IO` → temp file → `renameTo`, with a `pathfinder_rag.db.v<N>` marker file.

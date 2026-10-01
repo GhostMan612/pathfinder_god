@@ -1,5 +1,14 @@
 # Pathfinder God — Release Notes
 
+> **These notes stop at the Flutter era.** The newest entry below is
+> **v0.6.4 (2026-09-14)**. After that the Flutter `spoke/` was deleted
+> (Phase 22, 2026-09-18) and replaced by the native Kotlin `spoke_kt/`, which
+> BP-06 (WP-0…WP-9) then took to code-complete. Every `flutter analyze` /
+> `flutter test` / `spoke/` reference in an entry is **historically accurate
+> for that release and is not the current build**. Current instructions:
+> [`README.md`](README.md) · [`KOTLIN_PORT_SPEC.md`](KOTLIN_PORT_SPEC.md) ·
+> `RULES.md` §5.2. Current identity is `com.pathfindergod.spoke`.
+
 ## v0.6.4 "Self-Improving Library + Offline Brain" — 2026-09-14
 
 ### Highlights
@@ -122,8 +131,8 @@ C:\venv-hub\venv\Scripts\python.exe -m app.main   :: http://0.0.0.0:8000
 ```
 
 ### Phone (Spoke) — Android Studio
-1. Open `spoke/`, press Run on your device.
-2. **Setup → Find hub automatically** → tap your laptop → green card.
+1. Open `spoke_kt/`, press Run on your device.
+2. **Setup → Tether** → enter `http://<laptop-LAN-IP>:8000` → CONNECT → green.
 
 Manual fallback: hub URL is `http://<laptop-lan-ip>:8000`
 (emulator: `http://10.0.2.2:8000`). Never use `:11450` — that's Ollama.
@@ -134,7 +143,7 @@ Manual fallback: hub URL is `http://<laptop-lan-ip>:8000`
 | Asset | Location | Size | Notes |
 |-------|----------|------|-------|
 | `pathfinder_rag.db` | `data/` (laptop, git-ignored) | 58MB | 44,620 FTS5 rows (1E 22,131 + 2E 22,489) |
-| `pathfinder_rag.db.gz` | `spoke/assets/rules/` (Git LFS) | 20MB | Bundled in APK, extracted on first launch |
+| `pathfinder_rag.db` (device extract) | `spoke_kt/app/src/main/assets/rules/` (Git LFS) | ~19MB | **Raw, never `.gz`** — copied out on first launch by `DatabaseAssetManager` |
 | `campaign.db` | `data/` (git-ignored) | 114KB | Campaigns/sessions/NPCs/locations/quests |
 
 Rebuild: `C:\venv-hub\venv\Scripts\python.exe hub/scripts/rebuild_rags.py`
@@ -152,8 +161,8 @@ Rebuild: `C:\venv-hub\venv\Scripts\python.exe hub/scripts/rebuild_rags.py`
 ## Credits
 - **Rules data** — Paizo PRD text (OGL), Pf2ools (MIT/CUP), Community Use Policy sources.
 - **LLM** — Ollama `phi4-mini` (default), `qwen2.5:3b`, `nomic-embed-text`.
-- **Frameworks** — Flutter, FastAPI, PySide6, SQLite/FTS5.
-- **Audio** — synthesized via `tools/gen_audio.py` (original, royalty-free).
+- **Frameworks** — *(current)* Kotlin, Jetpack Compose, Filament (dice pit only), AGDK `games-activity`, Room, Retrofit/OkHttp, FastAPI, PySide6, SQLite/FTS5. *(this section shipped in the Flutter era: Flutter, FastAPI, PySide6, SQLite/FTS5.)*
+- **Audio** — *(current)* licensed third-party loops and SFX; every file credited in [`docs/audio-credits.md`](docs/audio-credits.md) and in the in-app **Setup → Audio Credits** screen. *(this section shipped in the Flutter era: synthesized via `tools/gen_audio.py`, which was deleted in BP-06 WP-2.)*
 
 ---
 *As Above, So Below. As Within, So Without. The Future Dictates the Past and the Past is Always Present.*

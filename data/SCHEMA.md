@@ -28,7 +28,8 @@ The main schema is a single FTS5 table named `rules`:
 | `source_book` | Where it came from (e.g. `Core Rulebook`, `Bestiary`). `Unknown Source` = legacy import, ranked last. |
 | `raw_content` | Plain text (HTML stripped) — what RAG retrieves and feeds the LLM. |
 
-Search ranking (hub `app/rag/retriever.py`, `raw_fallback.py`, Spoke `rulebook_db.dart`):
+Search ranking (hub `app/rag/search.py`, `app/rag/retriever.py`,
+`app/rag/raw_fallback.py`; spoke `spoke_kt/.../data/repository/RuleRepository.kt`):
 exact `name` match → FTS5 `rank` over known-source rows → FTS5 over `Unknown Source` rows,
 deduped by lowercase name, 2E-first then 1E fallback.
 
@@ -37,10 +38,15 @@ Queried as full text:
 ```sql
 SELECT system, category, name, source_book, raw_content
 FROM rules
-WHERE system = ?           -- '2e' first, then '1e' (the edition fallback)
+WHERE system = ?           -- '2E' first, then '1E' (the edition fallback)
   AND rules MATCH ?        -- FTS5 match expression
 LIMIT ?;
 ```
+
+**The bound value is UPPERCASE.** `hub/app/rag/search.py:200` binds
+`edition.upper()`. Binding the raw lowercase `edition` returns **zero** hits
+against the real 58MB DB, because the column stores `'1E'`/`'2E'` — this was a
+live bug in `/ask`'s rule-context path and is fixed.
 
 ## Alternate shapes the hub also understands
 
@@ -74,9 +80,11 @@ Pipeline (`hub/scripts/`, all Genesis-headed):
   rate-limited AoN/d20pfsrd fetchers (run targeted, not full-site).
 - `sources.yaml` — source registry (priority, license, URLs).
 
-After rebuilding the DB, re-bundle the phone asset and bump
-`RulebookDb.bundleVersion` in `spoke/lib/services/rulebook_db.dart`:
+After rebuilding the DB, re-bundle the phone asset as a **raw `.db`** and bump
+`DatabaseAssetManager.BUNDLE_VERSION` in
+`spoke_kt/app/src/main/java/com/pathfindergod/spoke/data/local/DatabaseAssetManager.kt`:
 
 ```bash
-# gzip -9 data/pathfinder_rag.db → spoke/assets/rules/pathfinder_rag.db.gz
+# raw copy — never gzip (AGP decompresses .gz assets at build time):
+cp data/pathfinder_rag.db spoke_kt/app/src/main/assets/rules/pathfinder_rag.db
 ```
