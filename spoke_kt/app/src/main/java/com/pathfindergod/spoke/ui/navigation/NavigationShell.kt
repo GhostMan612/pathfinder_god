@@ -5,182 +5,209 @@
 
 package com.pathfindergod.spoke.ui.navigation
 
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteDefaults
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.pathfindergod.spoke.ui.character.CharacterDetailScreen
-import com.pathfindergod.spoke.ui.character.CharacterListScreen
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.navigation.NavHostController
+import androidx.navigation.NavOptions
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import com.pathfindergod.spoke.service.AudioService
 import com.pathfindergod.spoke.ui.character.rememberCharacterViewModel
-import com.pathfindergod.spoke.ui.combat.CombatTrackerScreen
 import com.pathfindergod.spoke.ui.combat.rememberCombatViewModel
-import com.pathfindergod.spoke.ui.campaign.CampaignScreen
-import com.pathfindergod.spoke.ui.campaign.rememberCampaignViewModel
-import com.pathfindergod.spoke.ui.dice.DiceScreen
-import com.pathfindergod.spoke.ui.encounter.EncounterScreen
+import com.pathfindergod.spoke.ui.designsystem.GodTags
 import com.pathfindergod.spoke.ui.encounter.rememberEncounterViewModel
-import com.pathfindergod.spoke.ui.loot.LootScreen
-import com.pathfindergod.spoke.ui.loot.rememberLootViewModel
-import com.pathfindergod.spoke.ui.map.MapListScreen
-import com.pathfindergod.spoke.ui.map.MapViewerScreen
+import com.pathfindergod.spoke.ui.home.MoreSheet
 import com.pathfindergod.spoke.ui.map.rememberMapViewModel
-import com.pathfindergod.spoke.ui.rules.RuleSearchScreen
-import com.pathfindergod.spoke.ui.settings.SettingsScreen
 import com.pathfindergod.spoke.ui.theme.GoldAccent
-import com.pathfindergod.spoke.ui.theme.TextPrimary
 import com.pathfindergod.spoke.ui.theme.TextSecondary
 import com.pathfindergod.spoke.ui.theme.VoidBackground
-import com.pathfindergod.spoke.ui.theme.rpgPanel
 
 @Composable
 fun NavigationShell() {
-    var selected by rememberSaveable { mutableIntStateOf(0) }
-    var detailId by rememberSaveable { mutableLongStateOf(-1L) }
-    var mapId by rememberSaveable { mutableStateOf<String?>(null) }
-    val items = NavigationItem.entries
-    Scaffold(
-        containerColor = VoidBackground,
-        bottomBar = {
-            NavigationBar(containerColor = VoidBackground) {
-                items.forEachIndexed { index, item ->
-                    NavigationBarItem(
-                        selected = index == selected,
-                        onClick = {
-                            if (index == selected && items[index] == NavigationItem.HERO) {
-                                detailId = -1L
-                            }
-                            if (index == selected && items[index] == NavigationItem.MAP) {
-                                mapId = null
-                            }
-                            selected = index
+    val navController = rememberNavController()
+    val context = LocalContext.current
+    val audio = remember(context) { AudioService.get(context) }
+    val characters = rememberCharacterViewModel()
+    val combat = rememberCombatViewModel()
+    val encounters = rememberEncounterViewModel()
+    val maps = rememberMapViewModel()
+    val backStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = backStackEntry?.destination?.route
+    val canNavigateUp = backStackEntry != null && navController.previousBackStackEntry != null
+    var moreOpen by rememberSaveable { mutableStateOf(false) }
+    var lastBarRoute by remember { mutableStateOf<String?>(null) }
+    val forwardSign = if (LocalLayoutDirection.current == LayoutDirection.Ltr) 1 else -1
+
+    DisposableEffect(Unit) {
+        audio.warmUp()
+        audio.syncMusic()
+        onDispose { audio.release() }
+    }
+
+    LaunchedEffect(currentRoute) {
+        audio.syncMusic()
+        val bar = NavigationItem.entries.firstOrNull { it.matches(currentRoute) }
+        if (bar != null && bar.destination.route != lastBarRoute) {
+            audio.tabChange()
+            lastBarRoute = bar.destination.route
+        }
+    }
+
+    val suiteColors = NavigationSuiteDefaults.colors(
+        navigationBarContainerColor = VoidBackground,
+        navigationRailContainerColor = VoidBackground,
+    )
+    val itemColors = NavigationSuiteDefaults.itemColors(
+        navigationBarItemColors = NavigationBarItemDefaults.colors(
+            selectedIconColor = VoidBackground,
+            selectedTextColor = GoldAccent,
+            indicatorColor = GoldAccent,
+            unselectedIconColor = TextSecondary,
+            unselectedTextColor = TextSecondary,
+        ),
+    )
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        NavigationSuiteScaffold(
+            navigationSuiteItems = {
+                NavigationItem.entries.forEach { bar ->
+                    item(
+                        selected = bar.matches(currentRoute),
+                        onClick = { navController.selectTab(bar.destination) },
+                        icon = { Icon(painterResource(bar.destination.iconRes), null) },
+                        label = {
+                            Text(
+                                text = bar.label(),
+                                modifier = Modifier.testTag(GodTags.navTab(bar.destination.entry)),
+                            )
                         },
-                        icon = { Icon(imageVector = item.icon, contentDescription = item.label) },
-                        label = { Text(text = item.label) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = VoidBackground,
-                            selectedTextColor = GoldAccent,
-                            indicatorColor = GoldAccent,
-                            unselectedIconColor = TextSecondary,
-                            unselectedTextColor = TextSecondary,
-                        ),
+                        colors = itemColors,
+                    )
+                }
+            },
+            navigationSuiteColors = suiteColors,
+            containerColor = VoidBackground,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .consumeWindowInsets(WindowInsets.safeDrawing),
+            ) {
+                AppTopBar(
+                    title = stringResource(titleResFor(currentRoute)),
+                    canNavigateUp = canNavigateUp,
+                    onNavigateUp = { navController.popBackStack() },
+                    onHome = { navController.goHome() },
+                    onMore = {
+                        audio.buttonPress()
+                        moreOpen = true
+                    },
+                )
+                NavHost(
+                    navController = navController,
+                    startDestination = NavRoutes.HOME,
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    enterTransition = {
+                        slideInHorizontally(spring(stiffness = 400f)) { width ->
+                            width / 3 * forwardSign
+                        } + fadeIn()
+                    },
+                    exitTransition = {
+                        slideOutHorizontally(spring(stiffness = 400f)) { width ->
+                            -width / 3 * forwardSign
+                        } + fadeOut()
+                    },
+                    popEnterTransition = {
+                        slideInHorizontally(spring(stiffness = 400f)) { width ->
+                            -width / 3 * forwardSign
+                        } + fadeIn()
+                    },
+                    popExitTransition = {
+                        slideOutHorizontally(spring(stiffness = 400f)) { width ->
+                            width / 3 * forwardSign
+                        } + fadeOut()
+                    },
+                ) {
+                    appNavGraph(
+                        navController = navController,
+                        characters = characters,
+                        combat = combat,
+                        encounters = encounters,
+                        maps = maps,
                     )
                 }
             }
-        },
-    ) { padding ->
-        AnimatedContent(
-            targetState = selected,
-            transitionSpec = {
-                val direction = if (targetState > initialState) 1 else -1
-                (slideInHorizontally(spring(stiffness = 400f)) { it / 3 * direction } +
-                    fadeIn()) togetherWith
-                    (slideOutHorizontally(spring(stiffness = 400f)) { -it / 3 * direction } +
-                        fadeOut())
-            },
-            label = "tabs",
-            modifier = Modifier
-                .fillMaxSize()
-                .background(VoidBackground)
-                .padding(padding),
-        ) { tab ->
-            when (items[tab]) {
-                NavigationItem.DICE -> DiceScreen()
-                NavigationItem.ENCOUNTER -> {
-                    EncounterScreen(viewModel = rememberEncounterViewModel())
-                }
-                NavigationItem.GOD -> {
-                    LootScreen(viewModel = rememberLootViewModel())
-                }
-                NavigationItem.RULES -> RuleSearchScreen()
-                NavigationItem.COMBAT -> {
-                    CombatTrackerScreen(viewModel = rememberCombatViewModel())
-                }
-                NavigationItem.CAMPAIGN -> {
-                    CampaignScreen(viewModel = rememberCampaignViewModel())
-                }
-                NavigationItem.MAP -> {
-                    val mapVm = rememberMapViewModel()
-                    val mapState by mapVm.state.collectAsStateWithLifecycle()
-                    val selected = mapState.maps.firstOrNull { it.id == mapId }
-                    if (mapId == null || selected == null) {
-                        MapListScreen(
-                            viewModel = mapVm,
-                            onSelect = { mapId = it },
-                        )
-                    } else {
-                        MapViewerScreen(
-                            mapId = selected.id,
-                            viewModel = mapVm,
-                            onBack = { mapId = null },
-                        )
-                    }
-                }
-                NavigationItem.SETUP -> SettingsScreen()
-                NavigationItem.HERO -> {
-                    val heroVm = rememberCharacterViewModel()
-                    val heroState by heroVm.state.collectAsStateWithLifecycle()
-                    val detail = heroState.characters.firstOrNull { it.id == detailId }
-                    if (detailId < 0 || detail == null) {
-                        CharacterListScreen(
-                            viewModel = heroVm,
-                            onSelect = {
-                                heroVm.select(it)
-                                detailId = it
-                            },
-                        )
-                    } else {
-                        CharacterDetailScreen(
-                            entity = detail,
-                            onBack = {
-                                heroVm.select(null)
-                                detailId = -1L
-                            },
-                        )
-                    }
-                }
-                else -> PlaceholderScreen(label = items[selected].label)
-            }
+        }
+
+        if (moreOpen) {
+            MoreSheet(
+                currentRoute = currentRoute,
+                onOpen = { destination ->
+                    moreOpen = false
+                    audio.buttonPress()
+                    navController.openDestination(destination)
+                },
+                onDismiss = { moreOpen = false },
+            )
         }
     }
 }
 
-@Composable
-fun PlaceholderScreen(label: String) {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(modifier = Modifier.rpgPanel().padding(horizontal = 32.dp, vertical = 20.dp)) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.headlineSmall,
-                color = TextPrimary,
-            )
-        }
+private fun NavHostController.selectTab(destination: Destination) {
+    navigate(destination.entry) {
+        popUpTo(NavRoutes.HOME) { saveState = true }
+        launchSingleTop = true
+        restoreState = true
+    }
+}
+
+private fun NavHostController.openDestination(destination: Destination) {
+    if (destination.route == NavRoutes.HOME) {
+        goHome()
+    } else {
+        navigate(
+            destination.deepLink,
+            NavOptions.Builder().setLaunchSingleTop(true).build(),
+        )
+    }
+}
+
+private fun NavHostController.goHome() {
+    navigate(NavRoutes.HOME) {
+        popUpTo(NavRoutes.HOME) { inclusive = true }
+        launchSingleTop = true
     }
 }

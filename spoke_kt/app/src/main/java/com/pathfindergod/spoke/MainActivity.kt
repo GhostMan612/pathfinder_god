@@ -6,27 +6,37 @@
 package com.pathfindergod.spoke
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
+import com.google.androidgamesdk.GameActivity
 import com.pathfindergod.spoke.ui.navigation.NavigationShell
+import com.pathfindergod.spoke.ui.pit.PitFrameGovernor
 import com.pathfindergod.spoke.ui.theme.PathfinderGodTheme
 
-class MainActivity : ComponentActivity() {
+class MainActivity : GameActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        WindowInsetsControllerCompat(window, window.decorView).apply {
-            hide(WindowInsetsCompat.Type.systemBars())
-            systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        }
+        PitFrameGovernor.bind(this)
         setContent {
             PathfinderGodTheme {
                 NavigationShell()
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        PitFrameGovernor.onHostResume()
+    }
+
+    override fun onPause() {
+        PitFrameGovernor.onHostPause()
+        super.onPause()
+    }
+
+    override fun onDestroy() {
+        PitFrameGovernor.release(this)
+        super.onDestroy()
     }
 }

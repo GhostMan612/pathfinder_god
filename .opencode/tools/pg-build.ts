@@ -54,7 +54,10 @@ export default tool({
     }
 
     const task = TASKS[args.action]
-    const command = `"${gradlew}" ${task} --no-daemon --console=plain`
+    // cmd /s /c strips one layer of quotes, so a bare "path" wrapper makes cmd read
+    // the .bat name as C:\...\gradlew.bat" <args> and fail to resolve it. The command
+    // must therefore be double-wrapped: cmd /s /c ""C:\...\gradlew.bat" task ...".
+    const command = `""${gradlew}" ${task} --no-daemon --console=plain"`
     const started = Date.now()
 
     const res = spawnSync("cmd.exe", ["/d", "/s", "/c", command], {

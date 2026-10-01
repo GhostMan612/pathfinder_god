@@ -5,12 +5,18 @@
 
 package com.pathfindergod.spoke.ui.map
 
+import android.content.Context
+import androidx.compose.animation.core.FloatExponentialDecaySpec
+import androidx.compose.animation.core.animateDecay
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,32 +24,59 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.unit.Velocity
+import com.pathfindergod.spoke.R
 import com.pathfindergod.spoke.service.ExportService
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pathfindergod.spoke.data.local.MapEntity
-import com.pathfindergod.spoke.ui.theme.GodTypography
+import com.pathfindergod.spoke.ui.designsystem.Dimens
+import com.pathfindergod.spoke.ui.designsystem.GodBackLink
+import com.pathfindergod.spoke.ui.designsystem.GodCard
+import com.pathfindergod.spoke.ui.designsystem.GodChip
+import com.pathfindergod.spoke.ui.designsystem.GodEmptyState
+import com.pathfindergod.spoke.ui.designsystem.GodStatusText
+import com.pathfindergod.spoke.ui.designsystem.GodTags
+import com.pathfindergod.spoke.ui.designsystem.Spacing
+import com.pathfindergod.spoke.ui.designsystem.godRtlText
+import com.pathfindergod.spoke.ui.designsystem.godTouchSize
 import com.pathfindergod.spoke.ui.theme.GoldAccent
 import com.pathfindergod.spoke.ui.theme.TextPrimary
 import com.pathfindergod.spoke.ui.theme.TextSecondary
-import com.pathfindergod.spoke.ui.theme.rpgPanel
 import com.pathfindergod.spoke.ui.viewmodel.MapViewModel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+
+const val MIN_ZOOM = 0.5f
+const val MAX_ZOOM = 6f
 
 @Composable
 fun MapViewerScreen(
@@ -59,17 +92,12 @@ fun MapViewerScreen(
             contentAlignment = Alignment.Center,
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = "Map lost to the void.",
-                    style = GodTypography.titleMedium,
-                    color = TextSecondary,
-                    textAlign = TextAlign.Center,
-                )
-                Text(
-                    text = "‹ Vault",
-                    style = GodTypography.labelLarge,
-                    color = GoldAccent,
-                    modifier = Modifier.clickable { onBack() }.padding(top = 12.dp),
+                GodEmptyState(text = stringResource(R.string.map_lost))
+                GodBackLink(
+                    text = godRtlText(R.string.map_back, R.string.map_back_rtl),
+                    onClick = onBack,
+                    testTag = GodTags.heroBack,
+                    modifier = Modifier.padding(top = Spacing.md),
                 )
             }
         }
@@ -84,91 +112,182 @@ private fun MapCanvas(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
+    val view = LocalView.current
+    val scope = rememberCoroutineScope()
+    val tracker = remember { VelocityTracker() }
     var gmLayer by rememberSaveable { mutableStateOf(true) }
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
-    val bitmap = remember(map.id, gmLayer) {
-        decodeMapPng(if (gmLayer) map.gmBase64Png else map.playerBase64Png)
+    val zoomInLabel = stringResource(R.string.a11y_map_zoom_in)
+    val zoomOutLabel = stringResource(R.string.a11y_map_zoom_out)
+    val zoomResetLabel = stringResource(R.string.a11y_map_zoom_reset)
+    val zoomLabel = stringResource(R.string.a11y_map_zoom, (scale * 100f).toInt())
+    val zoomActions = listOf(
+        CustomAccessibilityAction(zoomInLabel) {
+            scale = (scale * 1.5f).coerceIn(MIN_ZOOM, MAX_ZOOM)
+            view.announceForAccessibility(zoomPercentAnnouncement(context, scale))
+            true
+        },
+        CustomAccessibilityAction(zoomOutLabel) {
+            scale = (scale / 1.5f).coerceIn(MIN_ZOOM, MAX_ZOOM)
+            view.announceForAccessibility(zoomPercentAnnouncement(context, scale))
+            true
+        },
+        CustomAccessibilityAction(zoomResetLabel) {
+            scale = 1f
+            offset = Offset.Zero
+            view.announceForAccessibility(zoomPercentAnnouncement(context, scale))
+            true
+        },
+    )
+    val decoded by produceState<ImageBitmap?>(initialValue = null, map.id, gmLayer) {
+        value = MapImageDecoder.decode(
+            if (gmLayer) map.gmBase64Png else map.playerBase64Png,
+            VIEWER_PX,
+        )
     }
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    val bitmap = decoded
+    Column(modifier = Modifier.fillMaxSize().padding(Spacing.lg)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = "‹ Vault",
-                style = GodTypography.labelLarge,
-                color = GoldAccent,
-                modifier = Modifier.clickable { onBack() }.padding(vertical = 4.dp),
+            GodBackLink(
+                text = godRtlText(R.string.map_back, R.string.map_back_rtl),
+                onClick = onBack,
+                testTag = GodTags.heroBack,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    text = "GM",
-                    style = GodTypography.titleMedium,
-                    fontWeight = if (gmLayer) FontWeight.Bold else FontWeight.Normal,
-                    color = if (gmLayer) GoldAccent else TextSecondary,
-                    modifier = Modifier.clickable { gmLayer = true }.padding(4.dp),
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                GodChip(
+                    label = stringResource(R.string.map_layer_gm),
+                    selected = gmLayer,
+                    onClick = { gmLayer = true },
+                    testTag = GodTags.MAP_LAYER_GM,
                 )
-                Text(
-                    text = "Player",
-                    style = GodTypography.titleMedium,
-                    fontWeight = if (!gmLayer) FontWeight.Bold else FontWeight.Normal,
-                    color = if (!gmLayer) GoldAccent else TextSecondary,
-                    modifier = Modifier.clickable { gmLayer = false }.padding(4.dp),
+                GodChip(
+                    label = stringResource(R.string.map_layer_player),
+                    selected = !gmLayer,
+                    onClick = { gmLayer = false },
+                    testTag = GodTags.MAP_LAYER_PLAYER,
                 )
             }
             Icon(
                 imageVector = Icons.Filled.Share,
-                contentDescription = "Share map",
+                contentDescription = stringResource(R.string.map_share),
                 tint = GoldAccent,
                 modifier = Modifier
-                    .clickable {
+                    .clickable(
+                        onClickLabel = stringResource(R.string.a11y_map_share),
+                        role = Role.Button,
+                    ) {
                         ExportService.shareMapImage(
                             context,
                             if (gmLayer) map.gmBase64Png else map.playerBase64Png,
                             map.prompt,
                         )
                     }
-                    .padding(4.dp),
+                    .godTouchSize()
+                    .padding(Spacing.xs)
+                    .testTag(GodTags.MAP_SHARE),
             )
         }
         Text(
             text = map.prompt,
-            style = GodTypography.titleMedium,
+            style = MaterialTheme.typography.titleMedium,
             color = TextPrimary,
-            modifier = Modifier.padding(top = 4.dp),
+            modifier = Modifier.padding(top = Spacing.xs),
         )
-        Box(
-            modifier = Modifier.rpgPanel().fillMaxWidth().weight(1f).padding(top = 12.dp),
-            contentAlignment = Alignment.Center,
+        GodCard(
+            modifier = Modifier.fillMaxWidth().weight(1f).padding(top = Spacing.md),
+            contentPadding = PaddingValues(Dimens.gridSpacing),
         ) {
-            if (bitmap != null) {
-                Image(
-                    bitmap = bitmap,
-                    contentDescription = map.prompt,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(Unit) {
-                            detectTransformGestures { _, pan, zoom, _ ->
-                                scale = (scale * zoom).coerceIn(0.5f, 6f)
-                                offset += pan
+            BoxWithConstraints(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                val density = LocalDensity.current
+                val viewportWidth = with(density) { maxWidth.toPx() }
+                val viewportHeight = with(density) { maxHeight.toPx() }
+                val clamp: (Offset) -> Offset = { raw ->
+                    val clamped = mapBoundsClamp(
+                        offsetX = raw.x,
+                        offsetY = raw.y,
+                        viewportWidth = viewportWidth,
+                        viewportHeight = viewportHeight,
+                        scale = scale,
+                    )
+                    Offset(clamped[0], clamped[1])
+                }
+                if (bitmap != null) {
+                    Image(
+                        bitmap = bitmap,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .semantics {
+                                contentDescription = map.prompt
+                                stateDescription = zoomLabel
+                                customActions = zoomActions
                             }
-                        }
-                        .graphicsLayer(
-                            scaleX = scale,
-                            scaleY = scale,
-                            translationX = offset.x,
-                            translationY = offset.y,
-                        ),
-                )
-            } else {
-                Text(
-                    text = "Image would not resolve.",
-                    style = GodTypography.bodyMedium,
-                    color = TextSecondary,
-                )
+                            .testTag(GodTags.MAP_CANVAS)
+                            .pointerInput(Unit) {
+                                detectTransformGestures(panZoomLock = true) { _, pan, zoom, _ ->
+                                    scale = (scale * zoom).coerceIn(MIN_ZOOM, MAX_ZOOM)
+                                    offset = clamp(offset + pan)
+                                }
+                            }
+                            .pointerInput(Unit) {
+                                detectDragGestures(
+                                    onDragStart = { tracker.resetTracking() },
+                                    onDrag = { change, drag ->
+                                        change.consume()
+                                        tracker.addPosition(
+                                            change.uptimeMillis,
+                                            change.position,
+                                        )
+                                        offset = clamp(offset + drag)
+                                    },
+                                    onDragEnd = {
+                                        val velocity = tracker.calculateVelocity()
+                                        if (velocity != Velocity.Zero) {
+                                            scope.launch {
+                                                var fx = offset.x
+                                                var fy = offset.y
+                                                val decay = FloatExponentialDecaySpec()
+                                                coroutineScope {
+                                                    val axisX = launch {
+                                                        animateDecay(fx, velocity.x, decay) { value, _ ->
+                                                            fx = value
+                                                        }
+                                                    }
+                                                    launch {
+                                                        animateDecay(fy, velocity.y, decay) { value, _ ->
+                                                            fy = value
+                                                        }
+                                                    }
+                                                    axisX.join()
+                                                }
+                                                offset = clamp(Offset(fx, fy))
+                                            }
+                                        }
+                                    },
+                                )
+                            }
+                            .graphicsLayer(
+                                scaleX = scale,
+                                scaleY = scale,
+                                translationX = offset.x,
+                                translationY = offset.y,
+                            ),
+                    )
+                } else {
+                    GodStatusText(text = stringResource(R.string.map_unresolved))
+                }
             }
         }
     }
 }
+
+private fun zoomPercentAnnouncement(context: Context, scale: Float): String =
+    context.getString(R.string.a11y_map_zoom, (scale * 100f).toInt())
