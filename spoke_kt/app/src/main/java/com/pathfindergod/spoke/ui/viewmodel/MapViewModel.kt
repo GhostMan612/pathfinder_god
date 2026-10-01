@@ -7,10 +7,12 @@ package com.pathfindergod.spoke.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.pathfindergod.spoke.R
 import com.pathfindergod.spoke.data.local.MapEntity
 import com.pathfindergod.spoke.data.network.GenerateRequest
 import com.pathfindergod.spoke.data.network.HubApi
 import com.pathfindergod.spoke.data.repository.MapRepository
+import com.pathfindergod.spoke.ui.strings.UiText
 import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,7 +22,7 @@ import kotlinx.coroutines.launch
 data class MapUiState(
     val maps: List<MapEntity> = emptyList(),
     val isGenerating: Boolean = false,
-    val error: String? = null,
+    val error: UiText? = null,
 )
 
 class MapViewModel(
@@ -56,11 +58,13 @@ class MapViewModel(
                         height = response.height,
                     )
                 } else {
-                    _state.value = _state.value.copy(error = "The forge returned no map.")
+                    _state.value = _state.value.copy(
+                        error = UiText.Resource(R.string.map_forge_empty),
+                    )
                 }
             } catch (_: Exception) {
                 _state.value = _state.value.copy(
-                    error = "Map conjuring failed — is the hub awake?",
+                    error = UiText.Resource(R.string.map_conjure_failed),
                 )
             }
             _state.value = _state.value.copy(isGenerating = false)

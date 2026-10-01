@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Kenney Board Game Icons, CC0 1.0 (public domain dedication).
+     https://kenney.nl/assets/board-game-icons
+     Source glyph: Vector/Icons/d20.svg
+     Path geometry is transcribed verbatim. The only change is a group
+     translation of 32.0,32.0 placing the glyph in Kenney's 64x64 tile. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="64"
+    android:viewportHeight="64">
+    <group
+        android:translateX="32.0"
+        android:translateY="32.0">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M22.35 -13.05 Q23 -11.9 23 -10.55 L23 10.5 Q23 11.85 22.35 13 L20.5 14.85 2.5 25.35 Q1.35 26 0 26 -1.35 26 -2.5 25.35 L-20.5 14.85 Q-21.65 14.15 -22.3 13 -23 11.85 -23 10.5 L-23 -10.55 Q-23 -11.9 -22.3 -13.05 -21.65 -14.2 -20.5 -14.85 L-2.5 -25.3 Q-1.35 -26 0 -26 1.35 -26 2.5 -25.3 L20.5 -14.85 Q21.65 -14.2 22.35 -13.05" />
+    </group>
+</vector>

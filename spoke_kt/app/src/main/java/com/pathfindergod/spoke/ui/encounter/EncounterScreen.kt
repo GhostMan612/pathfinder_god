@@ -9,18 +9,21 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import com.pathfindergod.spoke.ui.motion.StaggerIn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,28 +32,43 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.pathfindergod.spoke.R
 import com.pathfindergod.spoke.data.local.AppDatabase
+import com.pathfindergod.spoke.data.local.AppPreferences
 import com.pathfindergod.spoke.data.local.EncounterEntity
-import com.pathfindergod.spoke.data.local.NetworkPreferences
 import com.pathfindergod.spoke.data.network.HubApi
 import com.pathfindergod.spoke.data.network.HubApiFactory
 import com.pathfindergod.spoke.data.repository.EncounterRepository
+import com.pathfindergod.spoke.ui.designsystem.Dimens
+import com.pathfindergod.spoke.ui.designsystem.GodCard
+import com.pathfindergod.spoke.ui.designsystem.GodChip
+import com.pathfindergod.spoke.ui.designsystem.GodEmptyState
+import com.pathfindergod.spoke.ui.designsystem.GodLiveRegion
+import com.pathfindergod.spoke.ui.designsystem.GodPrimaryButton
+import com.pathfindergod.spoke.ui.designsystem.GodSectionHeader
+import com.pathfindergod.spoke.ui.designsystem.GodStatusText
+import com.pathfindergod.spoke.ui.designsystem.GodTags
+import com.pathfindergod.spoke.ui.designsystem.GodTextField
+import com.pathfindergod.spoke.ui.designsystem.GodTone
+import com.pathfindergod.spoke.ui.designsystem.Spacing
+import com.pathfindergod.spoke.ui.designsystem.godTouchSize
+import com.pathfindergod.spoke.ui.icons.CategoryIcons
+import com.pathfindergod.spoke.ui.strings.resolve
 import com.pathfindergod.spoke.ui.theme.CritRed
-import com.pathfindergod.spoke.ui.theme.GodTypography
 import com.pathfindergod.spoke.ui.theme.GoldAccent
 import com.pathfindergod.spoke.ui.theme.TextPrimary
 import com.pathfindergod.spoke.ui.theme.TextSecondary
-import com.pathfindergod.spoke.ui.theme.rpgPanel
 import com.pathfindergod.spoke.ui.viewmodel.EncounterPhase
 import com.pathfindergod.spoke.ui.viewmodel.EncounterViewModel
 
@@ -68,14 +86,15 @@ private class EncounterVmFactory(
 @Composable
 internal fun rememberEncounterViewModel(): EncounterViewModel {
     val context = LocalContext.current
-    val prefs = remember { NetworkPreferences(context) }
-    val api = remember { HubApiFactory.create(prefs.restUrl()) }
+    val prefs = remember { AppPreferences(context) }
+    val api = remember { HubApiFactory.get(prefs.restUrl()) }
     val repository = remember {
         EncounterRepository(AppDatabase.create(context.applicationContext), api)
     }
     return viewModel(factory = remember { EncounterVmFactory(repository, api) })
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EncounterScreen(
     viewModel: EncounterViewModel,
@@ -85,83 +104,84 @@ fun EncounterScreen(
     var theme by rememberSaveable { mutableStateOf("") }
     var difficulty by rememberSaveable { mutableStateOf("moderate") }
     val loading = state.phase == EncounterPhase.Loading
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Column(modifier = Modifier.rpgPanel().fillMaxWidth().padding(16.dp)) {
-            Text(
-                text = "Forge",
-                style = GodTypography.titleMedium,
-                color = GoldAccent,
-            )
+    Column(modifier = Modifier.fillMaxSize().padding(Spacing.lg)) {
+        GodCard(title = { ForgeHeader() }) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                modifier = Modifier.fillMaxWidth().padding(top = Spacing.sm),
             ) {
-                TextField(
+                GodTextField(
                     value = level,
                     onValueChange = { level = it },
-                    label = { Text(text = "Party Level") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    colors = forgeFieldColors(),
+                    label = stringResource(R.string.encounter_party_level),
+                    numeric = true,
                     modifier = Modifier.weight(1f),
                 )
-                TextField(
+                GodTextField(
                     value = theme,
                     onValueChange = { theme = it },
-                    label = { Text(text = "Theme") },
-                    singleLine = true,
-                    colors = forgeFieldColors(),
+                    label = stringResource(R.string.encounter_theme),
                     modifier = Modifier.weight(2f),
                 )
             }
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+                modifier = Modifier.fillMaxWidth().padding(top = Spacing.md),
             ) {
                 difficulties.forEach { option ->
-                    val selected = difficulty == option
-                    Text(
-                        text = option.replaceFirstChar { it.uppercase() },
-                        style = GodTypography.labelLarge,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                        color = if (selected) GoldAccent else TextSecondary,
-                        modifier = Modifier
-                            .rpgPanel()
-                            .clickable { difficulty = option }
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                    )
-                }
-            }
-            Box(
-                modifier = Modifier
-                    .rpgPanel()
-                    .clickable(enabled = !loading) {
-                        if (theme.isBlank()) return@clickable
-                        viewModel.generateEncounter(
-                            level.toIntOrNull()?.coerceIn(1, 20) ?: 1,
-                            difficulty,
-                            theme.trim(),
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            painter = painterResource(CategoryIcons.encounterDifficulty(option)),
+                            contentDescription = null,
+                            tint = if (difficulty == option) GoldAccent else TextSecondary,
+                            modifier = Modifier.size(Dimens.iconInline).padding(end = Spacing.xs),
+                        )
+                        GodChip(
+                            label = option.replaceFirstChar { it.uppercase() },
+                            selected = difficulty == option,
+                            onClick = { difficulty = option },
+                            style = MaterialTheme.typography.labelLarge,
+                            testTag = GodTags.encounterDifficulty(option),
                         )
                     }
-                    .fillMaxWidth()
-                    .padding(top = 12.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = if (loading) "MUSTERING…" else "CONJURE ENCOUNTER",
-                    style = GodTypography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = if (loading) TextSecondary else GoldAccent,
-                    modifier = Modifier.padding(vertical = 12.dp),
-                )
+                }
             }
+            GodPrimaryButton(
+                text = stringResource(
+                    if (loading) R.string.encounter_mustering else R.string.encounter_conjure,
+                ),
+                enabled = !loading,
+                onClickLabel = stringResource(R.string.a11y_encounter_conjure),
+                onClick = {
+                    if (theme.isBlank()) return@GodPrimaryButton
+                    viewModel.generateEncounter(
+                        level.toIntOrNull()?.coerceIn(1, 20) ?: 1,
+                        difficulty,
+                        theme.trim(),
+                    )
+                },
+                modifier = Modifier.padding(top = Spacing.md),
+            )
         }
         (state.phase as? EncounterPhase.Error)?.let { error ->
-            Text(
-                text = error.message,
-                style = GodTypography.bodyMedium,
+            GodStatusText(
+                text = error.message.resolve(),
+                tone = GodTone.Critical,
                 color = CritRed,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = Spacing.sm),
+            )
+        }
+        if (state.activeMonsters.isNotEmpty() && !loading) {
+            GodLiveRegion(
+                text = stringResource(
+                    R.string.a11y_encounter_ready,
+                    state.activeMonsters.size,
+                    state.activeTargetXp,
+                ),
+                assertive = true,
+                tag = GodTags.ENCOUNTER_STATUS,
+                modifier = Modifier.fillMaxWidth().padding(top = Spacing.xs),
             )
         }
         if (state.activeMonsters.isEmpty() && !loading) {
@@ -169,24 +189,22 @@ fun EncounterScreen(
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(
-                    text = "Name a hunting ground.",
-                    style = GodTypography.titleMedium,
-                    color = TextSecondary,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(horizontal = 32.dp),
-                )
+                GodEmptyState(text = stringResource(R.string.encounter_idle))
             }
         } else {
             LazyColumn(
-                modifier = Modifier.fillMaxWidth().weight(1f).padding(top = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth().weight(1f).padding(top = Spacing.md),
+                verticalArrangement = Arrangement.spacedBy(Dimens.gridSpacing),
             ) {
                 if (state.activeLabel.isNotBlank()) {
                     item(key = "label") {
                         Text(
-                            text = "${state.activeLabel} · Target ${state.activeTargetXp} XP",
-                            style = GodTypography.titleMedium,
+                            text = stringResource(
+                                R.string.encounter_target_pattern,
+                                state.activeLabel,
+                                state.activeTargetXp,
+                            ),
+                            style = MaterialTheme.typography.titleMedium,
                             color = GoldAccent,
                         )
                     }
@@ -201,11 +219,9 @@ fun EncounterScreen(
                 }
                 if (state.encounters.isNotEmpty()) {
                     item(key = "vault") {
-                        Text(
-                            text = "Vault",
-                            style = GodTypography.titleMedium,
-                            color = GoldAccent,
-                            modifier = Modifier.padding(top = 8.dp),
+                        GodSectionHeader(
+                            text = stringResource(R.string.encounter_vault),
+                            modifier = Modifier.padding(top = Spacing.sm),
                         )
                     }
                     state.encounters.forEachIndexed { index, saved ->
@@ -226,45 +242,62 @@ fun EncounterScreen(
 }
 
 @Composable
+private fun ForgeHeader() {
+    Text(
+        text = stringResource(R.string.encounter_forge),
+        style = MaterialTheme.typography.titleMedium,
+        color = GoldAccent,
+    )
+}
+
+@Composable
 private fun VaultRow(
     encounter: EncounterEntity,
     modifier: Modifier = Modifier,
     onSelect: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    Row(
-        modifier = modifier.rpgPanel().clickable { onSelect() }.fillMaxWidth().padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    GodCard(
+        modifier = modifier.fillMaxWidth(),
+        testTag = GodTags.encounter(encounter.id),
+        contentPadding = PaddingValues(Dimens.cardPaddingTight),
+        onClickLabel = stringResource(R.string.a11y_encounter_open, encounter.theme),
+        onClick = onSelect,
     ) {
-        Column(modifier = Modifier.weight(1f)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = encounter.theme,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextPrimary,
+                )
+                Text(
+                    text = stringResource(
+                        R.string.combat_pattern_threat_xp,
+                        encounter.threat,
+                        encounter.targetXp,
+                    ),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = TextSecondary,
+                )
+            }
             Text(
-                text = encounter.theme,
-                style = GodTypography.bodyMedium,
-                color = TextPrimary,
-            )
-            Text(
-                text = "${encounter.threat} · Target ${encounter.targetXp} XP",
-                style = GodTypography.labelLarge,
-                color = TextSecondary,
+                text = stringResource(R.string.action_delete),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = CritRed,
+                modifier = Modifier
+                    .godTouchSize()
+                    .clickable(
+                        onClickLabel = stringResource(
+                            R.string.a11y_encounter_delete,
+                            encounter.theme,
+                        ),
+                        role = Role.Button,
+                    ) { onDelete() }
+                    .padding(Spacing.sm)
+                    .testTag(GodTags.encounterDelete(encounter.id)),
             )
         }
-        Text(
-            text = "✕",
-            style = GodTypography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            color = CritRed,
-            modifier = Modifier.clickable { onDelete() }.padding(8.dp),
-        )
     }
 }
-
-@Composable
-private fun forgeFieldColors() = TextFieldDefaults.colors(
-    focusedTextColor = TextPrimary,
-    unfocusedTextColor = TextPrimary,
-    focusedContainerColor = Color.Transparent,
-    unfocusedContainerColor = Color.Transparent,
-    cursorColor = GoldAccent,
-    focusedLabelColor = TextSecondary,
-    unfocusedLabelColor = TextSecondary,
-)

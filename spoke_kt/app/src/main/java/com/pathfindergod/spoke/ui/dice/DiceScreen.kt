@@ -5,8 +5,6 @@
 
 package com.pathfindergod.spoke.ui.dice
 
-import android.os.Build
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,219 +15,511 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import com.pathfindergod.spoke.ui.motion.StaggerIn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
-import com.pathfindergod.spoke.service.AudioService
-import com.pathfindergod.spoke.ui.pit.FilamentPit
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.pathfindergod.spoke.R
+import com.pathfindergod.spoke.data.local.AppDatabase
+import com.pathfindergod.spoke.data.local.AppPreferences
+import com.pathfindergod.spoke.data.repository.RollRepository
+import com.pathfindergod.spoke.service.AudioService
+import com.pathfindergod.spoke.ui.designsystem.GodChip
+import com.pathfindergod.spoke.ui.designsystem.GodPrimaryButton
+import com.pathfindergod.spoke.ui.designsystem.GodSectionHeader
+import com.pathfindergod.spoke.ui.designsystem.GodStatusText
+import com.pathfindergod.spoke.ui.designsystem.GodTags
+import com.pathfindergod.spoke.ui.designsystem.GodTone
+import com.pathfindergod.spoke.ui.designsystem.Spacing
+import com.pathfindergod.spoke.ui.motion.StaggerIn
+import com.pathfindergod.spoke.ui.pit.FilamentPit
+import com.pathfindergod.spoke.ui.strings.resolve
+import com.pathfindergod.spoke.ui.theme.CritRed
 import com.pathfindergod.spoke.ui.theme.GoldAccent
-import com.pathfindergod.spoke.ui.theme.TextPrimary
 import com.pathfindergod.spoke.ui.theme.TextSecondary
-import com.pathfindergod.spoke.ui.theme.rpgPanel
+import com.pathfindergod.spoke.ui.viewmodel.DiceUiState
+import com.pathfindergod.spoke.ui.viewmodel.DiceViewModel
+import com.pathfindergod.spoke.ui.viewmodel.RollEntry
+import kotlin.math.abs
+
+private val COUNT_STEPS = listOf(1, 2, 3, 4, 5, 6, 8, 10)
+private val MODIFIER_STEPS = listOf(-3, -2, -1, 0, 1, 2, 3, 5)
+private val TARGET_STEPS = listOf(5, 10, 11, 12, 14, 15, 16, 18, 20, 25)
+
+private class DiceVmFactory(
+    private val repository: RollRepository,
+    private val audio: AudioService,
+) : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>): T =
+        DiceViewModel(repository, audio) as T
+}
 
 @Composable
-fun DiceScreen() {
-    val engine = remember { DiceEngine() }
+fun DiceScreen(initialDie: Die? = null) {
     val context = LocalContext.current
-    val audio = remember { AudioService(context.applicationContext) }
-    val haptics = LocalHapticFeedback.current
-    DisposableEffect(Unit) {
-        onDispose { audio.release() }
+    val database = remember { AppDatabase.create(context.applicationContext) }
+    val repository = remember(database) { RollRepository(database.rollDao()) }
+    val audio = remember { AudioService.get(context) }
+    val preferences = remember { AppPreferences(context.applicationContext) }
+    val viewModel: DiceViewModel = viewModel(
+        factory = remember { DiceVmFactory(repository, audio) },
+    )
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val pit = preferences.pitEnabled()
+
+    LaunchedEffect(initialDie) {
+        if (initialDie != null) viewModel.selectDie(initialDie)
     }
-    var selected by remember { mutableStateOf(Die.D20) }
-    var mode by remember { mutableStateOf(Advantage.STRAIGHT) }
-    var record by remember { mutableStateOf<RollRecord?>(null) }
-    var history by remember { mutableStateOf(emptyList<RollRecord>()) }
-    var rollToken by remember { mutableIntStateOf(0) }
-    var pit by rememberSaveable { mutableStateOf(false) }
-    val fireImpact: () -> Unit = {
-        val dramatic = record?.impact != null &&
-            record?.impact != Impact.NORMAL
-        if (dramatic || Build.VERSION.SDK_INT < 27) {
-            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-        } else {
-            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        }
-        if (record?.impact == Impact.CRITICAL_SUCCESS) {
-            audio.playCritChime()
-        } else {
-            audio.playClatter()
-        }
-    }
-    Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(Spacing.lg),
+        verticalArrangement = Arrangement.spacedBy(Spacing.md),
     ) {
-        if (pit) {
-            FilamentPit(
-                die = selected,
-                rollToken = rollToken,
-                impact = record?.impact ?: Impact.NORMAL,
-                modifier = Modifier.size(220.dp).align(Alignment.CenterHorizontally),
-                onImpact = fireImpact,
-            )
-        } else {
-            DiceCanvas(
-                die = selected,
-                face = record?.kept?.firstOrNull() ?: selected.sides,
-                rollToken = rollToken,
-                modifier = Modifier.size(180.dp).align(Alignment.CenterHorizontally),
-                impact = record?.impact ?: Impact.NORMAL,
-                onImpact = fireImpact,
+        item(key = "roller") {
+            Roller(
+                state = state,
+                pit = pit,
+                onImpact = viewModel::playImpact,
             )
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(
-                8.dp,
-                Alignment.CenterHorizontally,
-            ),
-        ) {
-            Box(
-                modifier = Modifier
-                    .rpgPanel()
-                    .clickable { pit = false }
-                    .padding(horizontal = 14.dp, vertical = 6.dp),
+        item(key = "dice") {
+            DieRow(selected = state.die, onSelect = viewModel::selectDie)
+        }
+        item(key = "count") {
+            CountRow(state = state, onSelect = viewModel::setCount)
+        }
+        item(key = "modifier") {
+            ModifierRow(state = state, onSelect = viewModel::setModifier)
+        }
+        item(key = "keep") {
+            KeepRow(state = state, onSelect = viewModel::setKeepHighest)
+        }
+        item(key = "mode") {
+            ModeRow(state = state, viewModel = viewModel)
+        }
+        item(key = "roll") {
+            GodPrimaryButton(
+                text = stringResource(R.string.dice_roll),
+                onClick = viewModel::roll,
+                testTag = GodTags.DICE_ROLL_BUTTON,
+            )
+        }
+        item(key = "history-heading") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = "Canvas",
-                    color = if (!pit) GoldAccent else TextSecondary,
-                    fontWeight = if (!pit) FontWeight.Bold else FontWeight.Normal,
+                GodSectionHeader(text = stringResource(R.string.dice_history_heading))
+                GodChip(
+                    label = stringResource(R.string.dice_history_clear),
+                    onClick = viewModel::clearHistory,
+                    enabled = state.history.isNotEmpty(),
+                    style = MaterialTheme.typography.labelLarge,
+                    horizontalPadding = Spacing.sm,
+                    verticalPadding = Spacing.xs,
+                    role = Role.Button,
+                    selectedStateRes = null,
+                    onClickLabel = stringResource(R.string.a11y_history_clear),
+                    testTag = GodTags.DICE_HISTORY_CLEAR,
                 )
             }
-            Box(
-                modifier = Modifier
-                    .rpgPanel()
-                    .clickable { pit = true }
-                    .padding(horizontal = 14.dp, vertical = 6.dp),
-            ) {
-                Text(
-                    text = "Pit",
-                    color = if (pit) GoldAccent else TextSecondary,
-                    fontWeight = if (pit) FontWeight.Bold else FontWeight.Normal,
-                )
-            }
         }
-        Text(
-            text = record?.let { "${it.total}" } ?: "—",
-            style = MaterialTheme.typography.displayLarge,
-            fontWeight = FontWeight.Bold,
-            color = GoldAccent,
-            modifier = Modifier.align(Alignment.CenterHorizontally),
-        )
-        Text(
-            text = record?.let { impactLabel(it) } ?: "Choose a die and roll.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = TextSecondary,
-            modifier = Modifier.align(Alignment.CenterHorizontally),
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-        ) {
-            Die.entries.forEach { die ->
-                Box(
-                    modifier = Modifier
-                        .rpgPanel()
-                        .clickable { selected = die }
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                ) {
-                    Text(
-                        text = "d${die.sides}",
-                        color = if (die == selected) GoldAccent else TextPrimary,
-                        fontWeight = if (die == selected) FontWeight.Bold else FontWeight.Normal,
-                    )
-                }
-            }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-        ) {
-            Advantage.entries.forEach { entry ->
-                val enabled = selected == Die.D20
-                Box(
-                    modifier = Modifier
-                        .rpgPanel()
-                        .clickable(enabled = enabled) { mode = entry }
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                ) {
-                    Text(
-                        text = entry.name.lowercase().replaceFirstChar { it.uppercase() },
-                        color = when {
-                            !enabled -> TextSecondary.copy(alpha = 0.4f)
-                            entry == mode -> GoldAccent
-                            else -> TextPrimary
-                        },
-                    )
-                }
-            }
-        }
-        Box(
-            modifier = Modifier
-                .rpgPanel()
-                .clickable {
-                    val notation = buildString {
-                        append("d${selected.sides}")
-                        if (selected == Die.D20 && mode == Advantage.ADVANTAGE) append("adv")
-                        if (selected == Die.D20 && mode == Advantage.DISADVANTAGE) append("dis")
-                    }
-                    val result = engine.roll(notation)
-                    record = result
-                    history = listOf(result) + history.take(29)
-                    rollToken++
-                }
-                .padding(vertical = 14.dp)
-                .fillMaxWidth(),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = "ROLL",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = GoldAccent,
-            )
-        }
-        LazyColumn(
-            modifier = Modifier.fillMaxWidth().weight(1f),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            itemsIndexed(history) { index, entry ->
-                StaggerIn(index = index) {
-                    Text(
-                        text = "${entry.notation} → ${entry.total}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextSecondary,
-                    )
-                }
+        itemsIndexed(
+            items = state.history,
+            key = { _, entry -> entry.key },
+        ) { index, entry ->
+            StaggerIn(index = index, modifier = Modifier.animateItem()) {
+                HistoryRow(entry = entry)
             }
         }
     }
 }
 
-private fun impactLabel(record: RollRecord): String = when (record.impact) {
-    Impact.CRITICAL_SUCCESS -> "${record.notation} — critical success!"
-    Impact.CRITICAL_FAILURE -> "${record.notation} — critical failure."
-    Impact.NORMAL -> "${record.notation} — ${record.kept.joinToString("+")}" +
-        if (record.modifier != 0) {
-            "${if (record.modifier > 0) "+" else ""}${record.modifier}"
-        } else {
-            ""
+@Composable
+private fun Roller(
+    state: DiceUiState,
+    pit: Boolean,
+    onImpact: () -> Unit,
+) {
+    val record = state.record
+    val announcement = rollAnnouncement(record)
+    val critical = record != null && record.impact != Impact.NORMAL
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            modifier = Modifier.fillMaxWidth().padding(top = Spacing.sm),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (pit) {
+                FilamentPit(
+                    die = state.die,
+                    face = state.face,
+                    rollToken = state.rollToken,
+                    impact = record?.impact ?: Impact.NORMAL,
+                    modifier = Modifier.size(220.dp).testTag(GodTags.DICE_PIT),
+                    onImpact = onImpact,
+                )
+            } else {
+                DiceCanvas(
+                    die = state.die,
+                    face = state.face,
+                    rollToken = state.rollToken,
+                    modifier = Modifier.size(180.dp).testTag(GodTags.DICE_PIT),
+                    impact = record?.impact ?: Impact.NORMAL,
+                    onImpact = onImpact,
+                )
+            }
         }
+        Box(
+            modifier = Modifier.clearAndSetSemantics {
+                liveRegion = if (critical) {
+                    LiveRegionMode.Assertive
+                } else {
+                    LiveRegionMode.Polite
+                }
+                contentDescription = announcement
+                testTag = GodTags.DICE_RESULT
+            },
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = record?.let { "${it.total}" } ?: stringResource(R.string.dice_no_result),
+                    style = MaterialTheme.typography.displayLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = GoldAccent,
+                )
+                Text(
+                    text = record?.let { impactLabel(it) } ?: stringResource(R.string.dice_prompt),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextSecondary,
+                )
+            }
+        }
+        state.error?.let { error ->
+            GodStatusText(
+                text = error.resolve(),
+                tone = GodTone.Critical,
+                color = CritRed,
+                modifier = Modifier.padding(top = Spacing.xs),
+            )
+        }
+    }
+}
+
+@Composable
+private fun rollAnnouncement(record: RollRecord?): String {
+    if (record == null) return stringResource(R.string.a11y_roll_idle)
+    val base = when (record.impact) {
+        Impact.CRITICAL_SUCCESS -> stringResource(
+            R.string.a11y_roll_crit_success,
+            record.notation,
+            record.total,
+        )
+        Impact.CRITICAL_FAILURE -> stringResource(
+            R.string.a11y_roll_crit_failure,
+            record.notation,
+            record.total,
+        )
+        Impact.NORMAL -> stringResource(
+            R.string.a11y_roll_normal,
+            record.notation,
+            record.total,
+        )
+    }
+    val degree = record.degree
+    val target = record.targetNumber
+    val suffix = if (degree != null && target != null) {
+        stringResource(
+            R.string.a11y_roll_degree,
+            target,
+            stringResource(degreeLabel(degree)),
+        )
+    } else {
+        ""
+    }
+    return "$base $suffix".trim()
+}
+
+@Composable
+private fun DieRow(selected: Die, onSelect: (Die) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+    ) {
+        Die.entries.forEach { die ->
+            GodChip(
+                label = stringResource(R.string.dice_face_pattern, die.sides),
+                selected = die == selected,
+                onClick = { onSelect(die) },
+                style = MaterialTheme.typography.bodyMedium,
+                horizontalPadding = Spacing.sm,
+                verticalPadding = Spacing.xs,
+                testTag = GodTags.diceDie(die.sides),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CountRow(
+    state: DiceUiState,
+    onSelect: (Int) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.xs, Alignment.CenterHorizontally),
+    ) {
+        Text(
+            text = stringResource(R.string.dice_count_label),
+            style = MaterialTheme.typography.labelLarge,
+            color = TextSecondary,
+        )
+        COUNT_STEPS.forEach { step ->
+            GodChip(
+                label = step.toString(),
+                selected = state.count == step,
+                onClick = { onSelect(step) },
+                style = MaterialTheme.typography.labelLarge,
+                horizontalPadding = Spacing.sm,
+                verticalPadding = Spacing.xs,
+                testTag = GodTags.diceCount(step),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ModifierRow(
+    state: DiceUiState,
+    onSelect: (Int) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.xs, Alignment.CenterHorizontally),
+    ) {
+        Text(
+            text = stringResource(R.string.dice_modifier_label),
+            style = MaterialTheme.typography.labelLarge,
+            color = TextSecondary,
+        )
+        MODIFIER_STEPS.forEach { step ->
+            GodChip(
+                label = signedLabel(step),
+                selected = state.modifier == step,
+                onClick = { onSelect(step) },
+                style = MaterialTheme.typography.labelLarge,
+                horizontalPadding = Spacing.sm,
+                verticalPadding = Spacing.xs,
+                testTag = GodTags.diceModifier(step),
+            )
+        }
+    }
+}
+
+@Composable
+private fun KeepRow(
+    state: DiceUiState,
+    onSelect: (Int?) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.xs, Alignment.CenterHorizontally),
+    ) {
+        Text(
+            text = stringResource(R.string.dice_keep_label),
+            style = MaterialTheme.typography.labelLarge,
+            color = TextSecondary,
+        )
+        GodChip(
+            label = stringResource(R.string.dice_keep_all),
+            selected = !state.supportsKeep || state.keepHighest == null,
+            onClick = { onSelect(null) },
+            style = MaterialTheme.typography.labelLarge,
+            horizontalPadding = Spacing.sm,
+            verticalPadding = Spacing.xs,
+            testTag = GodTags.diceKeep(null),
+        )
+        if (state.supportsKeep) {
+            (1..state.count).forEach { keep ->
+                GodChip(
+                    label = stringResource(R.string.dice_keep_highest_pattern, keep),
+                    selected = state.keepHighest == keep,
+                    onClick = { onSelect(keep) },
+                    style = MaterialTheme.typography.labelLarge,
+                    horizontalPadding = Spacing.sm,
+                    verticalPadding = Spacing.xs,
+                    testTag = GodTags.diceKeep(keep),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModeRow(
+    state: DiceUiState,
+    viewModel: DiceViewModel,
+) {
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.xs, Alignment.CenterHorizontally),
+        ) {
+            Advantage.entries.forEach { entry ->
+                GodChip(
+                    label = stringResource(advantageLabel(entry)),
+                    selected = state.advantage == entry && state.supportsAdvantage,
+                    enabled = entry == Advantage.STRAIGHT || state.supportsAdvantage,
+                    onClick = { viewModel.setAdvantage(entry) },
+                    style = MaterialTheme.typography.labelLarge,
+                    horizontalPadding = Spacing.sm,
+                    verticalPadding = Spacing.xs,
+                    testTag = GodTags.diceAdvantage(entry.name),
+                )
+            }
+            GodChip(
+                label = stringResource(R.string.dice_explode),
+                selected = state.exploding,
+                onClick = { viewModel.setExploding(!state.exploding) },
+                style = MaterialTheme.typography.labelLarge,
+                horizontalPadding = Spacing.sm,
+                verticalPadding = Spacing.xs,
+                testTag = GodTags.DICE_EXPLODE,
+            )
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = Spacing.xs),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.xs, Alignment.CenterHorizontally),
+        ) {
+            Text(
+                text = stringResource(R.string.dice_target_label),
+                style = MaterialTheme.typography.labelLarge,
+                color = TextSecondary,
+            )
+            GodChip(
+                label = stringResource(R.string.dice_target_off),
+                selected = state.targetNumber == null,
+                onClick = { viewModel.setTargetNumber(null) },
+                style = MaterialTheme.typography.labelLarge,
+                horizontalPadding = Spacing.sm,
+                verticalPadding = Spacing.xs,
+                testTag = GodTags.diceTarget(null),
+            )
+            TARGET_STEPS.forEach { target ->
+                GodChip(
+                    label = stringResource(R.string.dice_target_pattern, target),
+                    selected = state.targetNumber == target,
+                    onClick = { viewModel.setTargetNumber(target) },
+                    style = MaterialTheme.typography.labelLarge,
+                    horizontalPadding = Spacing.sm,
+                    verticalPadding = Spacing.xs,
+                    testTag = GodTags.diceTarget(target),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistoryRow(entry: RollEntry) {
+    val record = entry.record
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = Spacing.xs)) {
+        Text(
+            text = stringResource(R.string.dice_rolled_pattern, record.notation, record.total),
+            style = MaterialTheme.typography.bodyMedium,
+            color = when (record.impact) {
+                Impact.CRITICAL_SUCCESS -> GoldAccent
+                Impact.CRITICAL_FAILURE -> CritRed
+                Impact.NORMAL -> TextSecondary
+            },
+        )
+        if (record.dropped.isNotEmpty()) {
+            Text(
+                text = stringResource(
+                    R.string.dice_dropped_pattern,
+                    DiceLabels.dice(record.dropped, stringResource(R.string.dice_join_plus)),
+                ),
+                style = MaterialTheme.typography.labelLarge,
+                color = TextSecondary,
+            )
+        }
+        val degree = record.degree
+        val target = record.targetNumber
+        if (degree != null && target != null) {
+            Text(
+                text = stringResource(
+                    R.string.dice_degree_pattern,
+                    target,
+                    stringResource(degreeLabel(degree)),
+                ),
+                style = MaterialTheme.typography.labelLarge,
+                color = when (degree) {
+                    DegreeOfSuccess.CRITICAL_SUCCESS -> GoldAccent
+                    DegreeOfSuccess.CRITICAL_FAILURE -> CritRed
+                    else -> TextSecondary
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun impactLabel(record: RollRecord): String = when (record.impact) {
+    Impact.CRITICAL_SUCCESS -> stringResource(R.string.dice_crit_success, record.notation)
+    Impact.CRITICAL_FAILURE -> stringResource(R.string.dice_crit_failure, record.notation)
+    Impact.NORMAL -> {
+        val joiner = stringResource(R.string.dice_join_plus)
+        val modifier = when {
+            record.modifier > 0 -> stringResource(R.string.dice_modifier_plus, record.modifier)
+            record.modifier < 0 -> stringResource(R.string.dice_modifier_minus, abs(record.modifier))
+            else -> null
+        }
+        stringResource(
+            R.string.dice_normal_keeps,
+            record.notation,
+            DiceLabels.expression(record.kept, joiner, modifier),
+        )
+    }
+}
+
+@Composable
+private fun signedLabel(modifier: Int): String = when {
+    modifier > 0 -> stringResource(R.string.dice_modifier_plus, modifier)
+    modifier < 0 -> stringResource(R.string.dice_modifier_minus, abs(modifier))
+    else -> modifier.toString()
+}
+
+private fun advantageLabel(advantage: Advantage): Int = when (advantage) {
+    Advantage.STRAIGHT -> R.string.dice_advantage_straight
+    Advantage.ADVANTAGE -> R.string.dice_advantage_advantage
+    Advantage.DISADVANTAGE -> R.string.dice_advantage_disadvantage
+}
+
+private fun degreeLabel(degree: DegreeOfSuccess): Int = when (degree) {
+    DegreeOfSuccess.CRITICAL_SUCCESS -> R.string.dice_degree_critical_success
+    DegreeOfSuccess.SUCCESS -> R.string.dice_degree_success
+    DegreeOfSuccess.FAILURE -> R.string.dice_degree_failure
+    DegreeOfSuccess.CRITICAL_FAILURE -> R.string.dice_degree_critical_failure
 }

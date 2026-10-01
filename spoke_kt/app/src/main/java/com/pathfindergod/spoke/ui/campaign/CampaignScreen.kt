@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,11 +20,9 @@ import com.pathfindergod.spoke.ui.motion.StaggerIn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,35 +31,43 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.pathfindergod.spoke.R
 import com.pathfindergod.spoke.data.local.AppDatabase
-import com.pathfindergod.spoke.data.local.NetworkPreferences
+import com.pathfindergod.spoke.data.local.AppPreferences
 import com.pathfindergod.spoke.data.network.HubApiFactory
 import com.pathfindergod.spoke.data.repository.CampaignRepository
+import com.pathfindergod.spoke.ui.designsystem.Dimens
+import com.pathfindergod.spoke.ui.designsystem.GodCard
+import com.pathfindergod.spoke.ui.designsystem.GodEmptyState
+import com.pathfindergod.spoke.ui.designsystem.GodFab
+import com.pathfindergod.spoke.ui.designsystem.GodPrimaryButton
+import com.pathfindergod.spoke.ui.designsystem.GodStatusText
+import com.pathfindergod.spoke.ui.designsystem.GodTags
+import com.pathfindergod.spoke.ui.designsystem.GodTextField
+import com.pathfindergod.spoke.ui.designsystem.GodTone
+import com.pathfindergod.spoke.ui.designsystem.Spacing
+import com.pathfindergod.spoke.ui.strings.resolve
 import com.pathfindergod.spoke.ui.theme.CritRed
-import com.pathfindergod.spoke.ui.theme.CrimsonPrimary
-import com.pathfindergod.spoke.ui.theme.GodTypography
 import com.pathfindergod.spoke.ui.theme.GoldAccent
 import com.pathfindergod.spoke.ui.theme.TextPrimary
 import com.pathfindergod.spoke.ui.theme.TextSecondary
-import com.pathfindergod.spoke.ui.theme.rpgPanel
 import com.pathfindergod.spoke.ui.viewmodel.CampaignViewModel
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 
-private val mockCombatEvents = listOf(
-    "The fighter felled the goblin chief with a critical strike.",
-    "The cleric stabilized the dying rogue.",
-    "The party claimed the crypt vault.",
+@Composable
+private fun rememberMockCombatEvents(): List<String> = listOf(
+    stringResource(R.string.campaign_mock_event_felled),
+    stringResource(R.string.campaign_mock_event_stabilized),
+    stringResource(R.string.campaign_mock_event_vault),
 )
 
 private class CampaignVmFactory(
@@ -74,8 +81,8 @@ private class CampaignVmFactory(
 @Composable
 internal fun rememberCampaignViewModel(): CampaignViewModel {
     val context = LocalContext.current
-    val prefs = remember { NetworkPreferences(context) }
-    val api = remember { HubApiFactory.create(prefs.restUrl()) }
+    val prefs = remember { AppPreferences(context) }
+    val api = remember { HubApiFactory.get(prefs.restUrl()) }
     val repository = remember {
         CampaignRepository(AppDatabase.create(context.applicationContext), api)
     }
@@ -98,35 +105,33 @@ fun CampaignScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     var name by rememberSaveable { mutableStateOf("") }
     var description by rememberSaveable { mutableStateOf("") }
+    val mockCombatEvents = rememberMockCombatEvents()
     val campaign = state.campaign
     Box(modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Column(modifier = Modifier.fillMaxSize().padding(Spacing.lg)) {
             if (campaign == null) {
                 Box(
                     modifier = Modifier.fillMaxWidth().weight(1f),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(
-                        text = "No chronicle begun — name a campaign below.",
-                        style = GodTypography.titleMedium,
-                        color = TextSecondary,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(horizontal = 32.dp),
-                    )
+                    GodEmptyState(text = stringResource(R.string.campaign_empty))
                 }
             } else {
-                Column(modifier = Modifier.rpgPanel().fillMaxWidth().padding(16.dp)) {
-                    Text(
-                        text = campaign.name,
-                        style = GodTypography.headlineSmall,
-                        color = GoldAccent,
-                    )
+                GodCard(
+                    title = {
+                        Text(
+                            text = campaign.name,
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = GoldAccent,
+                        )
+                    },
+                ) {
                     if (campaign.description.isNotBlank()) {
                         Text(
                             text = campaign.description,
-                            style = GodTypography.bodyMedium,
+                            style = MaterialTheme.typography.bodyMedium,
                             color = TextSecondary,
-                            modifier = Modifier.padding(top = 4.dp),
+                            modifier = Modifier.padding(top = Spacing.xs),
                         )
                     }
                 }
@@ -134,113 +139,73 @@ fun CampaignScreen(
                     ledgerNotes(campaign.sessionNotes)
                 }
                 if (state.isSummarizing) {
-                    Text(
-                        text = "The chronicler writes…",
-                        style = GodTypography.bodyMedium,
-                        color = TextSecondary,
-                        modifier = Modifier.padding(top = 8.dp),
+                    GodStatusText(
+                        text = stringResource(R.string.campaign_summarizing),
+                        modifier = Modifier.padding(top = Spacing.sm),
                     )
                 }
                 state.error?.let { error ->
-                    Text(
-                        text = error,
-                        style = GodTypography.bodyMedium,
+                    GodStatusText(
+                        text = error.resolve(),
+                        tone = GodTone.Critical,
                         color = CritRed,
-                        modifier = Modifier.padding(top = 4.dp),
+                        modifier = Modifier.padding(top = Spacing.xs),
                     )
                 }
                 LazyColumn(
-                    modifier = Modifier.fillMaxWidth().weight(1f).padding(top = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth().weight(1f).padding(top = Spacing.md),
+                    verticalArrangement = Arrangement.spacedBy(Dimens.gridSpacing),
                 ) {
                     itemsIndexed(notes, key = { _, note -> note.hashCode() }) { index, note ->
                         StaggerIn(index = index, modifier = Modifier.animateItem()) {
-                            Text(
-                                text = note,
-                                style = GodTypography.bodyMedium,
-                                color = TextPrimary,
-                                modifier = Modifier
-                                    .rpgPanel()
-                                    .fillMaxWidth()
-                                    .padding(12.dp),
-                            )
+                            GodCard(contentPadding = PaddingValues(Dimens.cardPaddingTight)) {
+                                Text(
+                                    text = note,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = TextPrimary,
+                                )
+                            }
                         }
                     }
                 }
-                Box(
-                    modifier = Modifier
-                        .rpgPanel()
-                        .clickable { viewModel.summarizeRecentEvents(mockCombatEvents) }
-                        .fillMaxWidth(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = "SUMMARIZE RECENT COMBAT",
-                        style = GodTypography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = GoldAccent,
-                        modifier = Modifier.padding(vertical = 14.dp),
-                    )
-                }
+                GodPrimaryButton(
+                    text = stringResource(R.string.campaign_summarize),
+                    onClickLabel = stringResource(R.string.a11y_campaign_summarize),
+                    onClick = { viewModel.summarizeRecentEvents(mockCombatEvents) },
+                    testTag = GodTags.CAMPAIGN_SUMMARIZE,
+                )
             }
             Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = Spacing.md),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                CampaignField(
+                GodTextField(
                     value = name,
-                    onChange = { name = it },
-                    label = "Name",
+                    onValueChange = { name = it },
+                    label = stringResource(R.string.campaign_field_name),
                     modifier = Modifier.weight(1f),
                 )
-                CampaignField(
+                GodTextField(
                     value = description,
-                    onChange = { description = it },
-                    label = "Description",
+                    onValueChange = { description = it },
+                    label = stringResource(R.string.campaign_field_description),
                     modifier = Modifier.weight(1f),
                 )
             }
         }
-        FloatingActionButton(
+        GodFab(
+            icon = Icons.Filled.Add,
+            contentDescription = stringResource(R.string.campaign_fab),
             onClick = {
                 viewModel.createCampaign(name.trim(), description.trim())
                 name = ""
                 description = ""
             },
-            containerColor = CrimsonPrimary,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Add,
-                contentDescription = "New campaign",
-                tint = GoldAccent,
-            )
-        }
+            testTag = GodTags.CAMPAIGN_FAB,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(Spacing.xl),
+        )
     }
-}
-
-@Composable
-private fun CampaignField(
-    value: String,
-    onChange: (String) -> Unit,
-    label: String,
-    modifier: Modifier = Modifier,
-) {
-    TextField(
-        value = value,
-        onValueChange = onChange,
-        label = { Text(text = label) },
-        singleLine = true,
-        colors = TextFieldDefaults.colors(
-            focusedTextColor = TextPrimary,
-            unfocusedTextColor = TextPrimary,
-            focusedContainerColor = Color.Transparent,
-            unfocusedContainerColor = Color.Transparent,
-            cursorColor = GoldAccent,
-            focusedLabelColor = TextSecondary,
-            unfocusedLabelColor = TextSecondary,
-        ),
-        modifier = modifier,
-    )
 }

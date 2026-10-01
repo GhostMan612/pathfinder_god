@@ -5,13 +5,12 @@
 
 package com.pathfindergod.spoke.ui.map
 
-import android.graphics.BitmapFactory
-import android.util.Base64
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,11 +22,12 @@ import com.pathfindergod.spoke.ui.motion.StaggerIn
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,35 +35,39 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.pathfindergod.spoke.R
 import com.pathfindergod.spoke.data.local.AppDatabase
+import com.pathfindergod.spoke.data.local.AppPreferences
 import com.pathfindergod.spoke.data.local.MapEntity
-import com.pathfindergod.spoke.data.local.NetworkPreferences
 import com.pathfindergod.spoke.data.network.HubApi
 import com.pathfindergod.spoke.data.network.HubApiFactory
 import com.pathfindergod.spoke.data.repository.MapRepository
+import com.pathfindergod.spoke.ui.designsystem.Dimens
+import com.pathfindergod.spoke.ui.designsystem.GodCard
+import com.pathfindergod.spoke.ui.designsystem.GodEmptyState
+import com.pathfindergod.spoke.ui.designsystem.GodFab
+import com.pathfindergod.spoke.ui.designsystem.GodLiveRegion
+import com.pathfindergod.spoke.ui.designsystem.GodSectionHeader
+import com.pathfindergod.spoke.ui.designsystem.GodStatusText
+import com.pathfindergod.spoke.ui.designsystem.GodTags
+import com.pathfindergod.spoke.ui.designsystem.GodTone
+import com.pathfindergod.spoke.ui.designsystem.Spacing
+import com.pathfindergod.spoke.ui.designsystem.godTouchHeight
+import com.pathfindergod.spoke.ui.strings.resolve
 import com.pathfindergod.spoke.ui.theme.CritRed
-import com.pathfindergod.spoke.ui.theme.CrimsonPrimary
-import com.pathfindergod.spoke.ui.theme.GodTypography
-import com.pathfindergod.spoke.ui.theme.GoldAccent
 import com.pathfindergod.spoke.ui.theme.TextPrimary
 import com.pathfindergod.spoke.ui.theme.TextSecondary
-import com.pathfindergod.spoke.ui.theme.rpgPanel
 import com.pathfindergod.spoke.ui.viewmodel.MapViewModel
-
-internal fun decodeMapPng(raw: String): ImageBitmap? = try {
-    val bytes = Base64.decode(raw, Base64.DEFAULT)
-    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-} catch (_: Exception) {
-    null
-}
 
 private class MapVmFactory(
     private val repository: MapRepository,
@@ -77,8 +81,8 @@ private class MapVmFactory(
 @Composable
 internal fun rememberMapViewModel(): MapViewModel {
     val context = LocalContext.current
-    val prefs = remember { NetworkPreferences(context) }
-    val api = remember { HubApiFactory.create(prefs.restUrl()) }
+    val prefs = remember { AppPreferences(context) }
+    val api = remember { HubApiFactory.get(prefs.restUrl()) }
     val repository = remember {
         MapRepository(AppDatabase.create(context.applicationContext), api)
     }
@@ -92,27 +96,30 @@ fun MapListScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     Box(modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-            Text(
-                text = "Vault",
-                style = GodTypography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = GoldAccent,
+        Column(modifier = Modifier.fillMaxSize().padding(Spacing.lg)) {
+            GodSectionHeader(
+                text = stringResource(R.string.map_vault),
+                prominent = true,
             )
             if (state.isGenerating) {
-                Text(
-                    text = "Conjuring…",
-                    style = GodTypography.bodyMedium,
-                    color = TextSecondary,
-                    modifier = Modifier.padding(top = 4.dp),
+                GodStatusText(
+                    text = stringResource(R.string.map_conjuring),
+                    modifier = Modifier.padding(top = Spacing.xs),
                 )
             }
             state.error?.let { error ->
-                Text(
-                    text = error,
-                    style = GodTypography.bodyMedium,
+                GodStatusText(
+                    text = error.resolve(),
+                    tone = GodTone.Critical,
                     color = CritRed,
-                    modifier = Modifier.padding(top = 4.dp),
+                    modifier = Modifier.padding(top = Spacing.xs),
+                )
+            }
+            if (!state.isGenerating && state.maps.isNotEmpty()) {
+                GodLiveRegion(
+                    text = stringResource(R.string.a11y_map_count, state.maps.size),
+                    tag = GodTags.MAP_FAB + ":count",
+                    modifier = Modifier.padding(top = Spacing.xs),
                 )
             }
             if (state.maps.isEmpty() && !state.isGenerating) {
@@ -120,20 +127,14 @@ fun MapListScreen(
                     modifier = Modifier.fillMaxWidth().weight(1f),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(
-                        text = "No maps yet — conjure a ruined crypt.",
-                        style = GodTypography.titleMedium,
-                        color = TextSecondary,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(horizontal = 32.dp),
-                    )
+                    GodEmptyState(text = stringResource(R.string.map_empty))
                 }
             } else {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(2),
-                    modifier = Modifier.fillMaxWidth().weight(1f).padding(top = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth().weight(1f).padding(top = Spacing.md),
+                    horizontalArrangement = Arrangement.spacedBy(Dimens.gridSpacing),
+                    verticalArrangement = Arrangement.spacedBy(Dimens.gridSpacing),
                 ) {
                     itemsIndexed(
                         state.maps,
@@ -150,17 +151,16 @@ fun MapListScreen(
                 }
             }
         }
-        FloatingActionButton(
-            onClick = { viewModel.generate("A ruined crypt") },
-            containerColor = CrimsonPrimary,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Add,
-                contentDescription = "Conjure map",
-                tint = GoldAccent,
-            )
-        }
+        val defaultPrompt = stringResource(R.string.map_default_prompt)
+        GodFab(
+            icon = Icons.Filled.Add,
+            contentDescription = stringResource(R.string.map_fab),
+            onClick = { viewModel.generate(defaultPrompt) },
+            testTag = GodTags.MAP_FAB,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(Spacing.xl),
+        )
     }
 }
 
@@ -171,18 +171,28 @@ private fun MapCard(
     onSelect: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    val thumbnail = remember(map.id) {
-        decodeMapPng(map.playerBase64Png.ifBlank { map.gmBase64Png })
+    val decoded by produceState<ImageBitmap?>(initialValue = null, map.id) {
+        value = MapImageDecoder.decode(
+            map.playerBase64Png.ifBlank { map.gmBase64Png },
+            THUMBNAIL_PX,
+        )
     }
-    Column(
-        modifier = modifier.rpgPanel().clickable { onSelect() }.padding(8.dp),
+    val thumbnail = decoded
+    GodCard(
+        modifier = modifier.fillMaxWidth(),
+        testTag = GodTags.map(map.id),
+        contentPadding = PaddingValues(Spacing.sm),
+        onClickLabel = stringResource(R.string.a11y_map_open, map.prompt),
+        onClick = onSelect,
     ) {
         if (thumbnail != null) {
             Image(
                 bitmap = thumbnail,
-                contentDescription = map.prompt,
+                contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f),
             )
         } else {
             Box(
@@ -190,25 +200,32 @@ private fun MapCard(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "?",
-                    style = GodTypography.displayLarge,
+                    text = stringResource(R.string.value_placeholder_image),
+                    style = MaterialTheme.typography.displayLarge,
                     color = TextSecondary,
                 )
             }
         }
         Text(
             text = map.prompt,
-            style = GodTypography.bodyMedium,
+            style = MaterialTheme.typography.bodyMedium,
             color = TextPrimary,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 6.dp),
+            modifier = Modifier.padding(top = Spacing.sm),
         )
         Text(
-            text = "Banish",
-            style = GodTypography.labelLarge,
+            text = stringResource(R.string.map_banish),
+            style = MaterialTheme.typography.labelLarge,
             color = CritRed,
-            modifier = Modifier.clickable { onDelete() }.padding(top = 2.dp),
+            modifier = Modifier
+                .clickable(
+                    onClickLabel = stringResource(R.string.a11y_map_banish, map.prompt),
+                    role = Role.Button,
+                ) { onDelete() }
+                .godTouchHeight()
+                .padding(top = Spacing.xxs)
+                .testTag(GodTags.mapBanish(map.id)),
         )
     }
 }

@@ -10,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,24 +22,35 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import com.pathfindergod.spoke.service.ExportService
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
+import com.pathfindergod.spoke.R
 import com.pathfindergod.spoke.data.local.CharacterEntity
+import com.pathfindergod.spoke.ui.designsystem.Dimens
+import com.pathfindergod.spoke.ui.designsystem.GodBackLink
+import com.pathfindergod.spoke.ui.designsystem.GodCard
+import com.pathfindergod.spoke.ui.designsystem.GodStatTile
+import com.pathfindergod.spoke.ui.designsystem.GodTags
+import com.pathfindergod.spoke.ui.designsystem.Spacing
+import com.pathfindergod.spoke.ui.designsystem.godRtlText
+import com.pathfindergod.spoke.ui.designsystem.godTouchSize
 import com.pathfindergod.spoke.ui.theme.CrimsonPrimary
 import com.pathfindergod.spoke.ui.theme.CritRed
-import com.pathfindergod.spoke.ui.theme.GodTypography
 import com.pathfindergod.spoke.ui.theme.GoldAccent
 import com.pathfindergod.spoke.ui.theme.ParchmentSurface
 import com.pathfindergod.spoke.ui.theme.TextPrimary
 import com.pathfindergod.spoke.ui.theme.TextSecondary
-import com.pathfindergod.spoke.ui.theme.rpgPanel
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -79,95 +91,121 @@ fun CharacterDetailScreen(
     val proficiencies = remember(entity.proficiencies) { flatEntries(entity.proficiencies) }
     val feats = remember(entity.feats) { flatEntries(entity.feats) }
     Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(Spacing.lg),
+        verticalArrangement = Arrangement.spacedBy(Spacing.md),
     ) {
-        Text(
-            text = "‹ Roster",
-            style = GodTypography.labelLarge,
-            color = GoldAccent,
-            modifier = Modifier.clickable { onBack() }.padding(vertical = 4.dp),
+        GodBackLink(
+            text = godRtlText(R.string.character_back, R.string.character_back_rtl),
+            onClick = onBack,
+            testTag = GodTags.heroBack,
         )
-        Row(
-            modifier = Modifier.rpgPanel().fillMaxWidth().padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier.size(56.dp).background(CrimsonPrimary, CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = entity.name.firstOrNull()?.uppercase() ?: "?",
-                    style = GodTypography.headlineSmall,
-                    color = ParchmentSurface,
+        GodCard {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier.size(Dimens.avatar).background(CrimsonPrimary, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = entity.name.firstOrNull()?.uppercase()
+                            ?: stringResource(R.string.value_unknown),
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = ParchmentSurface,
+                    )
+                }
+                Column(modifier = Modifier.weight(1f).padding(start = Spacing.lg)) {
+                    Text(
+                        text = entity.name,
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = GoldAccent,
+                    )
+                    Text(
+                        text = stringResource(
+                            R.string.character_summary_pattern,
+                            entity.ancestry ?: stringResource(R.string.value_not_set),
+                            entity.characterClass ?: stringResource(R.string.value_not_set),
+                            entity.level,
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary,
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Filled.Share,
+                    contentDescription = stringResource(R.string.character_share),
+                    tint = GoldAccent,
+                    modifier = Modifier
+                        .clickable(
+                            onClickLabel = stringResource(R.string.a11y_hero_share, entity.name),
+                            role = Role.Button,
+                        ) { ExportService.shareCharacter(context, entity) }
+                        .godTouchSize()
+                        .padding(Spacing.sm)
+                        .testTag(GodTags.heroShare(entity.id)),
                 )
             }
-            Column(modifier = Modifier.weight(1f).padding(start = 16.dp)) {
+        }
+        GodCard(
+            contentPadding = PaddingValues(vertical = Spacing.md),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+            ) {
+                GodStatTile(
+                    label = stringResource(R.string.character_stat_ac),
+                    value = derived["ac"] ?: stringResource(R.string.character_stat_ac_default),
+                )
+                GodStatTile(
+                    label = stringResource(R.string.character_stat_hp),
+                    value = stringResource(
+                        R.string.character_hp_pattern,
+                        derived["hp"] ?: stringResource(R.string.character_stat_hp_default),
+                        derived["maxHp"] ?: stringResource(R.string.character_stat_hp_default),
+                    ),
+                    valueColor = CritRed,
+                )
+                GodStatTile(
+                    label = stringResource(R.string.character_stat_speed),
+                    value = stringResource(
+                        R.string.character_speed_unit,
+                        derived["speed"] ?: (entity.speed ?: stringResource(R.string.character_stat_speed_default)),
+                    ),
+                )
+            }
+        }
+        GodCard(
+            title = {
                 Text(
-                    text = entity.name,
-                    style = GodTypography.headlineSmall,
+                    text = stringResource(R.string.character_ability_scores),
+                    style = MaterialTheme.typography.titleMedium,
                     color = GoldAccent,
                 )
-                Text(
-                    text = "${entity.ancestry ?: "—"} · ${entity.characterClass ?: "—"} · Level ${entity.level}",
-                    style = GodTypography.bodyMedium,
-                    color = TextSecondary,
-                )
-            }
-            Icon(
-                imageVector = Icons.Filled.Share,
-                contentDescription = "Share sheet",
-                tint = GoldAccent,
-                modifier = Modifier
-                    .clickable { ExportService.shareCharacter(context, entity) }
-                    .padding(8.dp),
-            )
-        }
-        Row(
-            modifier = Modifier.rpgPanel().fillMaxWidth().padding(vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
+            },
         ) {
-            SheetStat(label = "AC", value = derived["ac"] ?: "10", color = TextPrimary)
-            SheetStat(
-                label = "HP",
-                value = "${derived["hp"] ?: "0"}/${derived["maxHp"] ?: "0"}",
-                color = CritRed,
-            )
-            SheetStat(
-                label = "Speed",
-                value = "${derived["speed"] ?: entity.speed ?: "25"} ft",
-                color = TextPrimary,
-            )
-        }
-        Column(modifier = Modifier.rpgPanel().fillMaxWidth().padding(16.dp)) {
-            Text(
-                text = "Ability Scores",
-                style = GodTypography.titleMedium,
-                color = GoldAccent,
-            )
             abilityOrder.chunked(3).forEach { row ->
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(top = Spacing.sm),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                 ) {
                     row.forEach { key ->
-                        val score = abilities[key]?.toIntOrNull() ?: 10
+                        val score = abilities[key]?.toIntOrNull()
+                            ?: stringResource(R.string.character_ability_default).toInt()
                         val mod = abilityModifier(score)
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
                                 text = key.uppercase(),
-                                style = GodTypography.labelLarge,
+                                style = MaterialTheme.typography.labelLarge,
                                 color = TextSecondary,
                             )
                             Text(
                                 text = "$score",
-                                style = GodTypography.titleLarge,
+                                style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary,
                             )
                             Text(
                                 text = if (mod >= 0) "+$mod" else "$mod",
-                                style = GodTypography.bodyMedium,
+                                style = MaterialTheme.typography.bodyMedium,
                                 color = GoldAccent,
                             )
                         }
@@ -175,28 +213,13 @@ fun CharacterDetailScreen(
                 }
             }
         }
-        SheetSection(title = "Proficiencies", entries = proficiencies)
-        SheetSection(title = "Feats", entries = feats)
-    }
-}
-
-@Composable
-private fun SheetStat(
-    label: String,
-    value: String,
-    color: androidx.compose.ui.graphics.Color,
-) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(
-            text = value,
-            style = GodTypography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            color = color,
+        SheetSection(
+            title = stringResource(R.string.character_proficiencies),
+            entries = proficiencies,
         )
-        Text(
-            text = label,
-            style = GodTypography.bodyMedium,
-            color = TextSecondary,
+        SheetSection(
+            title = stringResource(R.string.character_feats),
+            entries = feats,
         )
     }
 }
@@ -206,26 +229,29 @@ private fun SheetSection(
     title: String,
     entries: List<Pair<String, String>>,
 ) {
-    Column(modifier = Modifier.rpgPanel().fillMaxWidth().padding(16.dp)) {
-        Text(
-            text = title,
-            style = GodTypography.titleMedium,
-            color = GoldAccent,
-        )
+    GodCard(
+        title = {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = GoldAccent,
+            )
+        },
+    ) {
         if (entries.isEmpty()) {
             Text(
-                text = "—",
-                style = GodTypography.bodyMedium,
+                text = stringResource(R.string.value_not_set),
+                style = MaterialTheme.typography.bodyMedium,
                 color = TextSecondary,
-                modifier = Modifier.padding(top = 4.dp),
+                modifier = Modifier.padding(top = Spacing.xs),
             )
         } else {
             entries.forEach { (key, value) ->
                 Text(
-                    text = "$key · $value",
-                    style = GodTypography.bodyMedium,
+                    text = stringResource(R.string.character_entry_pattern, key, value),
+                    style = MaterialTheme.typography.bodyMedium,
                     color = TextPrimary,
-                    modifier = Modifier.padding(top = 4.dp),
+                    modifier = Modifier.padding(top = Spacing.xs),
                 )
             }
         }

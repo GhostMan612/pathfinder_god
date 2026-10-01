@@ -14,18 +14,38 @@ import kotlin.math.sqrt
 data class DieMesh(
     val positions: FloatArray,
     val uvs: FloatArray,
+    val tangents: FloatArray,
     val indices: ShortArray,
     val faceNumbers: IntArray,
     val faceKinds: IntArray,
     val facePoints: List<List<FloatArray>>,
-)
+    val centroidNormals: FloatArray,
+    val cols: Int,
+    val rows: Int,
+) {
+    val faceCount: Int get() = faceNumbers.size
+
+    fun centroidNormal(face: Int): FloatArray = floatArrayOf(
+        centroidNormals[face * 3],
+        centroidNormals[face * 3 + 1],
+        centroidNormals[face * 3 + 2],
+    )
+
+    fun faceIndexOf(value: Int): Int = faceNumbers.indexOf(value)
+
+    fun centroidNormalFor(value: Int): FloatArray? {
+        val index = faceIndexOf(value)
+        return if (index < 0) null else centroidNormal(index)
+    }
+}
 
 object DieMeshBuilder {
-    const val COLS = 5
-    const val ROWS = 4
     const val TRI = 0
     const val QUAD = 1
     const val PENT = 2
+
+    const val TRAPEZO_RING_NUMERATOR = 0.22451399f
+    const val TRAPEZO_RING_DENOMINATOR = 2.12662702f
 
     private data class Poly(val verts: IntArray, val kind: Int)
     private data class Tri(val v: IntArray, val c: IntArray, val face: Int)
@@ -54,7 +74,7 @@ object DieMeshBuilder {
         Die.D4 -> assemble(tetrahedron(), 1, null)
         Die.D6 -> assemble(cube(), 1, 7)
         Die.D8 -> assemble(octahedron(), 1, 9)
-        Die.D10 -> assemble(trapezohedron(), 0, 9)
+        Die.D10 -> assemble(trapezohedron(), 1, 11)
         Die.D12 -> assemble(dodecahedron(), 1, 13)
         Die.D20 -> assemble(icosahedron(), 1, 21)
     }
@@ -137,7 +157,7 @@ object DieMeshBuilder {
 
     private fun trapezohedron(): Pair<List<FloatArray>, List<Poly>> {
         val apexH = 1.134f
-        val ringH = apexH * 0.2245f / 2.1267f
+        val ringH = apexH * TRAPEZO_RING_NUMERATOR / TRAPEZO_RING_DENOMINATOR
         val verts = mutableListOf(
             floatArrayOf(0f, apexH, 0f),
             floatArrayOf(0f, -apexH, 0f),
@@ -358,13 +378,15 @@ object DieMeshBuilder {
                 next++
             }
         }
+        val grid = DieAtlas.gridFor(polys.size)
         val positions = FloatArray(tris.size * 9)
         val uvs = FloatArray(tris.size * 6)
+        val tangents = FloatArray(tris.size * 12)
         val indices = ShortArray(tris.size * 3) { it.toShort() }
         tris.forEachIndexed { ti, tri ->
             val kind = polys[tri.face].kind
-            val col = tri.face % COLS
-            val row = tri.face / COLS
+            val col = tri.face % grid.cols
+            val row = tri.face / grid.cols
             for (corner in 0 until 3) {
                 val out = ti * 3 + corner
                 val v = unit[tri.v[corner]]
@@ -372,12 +394,90 @@ object DieMeshBuilder {
                 positions[out * 3 + 1] = v[1]
                 positions[out * 3 + 2] = v[2]
                 val (fx, fy) = tileCorner(kind, tri.c[corner])
-                uvs[out * 2] = (col + fx) / COLS
-                uvs[out * 2 + 1] = 1f - (row + fy) / ROWS
+                uvs[out * 2] = (col + fx) / grid.cols
+                uvs[out * 2 + 1] = 1f - (row + fy) / grid.rows
             }
+            writeTangent(tri, ti, positions, uvs, tangents)
         }
         val points = polys.map { poly -> poly.verts.map { unit[it] } }
-        return DieMesh(positions, uvs, indices, numbers, polys.map { it.kind }.toIntArray(), points)
+        val centroidNormals = FloatArray(polys.size * 3)
+        points.forEachIndexed { index, corners ->
+            val n = norm(centroidOf(corners))
+            centroidNormals[index * 3] = n[0]
+            centroidNormals[index * 3 + 1] = n[1]
+            centroidNormals[index * 3 + 2] = n[2]
+        }
+        return DieMesh(
+            positions = positions,
+            uvs = uvs,
+            tangents = tangents,
+            indices = indices,
+            faceNumbers = numbers,
+            faceKinds = polys.map { it.kind }.toIntArray(),
+            facePoints = points,
+            centroidNormals = centroidNormals,
+            cols = grid.cols,
+            rows = grid.rows,
+        )
+    }
+
+    private fun writeTangent(
+        tri: Tri,
+        ti: Int,
+        positions: FloatArray,
+        uvs: FloatArray,
+        tangents: FloatArray,
+    ) {
+        val base = ti * 3
+        val p = Array(3) { i ->
+            floatArrayOf(
+                positions[(base + i) * 3],
+                positions[(base + i) * 3 + 1],
+                positions[(base + i) * 3 + 2],
+            )
+        }
+        val t = Array(3) { i ->
+            floatArrayOf(uvs[(base + i) * 2], uvs[(base + i) * 2 + 1])
+        }
+        val e1 = sub(p[1], p[0])
+        val e2 = sub(p[2], p[0])
+        val du1 = t[1][0] - t[0][0]
+        val dv1 = t[1][1] - t[0][1]
+        val du2 = t[2][0] - t[0][0]
+        val dv2 = t[2][1] - t[0][1]
+        val det = du1 * dv2 - du2 * dv1
+        val (tx, ty, tz, w) = if (kotlin.math.abs(det) < 1e-12f) {
+            val n = faceNormal(p[0], p[1], p[2])
+            val seed = if (kotlin.math.abs(n[0]) < 0.9f) {
+                cross(n, floatArrayOf(1f, 0f, 0f))
+            } else {
+                cross(n, floatArrayOf(0f, 1f, 0f))
+            }
+            val s = norm(seed)
+            floatArrayOf(s[0], s[1], s[2], 1f)
+        } else {
+            val r = 1f / det
+            val tangent = norm(
+                floatArrayOf(
+                    (e1[0] * dv2 - e2[0] * dv1) * r,
+                    (e1[1] * dv2 - e2[1] * dv1) * r,
+                    (e1[2] * dv2 - e2[2] * dv1) * r,
+                ),
+            )
+            floatArrayOf(
+                tangent[0],
+                tangent[1],
+                tangent[2],
+                if (det < 0f) -1f else 1f,
+            )
+        }
+        for (corner in 0 until 3) {
+            val slot = (base + corner) * 4
+            tangents[slot] = tx
+            tangents[slot + 1] = ty
+            tangents[slot + 2] = tz
+            tangents[slot + 3] = w
+        }
     }
 
     private fun faceNormal(a: FloatArray, b: FloatArray, c: FloatArray): FloatArray {

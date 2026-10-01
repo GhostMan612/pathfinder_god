@@ -7,12 +7,19 @@ package com.pathfindergod.spoke.service
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.util.Base64
 import androidx.core.content.FileProvider
 import com.pathfindergod.spoke.data.local.CharacterEntity
 import java.io.File
 import java.io.FileOutputStream
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 object ExportService {
     const val AUTHORITY = "com.pathfindergod.spoke.fileprovider"
@@ -39,18 +46,37 @@ object ExportService {
         context.startActivity(Intent.createChooser(intent, entity.name))
     }
 
-    fun shareMapImage(context: Context, base64Png: String, fileName: String): Boolean {
-        return try {
+    fun shareMapImage(context: Context, base64Png: String, fileName: String) {
+        val appContext = context.applicationContext
+        val safe = fileName.take(48).ifBlank { "map" }
+        exportScope.launch {
+            val uri = writeMap(appContext, base64Png, safe) ?: return@launch
+            withContext(Dispatchers.Main) { sendImage(appContext, uri, safe) }
+        }
+    }
+
+    private suspend fun writeMap(
+        context: Context,
+        base64Png: String,
+        safe: String,
+    ): Uri? = withContext(Dispatchers.IO) {
+        try {
             val raw = Base64.decode(base64Png, Base64.DEFAULT)
-            val bitmap = BitmapFactory.decodeByteArray(raw, 0, raw.size)
-                ?: return false
+            val bitmap = BitmapFactory.decodeByteArray(raw, 0, raw.size) ?: return@withContext null
             val dir = File(context.cacheDir, "exports").apply { mkdirs() }
-            val safe = fileName.take(48).ifBlank { "map" }
             val file = File(dir, "$safe.png")
             FileOutputStream(file).use { out ->
-                bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
             }
-            val uri = FileProvider.getUriForFile(context, AUTHORITY, file)
+            bitmap.recycle()
+            FileProvider.getUriForFile(context, AUTHORITY, file)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun sendImage(context: Context, uri: Uri, title: String) {
+        try {
             val intent = Intent(Intent.ACTION_SEND)
                 .setType("image/png")
                 .putExtra(Intent.EXTRA_STREAM, uri)
@@ -58,10 +84,11 @@ object ExportService {
                     Intent.FLAG_GRANT_READ_URI_PERMISSION or
                         Intent.FLAG_ACTIVITY_NEW_TASK,
                 )
-            context.startActivity(Intent.createChooser(intent, safe))
-            true
+            context.startActivity(Intent.createChooser(intent, title))
         } catch (_: Exception) {
-            false
+            Unit
         }
     }
+
+    private val exportScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 }

@@ -15,7 +15,8 @@ import android.os.Binder
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
-import com.pathfindergod.spoke.data.local.NetworkPreferences
+import com.pathfindergod.spoke.R
+import com.pathfindergod.spoke.data.local.AppPreferences
 import com.pathfindergod.spoke.data.network.HubWebSocketClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -57,14 +58,14 @@ class HubForegroundService : Service() {
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_ID,
-                "Hub Link",
+                getString(R.string.hub_channel_name),
                 NotificationManager.IMPORTANCE_LOW,
             ),
         )
         ServiceCompat.startForeground(
             this,
             NOTIFICATION_ID,
-            buildNotification("Hub link idle"),
+            buildNotification(getString(R.string.hub_channel_idle)),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
         )
     }
@@ -73,7 +74,7 @@ class HubForegroundService : Service() {
         when (intent?.action) {
             ACTION_CONNECT -> {
                 streamUrl = intent.getStringExtra(EXTRA_URL)
-                    ?: NetworkPreferences(this).streamUrl()
+                    ?: AppPreferences(this).streamUrl()
                 maintainLink()
             }
             ACTION_DISCONNECT -> dropLink()
@@ -91,7 +92,7 @@ class HubForegroundService : Service() {
 
     private fun buildNotification(status: String): Notification =
         NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Pathfinder God")
+            .setContentTitle(getString(R.string.app_name))
             .setContentText(status)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setOngoing(true)

@@ -7,8 +7,10 @@ package com.pathfindergod.spoke.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.pathfindergod.spoke.R
 import com.pathfindergod.spoke.data.network.GenerateRequest
 import com.pathfindergod.spoke.data.network.HubApi
+import com.pathfindergod.spoke.ui.strings.UiText
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,7 +32,7 @@ sealed interface LootState {
     data object Idle : LootState
     data object Loading : LootState
     data class Success(val items: List<LootItem>, val craftDc: Int?) : LootState
-    data class Error(val message: String, val items: List<LootItem>) : LootState
+    data class Error(val message: UiText, val items: List<LootItem>) : LootState
 }
 
 class LootViewModel(
@@ -56,14 +58,14 @@ class LootViewModel(
                     _state.value = LootState.Success(hoard.toList(), response.craftDc)
                 } else {
                     _state.value = LootState.Error(
-                        response.errors.firstOrNull()
-                            ?: "The forge refused the commission.",
+                        response.errors.firstOrNull()?.let { UiText.Message(it) }
+                            ?: UiText.Resource(R.string.loot_forge_refused),
                         hoard.toList(),
                     )
                 }
             } catch (_: Exception) {
                 _state.value = LootState.Error(
-                    "Loot conjuring failed — is the hub awake?",
+                    UiText.Resource(R.string.loot_conjure_failed),
                     hoard.toList(),
                 )
             }

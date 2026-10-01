@@ -7,11 +7,13 @@ package com.pathfindergod.spoke.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.pathfindergod.spoke.R
 import com.pathfindergod.spoke.data.local.EncounterEntity
 import com.pathfindergod.spoke.data.network.EncounterMonster
 import com.pathfindergod.spoke.data.network.EncounterRequest
 import com.pathfindergod.spoke.data.network.HubApi
 import com.pathfindergod.spoke.data.repository.EncounterRepository
+import com.pathfindergod.spoke.ui.strings.UiText
 import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -23,7 +25,7 @@ sealed interface EncounterPhase {
     data object Idle : EncounterPhase
     data object Loading : EncounterPhase
     data object Success : EncounterPhase
-    data class Error(val message: String) : EncounterPhase
+    data class Error(val message: UiText) : EncounterPhase
 }
 
 data class EncounterUiState(
@@ -74,7 +76,9 @@ class EncounterViewModel(
                 )
             } catch (_: Exception) {
                 _state.value = _state.value.copy(
-                    phase = EncounterPhase.Error("Encounter conjuring failed — is the hub awake?"),
+                    phase = EncounterPhase.Error(
+                        UiText.Resource(R.string.encounter_conjure_failed),
+                    ),
                 )
             }
         }

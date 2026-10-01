@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.pathfindergod.spoke.data.local.RuleFtsEntity
 import com.pathfindergod.spoke.data.repository.RuleRepository
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,7 +30,18 @@ class RuleSearchViewModel(
 
     private var searchJob: Job? = null
 
-    fun search(query: String, system: String? = null, limit: Int = 25) {
+    fun search(query: String, system: String? = null, limit: Int = 25) =
+        dispatch(query, system, limit, SEARCH_DEBOUNCE_MS)
+
+    fun searchNow(query: String, system: String? = null, limit: Int = 25) =
+        dispatch(query, system, limit, 0L)
+
+    fun clear() {
+        searchJob?.cancel()
+        _state.value = RuleSearchUiState()
+    }
+
+    private fun dispatch(query: String, system: String?, limit: Int, debounceMs: Long) {
         searchJob?.cancel()
         val trimmed = query.trim()
         if (trimmed.isEmpty()) {
@@ -37,6 +49,7 @@ class RuleSearchViewModel(
             return
         }
         searchJob = viewModelScope.launch {
+            if (debounceMs > 0L) delay(debounceMs)
             _state.value = _state.value.copy(query = trimmed, isLoading = true)
             val results = if (system.isNullOrEmpty()) {
                 repository.search(trimmed, limit)
@@ -47,8 +60,7 @@ class RuleSearchViewModel(
         }
     }
 
-    fun clear() {
-        searchJob?.cancel()
-        _state.value = RuleSearchUiState()
+    companion object {
+        const val SEARCH_DEBOUNCE_MS = 250L
     }
 }

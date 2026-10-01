@@ -9,6 +9,8 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteOpenHelper
 
 @Database(
@@ -17,8 +19,9 @@ import androidx.sqlite.db.SupportSQLiteOpenHelper
         EncounterEntity::class,
         MapEntity::class,
         CampaignEntity::class,
+        RollEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -30,14 +33,37 @@ abstract class AppDatabase : RoomDatabase() {
 
     abstract fun campaignDao(): CampaignDao
 
+    abstract fun rollDao(): RollDao
+
     companion object {
         const val FILE_NAME = "pathfinder_spoke.db"
+
+        private const val CREATE_ROLL_HISTORY =
+            "CREATE TABLE IF NOT EXISTS `roll_history` (" +
+                "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`notation` TEXT NOT NULL, " +
+                "`rolls` TEXT NOT NULL, " +
+                "`kept` TEXT NOT NULL, " +
+                "`dropped` TEXT NOT NULL, " +
+                "`modifier` INTEGER NOT NULL, " +
+                "`total` INTEGER NOT NULL, " +
+                "`impact` TEXT NOT NULL, " +
+                "`degree` TEXT NOT NULL, " +
+                "`target_number` INTEGER, " +
+                "`rolled_at` INTEGER NOT NULL)"
+
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(CREATE_ROLL_HISTORY)
+            }
+        }
 
         fun create(
             context: Context,
             factory: SupportSQLiteOpenHelper.Factory = NgaSQLiteOpenHelperFactory(),
         ): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, FILE_NAME)
+                .addMigrations(MIGRATION_2_3)
                 .openHelperFactory(factory)
                 .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()

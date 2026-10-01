@@ -7,8 +7,10 @@ package com.pathfindergod.spoke.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.pathfindergod.spoke.R
 import com.pathfindergod.spoke.data.local.CampaignEntity
 import com.pathfindergod.spoke.data.repository.CampaignRepository
+import com.pathfindergod.spoke.ui.strings.UiText
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -17,7 +19,7 @@ import kotlinx.coroutines.launch
 data class CampaignUiState(
     val campaign: CampaignEntity? = null,
     val isSummarizing: Boolean = false,
-    val error: String? = null,
+    val error: UiText? = null,
 )
 
 class CampaignViewModel(
@@ -39,7 +41,9 @@ class CampaignViewModel(
             try {
                 repository.createCampaign(name, description)
             } catch (_: Exception) {
-                _state.value = _state.value.copy(error = "Campaign creation failed.")
+                _state.value = _state.value.copy(
+                    error = UiText.Resource(R.string.campaign_create_failed),
+                )
             }
         }
     }
@@ -52,7 +56,7 @@ class CampaignViewModel(
                 repository.summarizeRecentEvents(events)
             } catch (_: Exception) {
                 _state.value = _state.value.copy(
-                    error = "Chronicler silent — is the hub awake?",
+                    error = UiText.Resource(R.string.campaign_chronicler_silent),
                 )
             }
             _state.value = _state.value.copy(isSummarizing = false)
