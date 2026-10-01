@@ -126,7 +126,7 @@ class CampaignRepository:
         schema_path = Path(__file__).parent / "schema.sql"
         if schema_path.exists():
             with self._conn() as conn:
-                conn.executescript(schema_path.read_text())
+                conn.executescript(schema_path.read_text(encoding="utf-8"))
 
     # ──────────────────────────────────────────────────────────────
     # Campaigns

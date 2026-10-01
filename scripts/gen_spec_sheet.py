@@ -136,10 +136,10 @@ def get_android():
     else:
         info["android_sdk_path"] = "Not found at C:\\android\\sdk"
     
-    # Gradle wrapper
-    gw = Path(r"C:\pathfinder_god\spoke\android\gradle\wrapper\gradle-wrapper.properties")
+    # Gradle wrapper. The live wrapper is spoke_kt/; spoke/ was the deleted Flutter tree.
+    gw = Path(r"C:\pathfinder_god\spoke_kt\gradle\wrapper\gradle-wrapper.properties")
     if gw.exists():
-        info["gradle_wrapper"] = gw.read_text()
+        info["gradle_wrapper"] = gw.read_text(encoding="utf-8")
     
     return info
 
@@ -166,7 +166,7 @@ def main():
     
     # Write JSON
     out_json = Path(r"C:\pathfinder_god\SPEC_SHEET.json")
-    out_json.write_text(json.dumps(spec, indent=2))
+    out_json.write_text(json.dumps(spec, indent=2), encoding="utf-8")
     print(f"[OK] JSON written to {out_json}")
     
     # Write Markdown
