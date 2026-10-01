@@ -20,19 +20,19 @@ from app.service import GodService
 from app.state.campaign import CampaignStore
 
 _SAMPLE_ROWS = [
-    ("2e", "action", "Flanking",
+    ("2E", "action", "Flanking",
      "Core Rulebook",
      "When you and an ally are on opposite sides of a foe, that foe is off-guard to melee attacks."),
-    ("1e", "combat", "Flanking",
+    ("1E", "combat", "Flanking",
      "Core Rulebook 1e",
      "A creature threatened by two foes on opposite sides is flanked, granting +2 to attack."),
-    ("2e", "monster", "Goblin Warrior",
+    ("2E", "monster", "Goblin Warrior",
      "Bestiary",
      "A small, quick goblin that fights with a dogslicer and shortbow; skittish but vicious in numbers."),
-    ("1e", "spell", "Fireball",
+    ("1E", "spell", "Fireball",
      "Core Rulebook 1e",
      "A blast of fire deals 1d6 fire damage per caster level to all creatures in a 20-ft radius."),
-    ("2e", "feat", "Power Attack",
+    ("2E", "feat", "Power Attack",
      "Core Rulebook",
      "Make a melee Strike with a penalty to accuracy for extra damage on a hit."),
 ]
@@ -49,6 +49,34 @@ def _build_rules_db(path: Path) -> None:
     )
     conn.commit()
     conn.close()
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_settings(rules_db_dir: Path, monkeypatch):
+    """Point every bound get_settings reference at the temp rules DB.
+
+    Modules that do `from app.config import get_settings` bind the real function
+    into their own namespace at import time. Patching app.config alone therefore
+    leaves them resolving REPO_ROOT/data, the gitignored 58MB laptop database.
+    Three tests in test_api.py only passed on the laptop because that real DB
+    happened to be present; they fail in CI, where data/ does not exist. Patch
+    every already-imported reference so the suite cannot depend on it.
+    """
+    import app.config
+
+    test_settings = Settings(
+        data_dir=rules_db_dir,
+        campaign_state_path=rules_db_dir / "campaign_state.json",
+    )
+    monkeypatch.setattr(app.config, "get_settings", lambda: test_settings)
+    for module_name, module in list(sys.modules.items()):
+        if not module_name.startswith("app."):
+            continue
+        if getattr(module, "get_settings", None) is not None:
+            monkeypatch.setattr(module, "get_settings", lambda: test_settings)
+        bound_settings = getattr(module, "settings", None)
+        if isinstance(bound_settings, Settings):
+            monkeypatch.setattr(module, "settings", test_settings)
 
 
 def _create_test_client(rules_db_dir: Path) -> TestClient:

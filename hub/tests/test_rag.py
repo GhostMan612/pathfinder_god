@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # As Above, So Below. As Within, So Without.
 # The Future Dictates the Past and the Past is Always Present.
 # ============================================================
@@ -31,21 +31,21 @@ def test_search_finds_matching_rule(rules_db_dir: Path):
 def test_edition_filter_isolates_2e(rules_db_dir: Path):
     hits = _retriever(rules_db_dir).search("power attack feat", edition="2e")
     assert hits
-    assert all(h.system == "2e" for h in hits)
+    assert all(h.system == "2E" for h in hits)
 
 
 def test_edition_fallback_2e_to_1e(rules_db_dir: Path):
     # Fireball only exists as a 1e row here; asking 2e-first must fall back to 1e.
     hits = _retriever(rules_db_dir).search("fireball", edition="2e")
     assert hits
-    assert hits[0].system == "1e"
+    assert hits[0].system == "1E"
 
 
 def test_both_prefers_2e_when_present(rules_db_dir: Path):
     # Flanking exists in both editions; "both" should surface 2e first.
     hits = _retriever(rules_db_dir).search("flanking", edition="both")
     assert hits
-    assert hits[0].system == "2e"
+    assert hits[0].system == "2E"
 
 
 def test_build_context_has_no_hit_message(rules_db_dir: Path):
@@ -54,7 +54,7 @@ def test_build_context_has_no_hit_message(rules_db_dir: Path):
 
 
 def test_missing_db_degrades_gracefully(tmp_path: Path):
-    # Point at a non-existent DB — should return [] rather than raise.
+    # Point at a non-existent DB â€” should return [] rather than raise.
     r = Retriever([tmp_path / "nope.db"])
     assert r.search("anything") == []
 

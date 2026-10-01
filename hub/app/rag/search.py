@@ -59,7 +59,7 @@ class RuleHit:
 
     name: str
     content: str
-    system: str = ""       # "1e" / "2e" when the DB tracks it
+    system: str = ""       # "1E" / "2E" when the DB tracks it
     category: str = ""
     source_book: str = ""
 
@@ -197,7 +197,7 @@ class Retriever:
                     cur = conn.execute(
                         "SELECT system, category, name, source_book, raw_content "
                         "FROM rules WHERE system=? AND rules MATCH ? LIMIT ?",
-                        (edition, match_query, limit),
+                        (edition.upper(), match_query, limit),
                     )
                 else:
                     cur = conn.execute(
