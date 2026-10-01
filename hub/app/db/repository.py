@@ -112,6 +112,10 @@ class CampaignRepository:
     def _conn(self):
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        # SQLite ignores ON DELETE CASCADE unless foreign keys are enabled per
+        # connection. Without this, reset_campaign() deleted the campaigns row
+        # and left every child row orphaned.
+        conn.execute("PRAGMA foreign_keys = ON")
         try:
             yield conn
             conn.commit()
@@ -120,6 +124,25 @@ class CampaignRepository:
             raise
         finally:
             conn.close()
+
+    @staticmethod
+    def _ensure_campaign(conn, campaign_id: int) -> None:
+        """Make sure the parent campaign row exists.
+
+        Foreign keys are enforced (see _conn). Every child table declares
+        REFERENCES campaigns(id), but the ContinuityKeeper and agent tools
+        write children against a hard-coded campaign id without ever creating
+        the parent. That only went unnoticed because foreign-key enforcement was
+        off, which is also why ON DELETE CASCADE was inert.
+        """
+        conn.execute(
+            """
+            INSERT INTO campaigns (id, name, created_at, updated_at)
+            VALUES (?, ?, datetime('now'), datetime('now'))
+            ON CONFLICT(id) DO NOTHING
+            """,
+            (campaign_id, f"Campaign {campaign_id}"),
+        )
 
     def _init_db(self) -> None:
         """Run schema.sql to create tables."""
@@ -195,6 +218,7 @@ class CampaignRepository:
         raw_log: str,
     ) -> None:
         with self._conn() as conn:
+            self._ensure_campaign(conn, campaign_id)
             conn.execute(
                 """
                 INSERT INTO sessions (campaign_id, session_num, summary, facts_json, raw_log)
@@ -247,6 +271,8 @@ class CampaignRepository:
             # Get location_id if parent_name provided
             location_id = None
             # (caller can pass location_id directly if needed)
+
+            self._ensure_campaign(conn, campaign_id)
 
             cur = conn.execute(
                 """
@@ -318,6 +344,7 @@ class CampaignRepository:
         session_num: int | None = None,
     ) -> int:
         with self._conn() as conn:
+            self._ensure_campaign(conn, campaign_id)
             parent_id = None
             if parent_name:
                 prow = conn.execute(
@@ -348,7 +375,16 @@ class CampaignRepository:
                 "SELECT * FROM locations WHERE campaign_id = ? ORDER BY name",
                 (campaign_id,),
             ).fetchall()
-            return [Location(**dict(r), facts=json.loads(r["facts_json"] or "[]")) for r in rows]
+            # SELECT * returns the *_json columns too, which the dataclass does
+            # not accept. Decode them into their real fields and drop the rest.
+            out = []
+            for r in rows:
+                values = dict(r)
+                values["facts"] = json.loads(values.pop("facts_json") or "[]")
+                values.pop("created_at", None)
+                values.pop("updated_at", None)
+                out.append(Location(**values))
+            return out
 
     # ──────────────────────────────────────────────────────────────
     # Items
@@ -367,6 +403,7 @@ class CampaignRepository:
         session_num: int | None = None,
     ) -> int:
         with self._conn() as conn:
+            self._ensure_campaign(conn, campaign_id)
             holder_id = None
             if holder_name:
                 row = conn.execute(
@@ -426,6 +463,7 @@ class CampaignRepository:
         session_num: int | None = None,
     ) -> int:
         with self._conn() as conn:
+            self._ensure_campaign(conn, campaign_id)
             giver_id = None
             if giver_name:
                 row = conn.execute(
@@ -467,14 +505,15 @@ class CampaignRepository:
                 "SELECT * FROM quests WHERE campaign_id = ? AND status = 'active' ORDER BY name",
                 (campaign_id,),
             ).fetchall()
-            return [
-                Quest(
-                    **dict(r),
-                    objectives=json.loads(r["objectives_json"] or "[]"),
-                    rewards=json.loads(r["rewards_json"] or "[]"),
-                )
-                for r in rows
-            ]
+            out = []
+            for r in rows:
+                values = dict(r)
+                values["objectives"] = json.loads(values.pop("objectives_json") or "[]")
+                values["rewards"] = json.loads(values.pop("rewards_json") or "[]")
+                values.pop("created_at", None)
+                values.pop("updated_at", None)
+                out.append(Quest(**values))
+            return out
 
     # ──────────────────────────────────────────────────────────────
     # Decisions
@@ -490,6 +529,7 @@ class CampaignRepository:
         made_by: str | None = None,
     ) -> int:
         with self._conn() as conn:
+            self._ensure_campaign(conn, campaign_id)
             cur = conn.execute(
                 """
                 INSERT INTO player_decisions (campaign_id, session_num, decision, context, consequences_json, made_by)
@@ -523,6 +563,7 @@ class CampaignRepository:
         stats: dict | None = None,
     ) -> int:
         with self._conn() as conn:
+            self._ensure_campaign(conn, campaign_id)
             cur = conn.execute(
                 """
                 INSERT INTO party_members (campaign_id, name, player_name, class, level, ancestry, background, stats_json)
@@ -584,9 +625,14 @@ class CampaignRepository:
             ]
 
 
-def get_repo(data_dir: str | None = None) -> CampaignRepository:
-    """Factory function to create a CampaignRepository instance."""
-    if data_dir is None:
+def get_repo(db_path: str | None = None) -> CampaignRepository:
+    """Factory for a CampaignRepository.
+
+    NOT a FastAPI dependency - use app.api.deps.get_repo for that. This takes a
+    single scalar argument, so FastAPI would otherwise treat it as a query
+    parameter and let a caller pass any writable path to create a database in.
+    """
+    if db_path is None:
         from app.config import settings
-        data_dir = str(settings.data_dir)
-    return CampaignRepository(data_dir)
+        db_path = str(settings.data_dir / "campaign.db")
+    return CampaignRepository(str(db_path))

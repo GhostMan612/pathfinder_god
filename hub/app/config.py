@@ -56,6 +56,19 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
 
+    # Referenced by monitoring.py /version and /health/detailed. It was missing
+    # from this model, so both endpoints raised AttributeError and returned 500.
+    environment: str = "local"
+
+    # --- Auth ---
+    # Referenced by app/api/security.py for JWT signing. It was also missing,
+    # so every Bearer-token request raised AttributeError and returned 500
+    # instead of 401. Empty means "JWT signing disabled"; generate one with:
+    # python -c "import secrets;print(secrets.token_urlsafe(48))"
+    secret_key: str = ""
+    # SHA-256 of the API key clients must present. Empty disables API-key auth.
+    api_key_sha256: str = ""
+
     
 
     # --- Retrieval ---

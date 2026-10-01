@@ -5,6 +5,7 @@
 
 package com.pathfindergod.spoke.data.repository
 
+import androidx.room.withTransaction
 import com.pathfindergod.spoke.data.local.AppDatabase
 import com.pathfindergod.spoke.data.local.CampaignEntity
 import com.pathfindergod.spoke.data.network.HubApi
@@ -31,7 +32,15 @@ class CampaignRepository(
             description = description,
             updatedAt = Instant.now().toString(),
         )
-        db.campaignDao().upsert(entity)
+        // Single-active-campaign invariant. The DAO only ever surfaces
+        // ORDER BY updated_at DESC LIMIT 1 and delete() had no callers, so
+        // creating a second campaign orphaned the previous one along with every
+        // session note the Chronicler had appended - permanently unreachable,
+        // with no list screen or picker to recover them.
+        db.withTransaction {
+            db.campaignDao().deleteAllExcept(entity.id)
+            db.campaignDao().upsert(entity)
+        }
         return entity
     }
 

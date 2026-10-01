@@ -49,14 +49,21 @@ class RuleSearchViewModel(
             return
         }
         searchJob = viewModelScope.launch {
-            if (debounceMs > 0L) delay(debounceMs)
-            _state.value = _state.value.copy(query = trimmed, isLoading = true)
-            val results = if (system.isNullOrEmpty()) {
-                repository.search(trimmed, limit)
-            } else {
-                repository.searchInSystem(trimmed, system, limit)
+            try {
+                if (debounceMs > 0L) delay(debounceMs)
+                _state.value = _state.value.copy(query = trimmed, isLoading = true)
+                val results = if (system.isNullOrEmpty()) {
+                    repository.search(trimmed, limit)
+                } else {
+                    repository.searchInSystem(trimmed, system, limit)
+                }
+                _state.value = _state.value.copy(results = results, isLoading = false)
+            } catch (e: java.util.concurrent.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // A bad query must never take the process down with it.
+                _state.value = _state.value.copy(results = emptyList(), isLoading = false)
             }
-            _state.value = _state.value.copy(results = results, isLoading = false)
         }
     }
 

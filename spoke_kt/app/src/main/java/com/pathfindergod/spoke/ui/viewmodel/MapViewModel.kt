@@ -9,7 +9,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.pathfindergod.spoke.R
 import com.pathfindergod.spoke.data.local.MapEntity
-import com.pathfindergod.spoke.data.network.GenerateRequest
+import com.pathfindergod.spoke.data.network.MapRequest
 import com.pathfindergod.spoke.data.network.HubApi
 import com.pathfindergod.spoke.data.repository.MapRepository
 import com.pathfindergod.spoke.ui.strings.UiText
@@ -45,17 +45,16 @@ class MapViewModel(
         viewModelScope.launch {
             _state.value = _state.value.copy(isGenerating = true, error = null)
             try {
-                val response = api.generateMap(GenerateRequest(prompt))
-                if (response.valid && response.gmBase64Png.isNotBlank()) {
+                val response = api.generateMap(MapRequest(prompt))
+                val gm = response.gmBase64Png.orEmpty()
+                if (response.valid && gm.isNotBlank()) {
                     repository.saveMap(
                         id = UUID.randomUUID().toString(),
                         prompt = prompt,
-                        gmBase64Png = response.gmBase64Png,
-                        playerBase64Png = response.playerBase64Png.ifBlank {
-                            response.gmBase64Png
-                        },
-                        width = response.width,
-                        height = response.height,
+                        gmBase64Png = gm,
+                        playerBase64Png = response.playerBase64Png?.takeIf { it.isNotBlank() } ?: gm,
+                        width = response.width ?: 0,
+                        height = response.height ?: 0,
                     )
                 } else {
                     _state.value = _state.value.copy(

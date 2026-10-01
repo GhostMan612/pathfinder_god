@@ -14,6 +14,7 @@ from typing import Any
 
 from app.config import get_settings
 from app.db.repository import CampaignRepository
+from app.rag._fts import build_match_query, editions_for
 
 logger = logging.getLogger(__name__)
 
@@ -41,17 +42,11 @@ async def search_rules(
         logger.error("No rules database found")
         return []
 
-    escaped = query.replace('"', '""')
-    # Escape FTS5 special characters
-    for ch in ['*', '-', '+', '(', ')', ':', '|', '@', '{', '}', '[', ']', '^', '~']:
-        escaped = escaped.replace(ch, f' {ch} ')
-    # Remove ? entirely (FTS5 wildcard)
-    escaped = escaped.replace('?', '')
-    # Collapse multiple spaces
-    escaped = ' '.join(escaped.split())
+    escaped = build_match_query(query)
+    if not escaped:
+        return []
     # Edition order: 2E first, then 1E (for "both") - DB uses uppercase
-    edition_map = {"2e": "2E", "1e": "1E"}
-    editions = [edition_map.get("2e", "2E"), edition_map.get("1e", "1E")] if edition == "both" else [edition_map.get(edition, edition.upper())]
+    editions = editions_for(edition)
 
     all_results = []
     seen: set[str] = set()

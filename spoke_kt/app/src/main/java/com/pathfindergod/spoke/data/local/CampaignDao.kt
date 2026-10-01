@@ -24,4 +24,9 @@ interface CampaignDao {
 
     @Query("DELETE FROM campaigns WHERE id = :id")
     suspend fun delete(id: String)
+
+    // Enforces the single-active-campaign invariant. Ended session_notes rows
+    // cascade with their campaign (see AppDatabase's foreign keys).
+    @Query("DELETE FROM campaigns WHERE id != :keepId")
+    suspend fun deleteAllExcept(keepId: String)
 }

@@ -65,12 +65,31 @@ data class GenerateResponse(
 )
 
 @Serializable
+data class MapRequest(
+    val prompt: String,
+    @SerialName("grid_enabled") val gridEnabled: Boolean = true,
+)
+
+@Serializable
 data class MapGenerateResponse(
     val valid: Boolean = false,
-    @SerialName("gm_base64_png") val gmBase64Png: String = "",
-    @SerialName("player_base64_png") val playerBase64Png: String = "",
-    val width: Int = 0,
-    val height: Int = 0,
+    // The contract types these anyOf[integer|string, null], so they must be
+    // nullable. Non-null defaults would throw on the legal value null.
+    @SerialName("gm_base64_png") val gmBase64Png: String? = null,
+    @SerialName("player_base64_png") val playerBase64Png: String? = null,
+    val width: Int? = null,
+    val height: Int? = null,
+    val error: String? = null,
+)
+
+@Serializable
+data class BuildCharacterRequest(val prompt: String)
+
+@Serializable
+data class BuildCharacterResponse(
+    val valid: Boolean,
+    val character: Map<String, JsonElement>? = null,
+    val errors: List<String> = emptyList(),
 )
 
 @Serializable
@@ -130,11 +149,18 @@ interface HubApi {
     @POST("generate/loot")
     suspend fun generateLoot(@Body request: GenerateRequest): LootResponse
 
-    @POST("generate/map")
-    suspend fun generateMap(@Body request: GenerateRequest): MapGenerateResponse
+    // There is no POST /generate/map. That path silently matched
+    // /generate/{kind} with kind="map", which returns 200 with a prose answer
+    // instead of a map - so the Map tab reported "empty" forever. The contract
+    // route is /map/generate and it takes MapRequest, not GenerateRequest.
+    @POST("map/generate")
+    suspend fun generateMap(@Body request: MapRequest): MapGenerateResponse
 
+    // /generate/character returns BuildCharacterResponse, not GenerateResponse.
+    // Decoding {valid, character, errors} as GenerateResponse threw
+    // MissingFieldException on the required `answer` field.
     @POST("generate/character")
-    suspend fun generateCharacter(@Body request: GenerateRequest): GenerateResponse
+    suspend fun generateCharacter(@Body request: BuildCharacterRequest): BuildCharacterResponse
 
     @POST("campaign/summarize-session")
     suspend fun summarizeSession(@Body request: SummarizeRequest): SummarizeResponse

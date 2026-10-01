@@ -18,10 +18,10 @@ import psutil
 from fastapi import APIRouter, Depends
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
-from sqlalchemy import text
+from app.api.deps import get_repo
 
 from app.config import Settings, get_settings
-from app.db.repository import CampaignRepository, get_repo
+from app.db.repository import CampaignRepository
 
 router = APIRouter(tags=["monitoring"])
 
@@ -117,7 +117,7 @@ async def check_database(repo: CampaignRepository) -> tuple[bool, str]:
     """Check database connectivity."""
     try:
         with repo._conn() as conn:
-            conn.execute(text("SELECT 1"))
+            conn.execute("SELECT 1").fetchone()
         return True, "ok"
     except Exception as e:
         return False, str(e)
@@ -139,7 +139,11 @@ async def check_ollama(settings) -> tuple[bool, str]:
 async def check_rules_db(settings) -> tuple[bool, str]:
     """Check rules database accessibility."""
     try:
-        from app.rag.retriever import Retriever
+        # app.rag.retriever.Retriever takes a CampaignRepository. The
+        # (db_paths, rag_limit=) constructor is app.rag.search.Retriever, so this
+        # raised TypeError on every call and the probe reported the rules DB as
+        # permanently unhealthy.
+        from app.rag.search import Retriever
         retriever = Retriever(settings.db_paths, rag_limit=1)
         hits = retriever.search("test", edition="2e", limit=1)
         return True, f"ok ({len(hits)} hits)"

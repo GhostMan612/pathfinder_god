@@ -12,6 +12,7 @@ import sqlite3
 
 from app.config import get_settings
 from app.db.repository import CampaignRepository
+from app.rag._fts import build_match_query, editions_for
 
 logger = logging.getLogger(__name__)
 
@@ -37,20 +38,12 @@ class Retriever:
     async def _fts5_search(self, query: str, edition: str, k: int) -> list[dict]:
         db_path = self._get_db_path(edition)
 
-        escaped = query.replace('"', '""')
-        for ch in ['*', '-', '+', '(', ')', ':', '|', '@', '{', '}', '[', ']', '^', '~']:
-            escaped = escaped.replace(ch, f' {ch} ')
-        escaped = escaped.replace('?', '')
-        escaped = ' '.join(escaped.split())
-        tokens = [t for t in escaped.split() if len(t) > 2]
-        if len(tokens) > 1:
-            escaped = ' OR '.join(tokens)
-        elif tokens:
-            escaped = tokens[0]
+        escaped = build_match_query(query)
+        if not escaped:
+            return []
 
         # Edition order: 2E first, then 1E (for "both") - DB uses uppercase
-        edition_map = {"2e": "2E", "1e": "1E"}
-        editions = [edition_map.get("2e", "2E"), edition_map.get("1e", "1E")] if edition == "both" else [edition_map.get(edition, edition.upper())]
+        editions = editions_for(edition)
 
         all_results = []
         seen: set[str] = set()

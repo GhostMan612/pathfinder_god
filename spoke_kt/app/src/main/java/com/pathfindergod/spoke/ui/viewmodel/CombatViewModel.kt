@@ -64,20 +64,32 @@ class CombatViewModel(
         get() = _state.value.combatants.getOrNull(_state.value.activeIndex)
 
     fun addCombatant(combatant: Combatant) {
-        val sorted = (_state.value.combatants + combatant)
+        val current = _state.value
+        // Track the acting combatant by identity: re-sorting the ladder by
+        // initiative moves everyone, so a bare activeIndex now points at a
+        // different creature and the turn silently jumps.
+        val activeId = current.combatants.getOrNull(current.activeIndex)?.id
+        val sorted = (current.combatants + combatant)
             .sortedByDescending { it.initiative }
-        _state.value = _state.value.copy(combatants = sorted)
+        val index = activeId?.let { id -> sorted.indexOfFirst { it.id == id } }
+            ?.takeIf { it >= 0 }
+            ?: current.activeIndex.coerceIn(0, (sorted.size - 1).coerceAtLeast(0))
+        _state.value = current.copy(combatants = sorted, activeIndex = index)
     }
 
     fun removeCombatant(id: String) {
-        val remaining = _state.value.combatants.filterNot { it.id == id }
-        val index = _state.value.activeIndex.coerceAtMost(
-            (remaining.size - 1).coerceAtLeast(0),
-        )
-        _state.value = _state.value.copy(
-            combatants = remaining,
-            activeIndex = index,
-        )
+        val current = _state.value
+        val activeId = current.combatants.getOrNull(current.activeIndex)?.id
+        val remaining = current.combatants.filterNot { it.id == id }
+        // Removing anyone above the active combatant shifts the list left, so
+        // clamping the old index would pass the turn to the wrong creature.
+        val index = if (activeId == null) {
+            0
+        } else {
+            remaining.indexOfFirst { it.id == activeId }.takeIf { it >= 0 }
+                ?: current.activeIndex.coerceIn(0, (remaining.size - 1).coerceAtLeast(0))
+        }
+        _state.value = current.copy(combatants = remaining, activeIndex = index)
     }
 
     fun updateHp(id: String, delta: Int) {

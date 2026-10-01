@@ -29,7 +29,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import java.util.concurrent.CancellationException
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 enum class HubConnectionStatus {
@@ -102,7 +104,7 @@ class HubForegroundService : Service() {
         if (linkJob?.isActive == true) return
         linkJob = scope.launch {
             var backoff = INITIAL_BACKOFF_MS
-            while (true) {
+            while (isActive) {
                 _status.value = HubConnectionStatus.CONNECTING
                 try {
                     var first = true
@@ -114,12 +116,21 @@ class HubForegroundService : Service() {
                         }
                         _events.emit(message)
                     }
+                } catch (e: CancellationException) {
+                    // CancellationException is an Exception. Swallowing it here
+                    // published RETRYING over the DISCONNECTED that dropLink()
+                    // had just set, so a deliberate disconnect was shown as a
+                    // retrying link forever.
+                    throw e
                 } catch (_: Exception) {
+                    // genuine transport failure -> back off below
                 }
+                if (!isActive) break
                 _status.value = HubConnectionStatus.RETRYING
                 delay(backoff)
                 backoff = (backoff * 2).coerceAtMost(MAX_BACKOFF_MS)
             }
+            _status.value = HubConnectionStatus.DISCONNECTED
         }
     }
 
