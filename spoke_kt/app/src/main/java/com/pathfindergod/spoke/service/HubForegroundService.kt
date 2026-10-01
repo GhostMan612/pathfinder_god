@@ -18,6 +18,7 @@ import androidx.core.app.ServiceCompat
 import com.pathfindergod.spoke.R
 import com.pathfindergod.spoke.data.local.AppPreferences
 import com.pathfindergod.spoke.data.network.HubWebSocketClient
+import com.pathfindergod.spoke.data.network.StreamEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -46,6 +47,9 @@ class HubForegroundService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val client = HubWebSocketClient()
     private var streamUrl: String = DEFAULT_STREAM_URL
+
+    /** Query sent to the Hub on every (re)connect. */
+    private var currentQuery: String = DEFAULT_QUERY
     private var linkJob: Job? = null
 
     inner class HubBinder : Binder() {
@@ -87,6 +91,9 @@ class HubForegroundService : Service() {
     override fun onDestroy() {
         dropLink()
         scope.cancel()
+        // START_STICKY guarantees recreation, so leaking the dispatcher threads
+        // and connection pool accumulated one set per restart.
+        client.shutdown()
         super.onDestroy()
     }
 
@@ -108,13 +115,16 @@ class HubForegroundService : Service() {
                 _status.value = HubConnectionStatus.CONNECTING
                 try {
                     var first = true
-                    client.stream(streamUrl).collect { message ->
+                    // The Hub only speaks after receiving a query, so the link
+                    // needs one. Reconnecting re-sends it, which is what makes
+                    // the documented sleep/resume recovery actually work.
+                    client.stream(streamUrl, currentQuery, edition = DEFAULT_EDITION).collect { event ->
                         if (first) {
                             first = false
                             backoff = INITIAL_BACKOFF_MS
                             _status.value = HubConnectionStatus.CONNECTED
                         }
-                        _events.emit(message)
+                        _events.emit(event)
                     }
                 } catch (e: CancellationException) {
                     // CancellationException is an Exception. Swallowing it here
@@ -148,6 +158,10 @@ class HubForegroundService : Service() {
         const val EXTRA_URL = "stream_url"
         const val DEFAULT_STREAM_URL = "ws://10.0.2.2:8000/stream"
 
+    /** The Hub blocks on receive_json(), so the link must open with a query. */
+    const val DEFAULT_QUERY = "status"
+    const val DEFAULT_EDITION = "both"
+
         private const val NOTIFICATION_ID = 1
         private const val INITIAL_BACKOFF_MS = 400L
         private const val MAX_BACKOFF_MS = 30_000L
@@ -156,7 +170,7 @@ class HubForegroundService : Service() {
             MutableStateFlow(HubConnectionStatus.DISCONNECTED)
         val status: StateFlow<HubConnectionStatus> = _status.asStateFlow()
 
-        private val _events = MutableSharedFlow<String>(extraBufferCapacity = 64)
-        val events: SharedFlow<String> = _events.asSharedFlow()
+        private val _events = MutableSharedFlow<StreamEvent>(extraBufferCapacity = 64)
+        val events: SharedFlow<StreamEvent> = _events.asSharedFlow()
     }
 }

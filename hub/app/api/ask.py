@@ -82,18 +82,21 @@ async def stream_endpoint(
 
         orchestrator = LLMOrchestrator(repo)
 
-        # Send start event
+        # Send start event. backend is reported per frame from now on: the
+        # orchestrator yields (backend, chunk), so an offline fallback is no
+        # longer mislabelled as an Ollama answer.
         await websocket.send_json(StreamEvent(type="start", backend="ollama").model_dump())
 
         # Stream chunks
-        async for chunk in orchestrator.stream(
+        backend = "ollama"
+        async for backend, chunk in orchestrator.stream(
             prompt=request.query,
             edition=request.edition,
             mode=request.mode,
             history=request.history,
         ):
             await websocket.send_json(
-                StreamEvent(type="chunk", text=chunk, backend="ollama").model_dump()
+                StreamEvent(type="chunk", text=chunk, backend=backend).model_dump()
             )
 
         sources = await orchestrator.retriever.get_sources(
@@ -102,7 +105,7 @@ async def stream_endpoint(
         await websocket.send_json(
             StreamEvent(
                 type="end",
-                backend="ollama",
+                backend=backend,
                 mode=request.mode,
                 edition=request.edition,
                 sources=sources,

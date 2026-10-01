@@ -260,8 +260,16 @@ class LLMOrchestrator:
         edition: str,
         mode: str | None = None,
         history: list[list[str]] | None = None,
-    ) -> AsyncGenerator[str, None]:
-        """Stream tokens from Ollama."""
+    ) -> AsyncGenerator[tuple[str, str], None]:
+        """Stream tokens, yielding (backend, chunk).
+
+        Previously this yielded bare strings and, on failure, yielded the text
+        "[Error: ...]". Two bugs came out of that: ask.py hard-coded
+        backend="ollama" on every frame, so an error or a fallback was labelled
+        as an LLM answer; and the documented offline FTS5 fallback never ran at
+        all here, unlike on /ask, so /stream answered nothing useful with Ollama
+        down. Now it yields the same raw-excerpts fallback generate() uses.
+        """
         system = self._build_system_prompt(mode, edition)
 
         try:
@@ -274,11 +282,17 @@ class LLMOrchestrator:
                 system=system,
                 model=self.settings.ollama_model,
             ):
-                yield chunk
+                yield ("ollama", chunk)
 
         except Exception as e:
             logger.warning(f"Ollama stream failed: {e}")
-            yield f"\n\n[Error: {e}]"
+            try:
+                from app.rag.raw_fallback import search_rules
+                hits = await search_rules(prompt, edition=edition, limit=5, repo=self.repo)
+                yield ("raw-excerpts", self._format_raw_excerpts(hits, prompt))
+            except Exception as inner:
+                logger.warning(f"raw fallback also failed: {inner}")
+                yield ("error", f"[Error: {e}]")
 
     # ──────────────────────────────────────────────────────────────
     # Prompt Builders
