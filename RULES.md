@@ -42,6 +42,11 @@ Do not install software, modify system settings, or write to new locations outsi
 This section is the single source of truth for tool routing and verification timing. If another file
 restates it and disagrees, this section wins. Do not copy the table into other files — link here.
 
+> **Legacy section aliases.** Agent frontmatter and comment blocks written before this numbering
+> still cite `§1A.0` and `§1A.3a`. Those map to **`§1A.1`** (intent → tool) and **`§1A.5`**
+> (encoding hazard) respectively. Treat a `§1A.0` or `§1A.3a` citation as pointing at those two
+> sections; no such section exists.
+
 ### §1A.1 — Intent → tool. A shell is a build tool, not a search tool.
 
 Decide by **intent**, not by convenience. Map the intent to the tool before touching anything.
