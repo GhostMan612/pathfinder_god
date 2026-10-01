@@ -225,28 +225,48 @@ class RulesLawyerAgent:
         )
 
     async def calculate_dc(self, level: int, rarity: str = "common", proficiency: str = "trained") -> DCResult:
-        """Deterministic DC — never LLM (Gemini §15.4)."""
-        rarity = (rarity or "common").lower()
-        proficiency = (proficiency or "trained").lower()
+        """Deterministic DC - never LLM (Gemini A15.4)."""
+        rarity = (rarity or "common").strip().lower()
+        proficiency = (proficiency or "trained").strip().lower()
 
-        # Simple DC path: proficiency-only check (no level). Caller passes level=-99 or uses proficiency.
-        # If action is untrained/trained/expert/master/legendary and level is sentinel, honor SIMPLE_DC.
-        # Otherwise level-based DC is canonical.
-        if level is None:  # type: ignore
-            level = -1
+        if rarity not in RARITY_ADJ:
+            return DCResult(
+                dc=0,
+                breakdown=f"unknown rarity {rarity!r}; expected one of {sorted(RARITY_ADJ)}",
+            )
+        if proficiency not in SIMPLE_DC:
+            return DCResult(
+                dc=0,
+                breakdown=(
+                    f"unknown proficiency {proficiency!r}; "
+                    f"expected one of {sorted(SIMPLE_DC)}"
+                ),
+            )
+
+        # Simple (proficiency-only) DC, e.g. Recall Knowledge. This path was
+        # unreachable: LEVEL_DC covers -1..25, so base is only None outside that
+        # range, and the branch that held the SIMPLE_DC lookup could never run.
+        # calculate_dc(level=0, proficiency="master") returned 14 where PF2e
+        # requires DC 30.
+        if level is None or proficiency != "trained":  # type: ignore[comparison-overlap]
+            simple = SIMPLE_DC[proficiency]
+            return DCResult(
+                dc=simple,
+                breakdown=f"Simple DC, {proficiency} = {simple} (no creature level)",
+            )
+
         base = LEVEL_DC.get(level)
         if base is None:
-            # Fallback for out-of-range (extrapolate 2 per level beyond 25)
+            # Out of range: extrapolate 2 per level beyond 25, clamp below -1.
             if level > 25:
                 base = 50 + (level - 25) * 2
-            elif level < -1:
-                base = 13
             else:
-                base = SIMPLE_DC.get(proficiency, 15)
+                base = 13
 
-        rarity_adj = RARITY_ADJ.get(rarity, 0)
+        rarity_adj = RARITY_ADJ[rarity]
         dc = base + rarity_adj
-        # Proficiency does NOT adjust level-based DC per Remaster; simple DC already encodes it.
+        # Proficiency does NOT adjust level-based DC per Remaster; simple DC
+        # already encodes it.
         return DCResult(dc=dc, breakdown=f"Level {level} base {base} + rarity {rarity} (+{rarity_adj}) = {dc} [{rarity}/{proficiency}]")
 
     async def validate_action(
