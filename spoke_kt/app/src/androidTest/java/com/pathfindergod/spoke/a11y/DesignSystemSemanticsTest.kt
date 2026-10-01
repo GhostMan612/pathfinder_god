@@ -11,9 +11,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsConfiguration
 import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.semantics.StateDescription
+import androidx.compose.ui.semantics.SemanticsProperties.StateDescription
+import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -56,7 +59,7 @@ class DesignSystemSemanticsTest {
             }
         }
         val state = compose.onNodeWithTag(TAG).fetchSemanticsNode()
-            .config.getOrNull(StateDescription) as? List<*>
+            .config.valueOrNull(StateDescription)
         assertEquals("Selected", state?.firstOrNull())
     }
 
@@ -73,7 +76,7 @@ class DesignSystemSemanticsTest {
             }
         }
         val state = compose.onNodeWithTag(TAG).fetchSemanticsNode()
-            .config.getOrNull(StateDescription) as? List<*>
+            .config.valueOrNull(StateDescription)
         assertEquals("Not selected", state?.firstOrNull())
     }
 
@@ -123,14 +126,14 @@ class DesignSystemSemanticsTest {
             }
         }
         var state = compose.onNodeWithTag(TAG).fetchSemanticsNode()
-            .config.getOrNull(StateDescription) as? List<*>
+            .config.valueOrNull(StateDescription)
         assertEquals("Collapsed", state?.firstOrNull())
 
         compose.onNodeWithTag(TAG).performClick()
         compose.waitForIdle()
 
         state = compose.onNodeWithTag(TAG).fetchSemanticsNode()
-            .config.getOrNull(StateDescription) as? List<*>
+            .config.valueOrNull(StateDescription)
         assertEquals("Expanded", state?.firstOrNull())
     }
 
@@ -160,7 +163,7 @@ class DesignSystemSemanticsTest {
             }
         }
         val node = compose.onNodeWithTag(TAG).fetchSemanticsNode()
-        assertTrue(node.config.getOrNull(StateDescription) == null)
+        assertTrue(!node.config.contains(StateDescription))
     }
 
     @Test
@@ -185,3 +188,11 @@ class DesignSystemSemanticsTest {
         const val TAG = "test:a11y:semantics"
     }
 }
+
+/**
+ * This Compose version exposes SemanticsConfiguration.get / getOrElseNullable / contains;
+ * there is no getOrNull. Returns the stored value, or null when the key is absent, so a
+ * test can distinguish "not set" from "set to a default".
+ */
+private fun <T> SemanticsConfiguration.valueOrNull(key: SemanticsPropertyKey<T>): T? =
+    if (contains(key)) get(key) else null

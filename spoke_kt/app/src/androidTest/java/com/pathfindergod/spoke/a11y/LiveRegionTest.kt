@@ -13,10 +13,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.ContentDescription
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.SemanticsConfiguration
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.SemanticsProperties.ContentDescription
+import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.hasContentDescriptionExactly
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -68,7 +72,7 @@ class LiveRegionTest {
             }
         }
         compose.onNodeWithTag(TAG)
-            .assert(SemanticsMatcher.hasContentDescriptionExactly("Kira takes 5 damage."))
+            .assert(hasContentDescriptionExactly("Kira takes 5 damage."))
     }
 
     @Test
@@ -86,14 +90,14 @@ class LiveRegionTest {
             }
         }
         val before = compose.onNodeWithTag(TAG).fetchSemanticsNode()
-            .config.getOrNull(ContentDescription) as? List<*>
+            .config.valueOrNull(ContentDescription)
         assertNotNull(before)
 
         compose.onNodeWithTag(TRIGGER).performClick()
         compose.waitForIdle()
 
         val after = compose.onNodeWithTag(TAG).fetchSemanticsNode()
-            .config.getOrNull(ContentDescription) as? List<*>
+            .config.valueOrNull(ContentDescription)
         assertNotNull(after)
         assertNotEquals(before, after)
     }
@@ -148,3 +152,11 @@ class LiveRegionTest {
         const val TRIGGER = "test:a11y:live:trigger"
     }
 }
+
+/**
+ * This Compose version exposes SemanticsConfiguration.get / getOrElseNullable / contains;
+ * there is no getOrNull. Returns the stored value, or null when the key is absent, so a
+ * test can distinguish "not set" from "set to a default".
+ */
+private fun <T> SemanticsConfiguration.valueOrNull(key: SemanticsPropertyKey<T>): T? =
+    if (contains(key)) get(key) else null
