@@ -39,8 +39,8 @@ class PitGeometryTest {
             )
         }
         val widest = DieAtlas.gridFor(20)
-        assertEquals(800, widest.width)
-        assertEquals(640, widest.height)
+        assertEquals(5 * DieAtlas.TILE, widest.width)
+        assertEquals(4 * DieAtlas.TILE, widest.height)
     }
 
     @Test
@@ -155,7 +155,7 @@ class PitGeometryTest {
     @Test
     fun groundQuadAndContactDiscFaceUp() {
         val ground = DieAtlas.groundQuad(6f, -1.2f)
-        assertEquals(4 * 3, ground.indices.size)
+        assertEquals(2 * 3, ground.indices.size)
         var index = 0
         while (index < ground.indices.size) {
             val a = vertex(ground, ground.indices[index])
@@ -172,9 +172,9 @@ class PitGeometryTest {
         assertEquals(32 * 3, disc.indices.size)
         index = 0
         while (index < disc.indices.size) {
-            val a = vertex(disc, disc.indices[index])
-            val b = vertex(disc, disc.indices[index + 1])
-            val c = vertex(disc, disc.indices[index + 2])
+            val a = paddedVertex(disc, disc.indices[index])
+            val b = paddedVertex(disc, disc.indices[index + 1])
+            val c = paddedVertex(disc, disc.indices[index + 2])
             val n = PitTransform.normalizeDirection(
                 PitTransform.cross(sub(b, a), sub(c, a)),
             )
@@ -187,6 +187,12 @@ class PitGeometryTest {
         quad.positions[index * 3],
         quad.positions[index * 3 + 1],
         quad.positions[index * 3 + 2],
+    )
+
+    private fun paddedVertex(quad: PitQuad, index: Short): FloatArray = floatArrayOf(
+        quad.positions[index * 6],
+        quad.positions[index * 6 + 1],
+        quad.positions[index * 6 + 2],
     )
 
     private fun sub(a: FloatArray, b: FloatArray): FloatArray =

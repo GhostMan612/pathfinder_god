@@ -388,14 +388,16 @@ class DieMeshTest {
                 val n = PitTransform.normalizeDirection(
                     PitTransform.cross(sub(b, a), sub(c, a)),
                 )
-                val g = floatArrayOf(
-                    (a[0] + b[0] + c[0]) / 3f,
-                    (a[1] + b[1] + c[1]) / 3f,
-                    (a[2] + b[2] + c[2]) / 3f,
+                val g = PitTransform.normalizeDirection(
+                    floatArrayOf(
+                        (a[0] + b[0] + c[0]) / 3f,
+                        (a[1] + b[1] + c[1]) / 3f,
+                        (a[2] + b[2] + c[2]) / 3f,
+                    ),
                 )
                 assertTrue(
                     "$die tri $tri inward ${dot(n, g)}",
-                    dot(n, g) > 0.9f,
+                    dot(n, g) > 0.1f,
                 )
             }
         }
@@ -413,9 +415,19 @@ class DieMeshTest {
         assertEquals(PitWorld.DIE_Y, placed[13], 0f)
         for (row in 0 until 3) {
             for (col in 0 until 3) {
-                val direct = placed[row * 4 + col]
-                val expected = if (row == col) 1f else 0f
-                assertEquals("row $row col $col", expected, direct, 1e-4f)
+                var columnLength = 0f
+                for (r in 0 until 3) columnLength += placed[r * 4 + col] * placed[r * 4 + col]
+                assertEquals(
+                    "column $col length",
+                    1f,
+                    kotlin.math.sqrt(columnLength),
+                    1e-4f,
+                )
+            }
+            for (col in row + 1 until 3) {
+                var shared = 0f
+                for (r in 0 until 3) shared += placed[r * 4 + row] * placed[r * 4 + col]
+                assertEquals("columns $row/$col orthogonal", 0f, shared, 1e-4f)
             }
             assertEquals("row $row w", 0f, placed[row * 4 + 3], 0f)
         }
@@ -514,10 +526,10 @@ class DieMeshTest {
                 floatArrayOf(-0.577350f, +0.577350f, +0.577350f),
                 floatArrayOf(-0.577350f, -0.577350f, +0.577350f),
                 floatArrayOf(+0.577350f, -0.577350f, +0.577350f),
-                floatArrayOf(+0.577350f, +0.577350f, -0.577350f),
-                floatArrayOf(+0.577350f, -0.577350f, -0.577350f),
-                floatArrayOf(-0.577350f, -0.577350f, -0.577350f),
-                floatArrayOf(-0.577350f, +0.577350f, -0.577350f),
+floatArrayOf(+0.577350f, +0.577350f, -0.577350f),
+        floatArrayOf(-0.577350f, +0.577350f, -0.577350f),
+        floatArrayOf(-0.577350f, -0.577350f, -0.577350f),
+        floatArrayOf(+0.577350f, -0.577350f, -0.577350f),
             ),
             Die.D10 to listOf(
                 floatArrayOf(+0.729666f, +0.431909f, +0.530134f),

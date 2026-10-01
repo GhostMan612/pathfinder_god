@@ -58,7 +58,7 @@ class PitSettleTest {
                     for (eye in cameraEyes()) {
                         val towardsCamera = towardsCamera(eye)
                         val settled = PitTransform.settleQuaternion(from, normal, towardsCamera)
-                        assertEquals("$die $value unit", 1f, length(settled), 1e-4f)
+                        assertEquals("$die $value unit", 1f, quatLength(settled), 1e-4f)
                         val aimed = PitTransform.rotate(settled, normal)
                         assertEquals(
                             "$die $value aim ${aimed.toList()} vs ${towardsCamera.toList()}",
@@ -111,7 +111,7 @@ class PitSettleTest {
                         val atZero = PitTransform.slerp(from, to, 0f)
                         assertTrue(
                             "$die $value path start",
-                            dot(atZero, from) > 1f - 1e-3f,
+                            quatDot(atZero, from) > 1f - 1e-3f,
                         )
                         val atOne = PitTransform.slerp(from, to, 1f)
                         assertEquals(
@@ -279,6 +279,13 @@ val eye = PitWorld.eye(yaw.toFloat(), pitch, distance)
 
     private fun length(v: FloatArray): Float = sqrt(
         (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).toDouble(),
+    ).toFloat()
+
+    private fun quatDot(a: FloatArray, b: FloatArray): Float =
+        a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]
+
+    private fun quatLength(v: FloatArray): Float = sqrt(
+        (v[0] * v[0] + v[1] * v[1] + v[2] * v[2] + v[3] * v[3]).toDouble(),
     ).toFloat()
 
     private companion object {
