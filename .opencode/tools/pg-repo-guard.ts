@@ -4,8 +4,30 @@ import { execFileSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 
 const GENESIS = "As Above, So Below"
-const SECRET =
-  /(api[_-]?key|secret[_-]?key|password\s*[:=]\s*["'][^"']+|bearer\s+[A-Za-z0-9._-]{20,}|sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,})/i
+// A secret is a NAME BOUND TO A VALUE, not a name. The previous pattern matched the bare
+// token `api[_-]?key` with no value at all, so it flagged:
+//   - shared/openapi.yaml's `APIKeyHeader:` security-scheme identifier (type: apiKey,
+//     header X-API-Key) - a schema name, 13 occurrences, no material in it;
+//   - the `X-API-Key` header name in docs and Kotlin sources.
+// Every hit was a false positive, and a guard that cries wolf gets ignored, which is worse
+// than no guard. So a name now has to be assigned a plausible value. This still catches the
+// real cases: api_key = "...", secretKey: "...", password: "...", bearer <token>,
+// sk-.../ghp_... provider tokens.
+const SECRET = new RegExp(
+  [
+    // The whole name list must be ONE group, otherwise `|` splits the outer alternation and
+    // bare `password` / `secret_key` match on their own with no value required.
+    String.raw`(?:(?:api|secret|access|auth|private|encryption|signing)[_-]?key|secret|password|passwd|auth[_-]?token|access[_-]?token|bearer[_-]?token|token)`,
+    // optional closing quote after the name, so JSON/Kotlin `"authToken": "..."` is caught
+    String.raw`["']?\s*[:=]\s*["']?[A-Za-z0-9+/=._\-]{8,}["']?`,
+    // provider-style tokens, matched anywhere
+    String.raw`|bearer\s+[A-Za-z0-9._\-]{20,}`,
+    String.raw`|\bsk-[A-Za-z0-9]{20,}`,
+    String.raw`|\bghp_[A-Za-z0-9]{20,}`,
+    String.raw`|\bAKIA[0-9A-Z]{16}\b`,
+  ].join(""),
+  "i",
+)
 const FORBIDDEN = [
   { re: /(^|\/)build\//, why: "build output" },
   { re: /(^|\/)\.gradle\//, why: "gradle cache" },

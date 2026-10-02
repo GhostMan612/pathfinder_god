@@ -45,6 +45,9 @@ fun GodPrimaryButton(
 ) {
     Box(
         modifier = modifier
+            // Outermost on purpose: godTouchHeight opens a new LayoutNode, so a tag applied
+            // after it would report the inner text bounds instead of the rendered touch target.
+            .then(if (testTag == null) Modifier else Modifier.testTag(testTag))
             .godCard(border = if (enabled) GoldAccent else GoldAccent.copy(alpha = 0.4f))
             .clickable(
                 enabled = enabled,
@@ -54,8 +57,7 @@ fun GodPrimaryButton(
             )
             .godTouchHeight()
             .fillMaxWidth()
-            .padding(vertical = verticalPadding)
-            .then(if (testTag == null) Modifier else Modifier.testTag(testTag)),
+            .padding(vertical = verticalPadding),
         contentAlignment = Alignment.Center,
     ) {
         Text(

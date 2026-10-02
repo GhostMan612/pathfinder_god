@@ -4,26 +4,17 @@
     <application android:networkSecurityConfig="@xml/network_security_config">
 
         <!--
-          Host for the Compose UI tests. Debug-only, so it never reaches a shippable
-          build.
+          Host for the Compose UI tests, launched explicitly by every test in the a11y package
+          via createAndroidComposeRule<ComposeTestActivity>().
 
-          androidx.activity.ComponentActivity comes from ui-test-manifest via
-          `debugImplementation`, which puts it in the APPLICATION manifest where it
-          inherits Theme.PathfinderGod -> Theme.AppCompat. It launches, but the
-          ComposeTestRule never registers a Compose root and every test fails with
-          "No compose hierarchies found in the app" - including a minimal
-          `setContent { Text("smoke") }`, which rules out the design system and the
-          AGDK GameActivity.
+          It is declared here, in the app APK under the default process, because that is what
+          createAndroidComposeRule<YourActivity>() requires. src/androidTest is wrong: an
+          activity declared there lands in the instrumentation APK, ActivityScenario resolves
+          it against the test process, and the launch fails.
 
-          It cannot be declared in src/androidTest either: that lands it in the
-          instrumentation APK, and the rule then fails with "Intent in process
-          com.pathfindergod.spoke resolved to different process
-          com.pathfindergod.spoke.test". src/debug satisfies both constraints.
-
-          The theme is a plain platform theme. AppCompat themes throw on window
-          creation for a host that is not an AppCompatActivity, and the tests do not
-          need one: the Compose theming comes from the PathfinderGodTheme composable
-          called inside setContent, not from the XML theme.
+          The theme is a plain platform theme. AppCompat themes throw on window creation for a
+          host that is not an AppCompatActivity, and the tests do not need one - Compose
+          theming comes from PathfinderGodTheme inside setContent, not from the XML theme.
         -->
         <activity
             android:name="com.pathfindergod.spoke.a11y.ComposeTestActivity"

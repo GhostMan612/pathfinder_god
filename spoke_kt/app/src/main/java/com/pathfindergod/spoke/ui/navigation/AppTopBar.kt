@@ -53,7 +53,13 @@ fun AppTopBar(
         navigationIcon = {
             IconButton(
                 onClick = { if (canNavigateUp) onNavigateUp() else onHome() },
-                modifier = Modifier.size(Dimens.minTouchTarget),
+                // The tag goes on the IconButton, not the Icon. The Icon is 24dp, so a tag
+                // there measures the glyph instead of the tappable control and reports a
+                // 24dp target. The IconButton is the 48dp touch target, and it is the
+                // element a test or an accessibility service should be inspecting.
+                modifier = Modifier
+                    .size(Dimens.minTouchTarget)
+                    .testTag(GodTags.TOP_BAR_BACK),
             ) {
                 Icon(
                     imageVector = if (canNavigateUp) {
@@ -65,20 +71,20 @@ fun AppTopBar(
                         if (canNavigateUp) R.string.nav_back else R.string.nav_to_home,
                     ),
                     tint = GoldAccent,
-                    modifier = Modifier.testTag(GodTags.TOP_BAR_BACK),
                 )
             }
         },
         actions = {
             IconButton(
                 onClick = onMore,
-                modifier = Modifier.size(Dimens.minTouchTarget),
+                modifier = Modifier
+                    .size(Dimens.minTouchTarget)
+                    .testTag(GodTags.TOP_BAR_MORE),
             ) {
                 Icon(
                     imageVector = Icons.Filled.MoreVert,
                     contentDescription = stringResource(R.string.nav_more),
                     tint = GoldAccent,
-                    modifier = Modifier.testTag(GodTags.TOP_BAR_MORE),
                 )
             }
         },

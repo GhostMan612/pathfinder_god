@@ -85,11 +85,33 @@ dependencies {
     implementation(libs.retrofit.serialization)
     implementation(libs.okhttp)
 
-    implementation(libs.agdk.games.activity)
-    implementation(libs.agdk.games.frame.pacing)
+    // AGDK's POM pins androidx.tracing:tracing with a hard range that Gradle imports as
+    // {strictly 1.0.0}. androidx.test:monitor 1.7.x (which Compose's EspressoLink drives)
+    // calls Trace.forceEnableAppTracing(), added in tracing 1.1.0, and the app APK's dex
+    // takes precedence over the test APK's - so the call died with NoSuchMethodError inside
+    // AndroidComposeUiTestEnvironment.runTest, killing the test environment before it could
+    // register the Compose root. That surfaced as all 37 instrumented tests failing with
+    // "No compose hierarchies found in the app". Upstream: android-test #2246, #2248.
+    //
+    // The dependency has to be excluded rather than merely upgraded: a stricter declaration
+    // elsewhere in the graph would otherwise win, because androidx.test declares tracing only
+    // for the test scope while the poisoned copy lives in the app scope.
+    implementation(libs.agdk.games.activity) {
+        exclude(group = "androidx.tracing", module = "tracing")
+    }
+    implementation(libs.agdk.games.frame.pacing) {
+        exclude(group = "androidx.tracing", module = "tracing")
+    }
+    implementation(libs.androidx.tracing)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
-    debugImplementation(libs.androidx.compose.ui.test.manifest)
+    // NOTE: androidx.compose.ui:ui-test-manifest is deliberately NOT a dependency. It exists
+    // only to contribute androidx.activity.ComponentActivity to the manifest so that
+    // createComposeRule() can resolve a host implicitly. Per the official docs it is "needed
+    // for createComposeRule(), but not for createAndroidComposeRule<YourActivity>()", which
+    // instead requires the activity to be declared in the app's own manifest. Every test here
+    // uses createAndroidComposeRule<ComposeTestActivity>(), with ComposeTestActivity declared
+    // in src/debug/AndroidManifest.xml, so the implicit manifest contribution is not needed.
 
     testImplementation(libs.junit)
 

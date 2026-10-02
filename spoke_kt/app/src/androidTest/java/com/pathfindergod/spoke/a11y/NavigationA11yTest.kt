@@ -5,7 +5,6 @@
 
 package com.pathfindergod.spoke.a11y
 
-import androidx.activity.ComponentActivity
 import androidx.compose.material3.Text
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -33,7 +32,7 @@ import org.junit.Test
 
 class NavigationA11yTest {
     @get:Rule
-    val compose = createAndroidComposeRule<ComponentActivity>()
+    val compose = createAndroidComposeRule<ComposeTestActivity>()
 
     @Test
     fun topBarTitleIsALiveRegionSoScreenChangesAreAnnounced() {
@@ -81,12 +80,13 @@ class NavigationA11yTest {
                 )
             }
         }
-        // The testTag sits on the inner IconButton; the merged node carries no tag, so the
-        // finder must walk the unmerged tree.
-        compose.onNodeWithTag(GodTags.TOP_BAR_BACK, useUnmergedTree = true)
+        // The tags sit on the IconButtons, which are the 48dp touch targets. They used to sit
+        // on the Icons inside them, which measure 24dp - so this test was reading the glyph
+        // rather than the control the user actually has to hit.
+        compose.onNodeWithTag(GodTags.TOP_BAR_BACK)
             .assertWidthIsAtLeast(Dimens.minTouchTarget)
             .assertHeightIsAtLeast(Dimens.minTouchTarget)
-        compose.onNodeWithTag(GodTags.TOP_BAR_MORE, useUnmergedTree = true)
+        compose.onNodeWithTag(GodTags.TOP_BAR_MORE)
             .assertWidthIsAtLeast(Dimens.minTouchTarget)
             .assertHeightIsAtLeast(Dimens.minTouchTarget)
     }

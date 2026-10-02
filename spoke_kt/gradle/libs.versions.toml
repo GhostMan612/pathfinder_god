@@ -42,6 +42,17 @@ androidxAppcompat = "1.7.0"
 androidxComposeBom = "2024.10.01"
 androidxCoreKtx = "1.13.1"
 androidxLifecycle = "2.8.7"
+# AGDK 3.0.5's POM pins androidx.tracing:tracing with a hard version range that Gradle
+# imports as {strictly 1.0.0}, which drags the whole build back to 1.0.0. That breaks
+# EVERY instrumented test: androidx.test:monitor 1.7.x calls Trace.forceEnableAppTracing(),
+# added in tracing 1.1.0, and the app APK's dex wins at runtime over the test APK's, so the
+# call dies with NoSuchMethodError inside AndroidComposeUiTestEnvironment.runTest. The test
+# environment then dies during rule setup, before the Compose root callback is installed, so
+# every node lookup reports "No compose hierarchies found in the app". Known upstream:
+# android-test issues 2246 and 2248. Fixed by excluding tracing from AGDK and supplying
+# >= 1.1.0 ourselves. 1.2.0 is the documented working version and stays well inside the
+# tracing 1.x API that AGDK 3.0.5 was compiled against.
+androidxTracing = "1.2.0"
 agdkGamesActivity = "3.0.5"
 agdkGamesFramePacing = "2.1.2"
 filament = "1.76.0"
@@ -63,6 +74,7 @@ androidxTestRunner = "1.6.2"
 [libraries]
 agdk-games-activity = { group = "androidx.games", name = "games-activity", version.ref = "agdkGamesActivity" }
 agdk-games-frame-pacing = { group = "androidx.games", name = "games-frame-pacing", version.ref = "agdkGamesFramePacing" }
+androidx-tracing = { group = "androidx.tracing", name = "tracing", version.ref = "androidxTracing" }
 androidx-test-core-ktx = { group = "androidx.test", name = "core-ktx", version.ref = "androidxTestCoreKtx" }
 androidx-test-ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxTestExtJunit" }
 androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "androidxTestRunner" }

@@ -5,12 +5,13 @@
 
 package com.pathfindergod.spoke.a11y
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.Text
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertWidthIsAtLeast
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.unit.dp
 import com.pathfindergod.spoke.ui.designsystem.Dimens
@@ -27,7 +28,7 @@ import org.junit.Test
 
 class TouchTargetTest {
     @get:Rule
-    val compose = createComposeRule()
+    val compose = createAndroidComposeRule<ComposeTestActivity>()
 
     @Test
     fun minimumTouchTargetIsFortyEightDp() {
@@ -65,20 +66,44 @@ class TouchTargetTest {
     }
 
     @Test
-    fun godChip_doesNotGrowHorizontallySoWideRowsStillFit() {
+    fun godChip_enforcesHeightButNeverGrowsWidthSoWideRowsStillFit() {
         compose.setContent {
             PathfinderGodTheme {
-                GodChip(
-                    label = "+3",
-                    onClick = {},
-                    testTag = TAG_CHIP,
-                )
+                Column {
+                    GodChip(
+                        label = "d20",
+                        onClick = {},
+                        horizontalPadding = Spacing.none,
+                        testTag = TAG_CHIP_NARROW,
+                    )
+                    GodChip(
+                        label = "d20",
+                        onClick = {},
+                        testTag = TAG_CHIP_PADDED,
+                    )
+                }
             }
         }
-        val node = compose.onNodeWithTag(TAG_CHIP).fetchSemanticsNode()
+        val minPx = with(compose.density) { Dimens.minTouchTarget.roundToPx() }
+        val narrow = compose.onNodeWithTag(TAG_CHIP_NARROW).fetchSemanticsNode().size
+        val padded = compose.onNodeWithTag(TAG_CHIP_PADDED).fetchSemanticsNode().size
+
+        // Height is forced up to the 48dp minimum even with no vertical padding...
         assertTrue(
-            "chip must grow in height only, was ${node.size}",
-            node.size.width < node.size.height,
+            "chip height must be at least the 48dp minimum, was ${narrow.height}px (min $minPx)",
+            narrow.height >= minPx,
+        )
+        // ...but width is left entirely to the content, which is the whole point of
+        // godTouchHeight over godTouchSize: a row of chips must not each be forced 48dp wide.
+        assertTrue(
+            "chip width must not be grown to the touch minimum, was ${narrow.width}px (min $minPx)",
+            narrow.width < minPx,
+        )
+        // And padding still widens the chip, proving the width above is content-driven and
+        // not simply stuck at the minimum.
+        assertTrue(
+            "padding should widen the chip, was ${narrow.width}px narrow vs ${padded.width}px padded",
+            padded.width > narrow.width,
         )
     }
 
@@ -117,9 +142,12 @@ class TouchTargetTest {
             PathfinderGodTheme {
                 Text(
                     text = "x",
+                    // testTag before godTouchSize, i.e. outermost. Modifier.layout opens a
+                    // new LayoutNode, so a tag applied after it lands on the inner node and
+                    // reports the raw glyph bounds - which measured 10dp, not 48dp.
                     modifier = Modifier
-                        .godTouchSize()
-                        .testTag(TAG_ICON),
+                        .testTag(TAG_ICON)
+                        .godTouchSize(),
                 )
             }
         }
@@ -130,6 +158,8 @@ class TouchTargetTest {
 
     private companion object {
         const val TAG_CHIP = "test:a11y:chip"
+        const val TAG_CHIP_NARROW = "test:a11y:chip:narrow"
+        const val TAG_CHIP_PADDED = "test:a11y:chip:padded"
         const val TAG_BUTTON = "test:a11y:button"
         const val TAG_BACK = "test:a11y:back"
         const val TAG_ICON = "test:a11y:icon"

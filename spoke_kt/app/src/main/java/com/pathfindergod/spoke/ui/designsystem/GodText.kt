@@ -78,14 +78,16 @@ fun GodBackLink(
         style = MaterialTheme.typography.labelLarge,
         color = GoldAccent,
         modifier = modifier
+            // Outermost on purpose: godTouchHeight opens a new LayoutNode, so a tag applied
+            // after it would report the inner text bounds instead of the rendered touch target.
+            .then(if (testTag == null) Modifier else Modifier.testTag(testTag))
             .clickable(
                 onClickLabel = text,
                 role = Role.Button,
                 onClick = onClick,
             )
             .godTouchHeight()
-            .padding(horizontal = Spacing.xs, vertical = Spacing.md)
-            .then(if (testTag == null) Modifier else Modifier.testTag(testTag)),
+            .padding(horizontal = Spacing.xs, vertical = Spacing.md),
     )
 }
 

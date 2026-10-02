@@ -7,7 +7,7 @@ package com.pathfindergod.spoke.a11y
 
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.test.platform.app.InstrumentationRegistry
 import com.pathfindergod.spoke.R
@@ -20,7 +20,7 @@ import org.junit.Test
 
 class RtlGlyphTest {
     @get:Rule
-    val compose = createComposeRule()
+    val compose = createAndroidComposeRule<ComposeTestActivity>()
 
     @Test
     fun backLinkGlyph_isLeftPointingInLtr() {

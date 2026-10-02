@@ -125,6 +125,8 @@ paths:
         required: true
         schema:
           type: string
+          minLength: 1
+          maxLength: 200
           description: Search query
           title: Q
         description: Search query
@@ -132,6 +134,10 @@ paths:
         in: query
         required: false
         schema:
+          enum:
+          - 1e
+          - 2e
+          - both
           type: string
           description: 'Edition: 1e, 2e, or both'
           default: both
@@ -169,7 +175,20 @@ paths:
 
         1e terms are scraped live (AoN 1e search, PRD spell fallback). Anything
 
-        else is queued to data/misses.jsonl for the chunked fleet backfill.'
+        else is queued to data/misses.jsonl for the chunked fleet backfill.
+
+
+        Requires auth. This was the one endpoint that made an outbound HTTP request
+
+        AND permanently wrote scraped third-party content into the shared
+
+        pathfinder_rag.db - up to 8000 chars of remote HTML that /rules/search then
+
+        returned and the orchestrator spliced straight into the LLM prompt. Unguarded,
+
+        any LAN client could both grow the 58MB DB without bound and plant a durable
+
+        prompt-injection payload.'
       operationId: fetch_missing_rule_rules_fetch_post
       requestBody:
         content:
@@ -190,6 +209,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
   /rules/missed:
     post:
       tags:
@@ -376,6 +398,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
   /campaign/export:
     get:
       tags:
@@ -484,6 +509,9 @@ paths:
       - campaign
       summary: List Npcs
       operationId: list_npcs_campaign_npcs_get
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
       parameters:
       - name: campaign_id
         in: query
@@ -514,6 +542,9 @@ paths:
       - campaign
       summary: Create Npc
       operationId: create_npc_campaign_npcs_post
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
       parameters:
       - name: campaign_id
         in: query
@@ -549,6 +580,9 @@ paths:
       - campaign
       summary: List Party
       operationId: list_party_campaign_party_get
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
       parameters:
       - name: campaign_id
         in: query
@@ -579,6 +613,9 @@ paths:
       - campaign
       summary: Add Party Member
       operationId: add_party_member_campaign_party_post
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
       parameters:
       - name: campaign_id
         in: query
@@ -809,14 +846,28 @@ components:
       properties:
         query:
           type: string
+          maxLength: 4000
+          minLength: 1
           title: Query
         edition:
           type: string
+          enum:
+          - 1e
+          - 2e
+          - both
           title: Edition
           default: both
         mode:
           anyOf:
           - type: string
+            enum:
+            - character
+            - npc
+            - monster
+            - boss
+            - map
+            - campaign
+            - encounter
           - type: 'null'
           title: Mode
         history:
@@ -825,8 +876,8 @@ components:
               type: string
             type: array
           type: array
+          maxItems: 20
           title: History
-          default: []
       type: object
       required:
       - query
@@ -1292,9 +1343,15 @@ components:
       properties:
         q:
           type: string
+          maxLength: 200
+          minLength: 1
           title: Q
         edition:
           type: string
+          enum:
+          - 1e
+          - 2e
+          - both
           title: Edition
           default: both
       type: object
@@ -1305,9 +1362,15 @@ components:
       properties:
         prompt:
           type: string
+          maxLength: 4000
+          minLength: 1
           title: Prompt
         edition:
           type: string
+          enum:
+          - 1e
+          - 2e
+          - both
           title: Edition
           default: both
       type: object
@@ -1386,6 +1449,8 @@ components:
       properties:
         prompt:
           type: string
+          maxLength: 2000
+          minLength: 1
           title: Prompt
       type: object
       required:
@@ -1581,6 +1646,7 @@ components:
           items:
             $ref: '#/components/schemas/MissedQuery'
           type: array
+          maxItems: 200
           title: Queries
       type: object
       required:
@@ -1590,9 +1656,15 @@ components:
       properties:
         q:
           type: string
+          maxLength: 200
+          minLength: 1
           title: Q
         edition:
           type: string
+          enum:
+          - 1e
+          - 2e
+          - both
           title: Edition
           default: both
       type: object

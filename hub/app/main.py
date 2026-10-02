@@ -66,12 +66,25 @@ def create_app() -> FastAPI:
 
     # CORS for the Spoke (phone on the LAN).
     #
-    # allow_origins=["*"] with allow_credentials=True meant any web page the user
-    # visited could issue cross-origin fetches to http://<laptop-lan-ip>:8000 and
-    # read the responses - /ask and /rules/search were unauthenticated, and the
-    # /campaign data endpoints were behind the API-key check that has since been
-    # closed. Starlette emits Access-Control-Allow-Origin: * together with
-    # Access-Control-Allow-Credentials: true, which is the worst of both.
+    # This used to be allow_origins=["*"] with allow_credentials=True, on a service
+    # bound to 0.0.0.0 and therefore reachable at http://<laptop-lan-ip>:8000.
+    # Starlette's CORSMiddleware does NOT emit a literal "*" in that combination -
+    # it does something worse. From starlette/middleware/cors.py:
+    #
+    #     # If credentials are allowed, then we must respond with the specific origin instead of '*'.
+    #     if self.allow_all_origins and self.allow_credentials:
+    #         self.allow_explicit_origin(headers, origin)
+    #
+    # so it reflects the caller's own Origin back verbatim and sets
+    # Access-Control-Allow-Credentials: true. That is a *valid* CORS response, so
+    # the browser lets the attacker's JavaScript read it: any web page the user
+    # visited could issue cross-origin fetches to the laptop's LAN address and read
+    # the replies. /ask and /rules/search need no credentials at all, so the answers
+    # were readable directly. This is a published Starlette advisory, not a
+    # theoretical concern (GHSA-9jfm-9rc6-2hfq). Starlette's own docs agree the
+    # config was invalid: "allow_origins, allow_methods and allow_headers cannot be
+    # set to ['*'] for credentials to be allowed, all of them must be explicitly
+    # specified."
     #
     # The Spoke is a native Android client and does not use CORS at all; only the
     # Command Center and local tooling are browser origins, and they run on
@@ -80,9 +93,15 @@ def create_app() -> FastAPI:
     allowed_origins = [
         "http://localhost:8000",
         "http://127.0.0.1:8000",
-        "http://10.0.2.2:8000",
-        f"http://{settings.host}:{settings.port}",
+        "http://10.0.2.2:8000",  # emulator -> host loopback
     ]
+    # The configured bind host is only useful as an origin when it is a real,
+    # dialable address. It defaults to 0.0.0.0 (and may be ::), which no browser
+    # can navigate to, so adding it verbatim would just put a junk entry in the
+    # allow-list. A real address (e.g. a LAN IP pinned in .env) is honoured.
+    bind_host = settings.host.strip()
+    if bind_host and bind_host not in ("0.0.0.0", "::", "[::]", "*"):
+        allowed_origins.append(f"http://{bind_host}:{settings.port}")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,

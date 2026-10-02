@@ -58,6 +58,12 @@ fun GodChip(
         fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
         color = contentColor,
         modifier = modifier
+            // testTag FIRST, i.e. outermost. Modifier.layout (used by godTouchHeight) opens a
+            // new LayoutNode, so a tag applied after it lands on the inner node and reports the
+            // raw text bounds - 30dp, not the 48dp touch target we actually render. Tagging the
+            // outermost node makes the tag denote the whole component, which is what a UI test or
+            // an accessibility service should be measuring anyway.
+            .then(if (testTag == null) Modifier else Modifier.testTag(testTag))
             .godCard(
                 fill = containerColor.copy(alpha = if (enabled) containerColor.alpha else containerColor.alpha * 0.4f),
                 border = borderColor.copy(alpha = if (enabled) 1f else 0.4f),
@@ -73,7 +79,6 @@ fun GodChip(
                 if (announcedState != null) stateDescription = announcedState
                 if (contentDescription != null) this.contentDescription = contentDescription
             }
-            .padding(horizontal = horizontalPadding, vertical = verticalPadding)
-            .then(if (testTag == null) Modifier else Modifier.testTag(testTag)),
+            .padding(horizontal = horizontalPadding, vertical = verticalPadding),
     )
 }
