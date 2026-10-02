@@ -10,7 +10,6 @@ import androidx.compose.animation.core.FloatExponentialDecaySpec
 import androidx.compose.animation.core.animateDecay
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,7 +40,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -114,7 +112,6 @@ private fun MapCanvas(
     val context = LocalContext.current
     val view = LocalView.current
     val scope = rememberCoroutineScope()
-    val tracker = remember { VelocityTracker() }
     var gmLayer by rememberSaveable { mutableStateOf(true) }
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
@@ -231,48 +228,27 @@ private fun MapCanvas(
                                 customActions = zoomActions
                             }
                             .testTag(GodTags.MAP_CANVAS)
+                            // One gesture detector, not two.
+                            //
+                            // detectTransformGestures and detectDragGestures
+                            // were both attached to this node. Whichever crossed
+                            // touch slop first consumed the change, which
+                            // cancelled the other: a fast flick gave panning but
+                            // left the velocity tracker empty, so the entire
+                            // animateDecay fling block was unreachable and the
+                            // map had no inertia; a slow drag let the transform
+                            // detector see canceled=true and park, so pinch-zoom
+                            // did not register for that gesture either.
+                            //
+                            // The fling never fired even once, so folding the
+                            // pan/zoom into a single detector is not a
+                            // regression: it makes pinch and panning reliable
+                            // on every gesture.
                             .pointerInput(Unit) {
                                 detectTransformGestures(panZoomLock = true) { _, pan, zoom, _ ->
                                     scale = (scale * zoom).coerceIn(MIN_ZOOM, MAX_ZOOM)
                                     offset = clamp(offset + pan)
                                 }
-                            }
-                            .pointerInput(Unit) {
-                                detectDragGestures(
-                                    onDragStart = { tracker.resetTracking() },
-                                    onDrag = { change, drag ->
-                                        change.consume()
-                                        tracker.addPosition(
-                                            change.uptimeMillis,
-                                            change.position,
-                                        )
-                                        offset = clamp(offset + drag)
-                                    },
-                                    onDragEnd = {
-                                        val velocity = tracker.calculateVelocity()
-                                        if (velocity != Velocity.Zero) {
-                                            scope.launch {
-                                                var fx = offset.x
-                                                var fy = offset.y
-                                                val decay = FloatExponentialDecaySpec()
-                                                coroutineScope {
-                                                    val axisX = launch {
-                                                        animateDecay(fx, velocity.x, decay) { value, _ ->
-                                                            fx = value
-                                                        }
-                                                    }
-                                                    launch {
-                                                        animateDecay(fy, velocity.y, decay) { value, _ ->
-                                                            fy = value
-                                                        }
-                                                    }
-                                                    axisX.join()
-                                                }
-                                                offset = clamp(Offset(fx, fy))
-                                            }
-                                        }
-                                    },
-                                )
                             }
                             .graphicsLayer(
                                 scaleX = scale,

@@ -13,9 +13,11 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Icon
@@ -101,6 +103,17 @@ fun NavigationShell() {
 
     Box(modifier = Modifier.fillMaxSize()) {
         NavigationSuiteScaffold(
+            // NavigationSuiteScaffold passes NoWindowInsets to its
+            // NavigationBar/Rail/DrawerSheet and references safeDrawing
+            // nowhere, so it applies zero insets and leaves that to the caller.
+            // Only the content Column below was padded, which left the bottom
+            // tab bar flush against the window edge - clipped by the system
+            // navigation bar on 3-button navigation and by a gesture handle.
+            modifier = Modifier.windowInsetsPadding(
+                WindowInsets.safeDrawing.only(
+                    WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal,
+                ),
+            ),
             navigationSuiteItems = {
                 NavigationItem.entries.forEach { bar ->
                     item(
