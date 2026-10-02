@@ -236,6 +236,10 @@ fun CombatantCard(
                                     verticalPadding = Spacing.xs,
                                     role = Role.Button,
                                     selectedStateRes = null,
+                                    contentDescription = stringResource(
+                                        R.string.a11y_condition_applied,
+                                        condition.name,
+                                    ),
                                     onClickLabel = stringResource(
                                         R.string.a11y_condition_remove,
                                         condition.name,

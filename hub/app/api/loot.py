@@ -6,7 +6,9 @@
 """Loot Generator API — LLM concept + Rules Lawyer crafting validation."""
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 from app.agents.loot_generator import LootBuildResult, LootGeneratorAgent
 from app.agents.rules_lawyer import RulesLawyerAgent
@@ -19,7 +21,7 @@ router = APIRouter(prefix="/generate", tags=["gm"])
 
 
 class LootRequest(BaseModel):
-    prompt: str
+    prompt: str = Field(..., min_length=1, max_length=2000)
 
 
 class LootResponse(BaseModel):

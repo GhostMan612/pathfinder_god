@@ -189,7 +189,13 @@ fun CharacterDetailScreen(
                 ) {
                     row.forEach { key ->
                         val score = abilities[key]?.toIntOrNull()
-                            ?: stringResource(R.string.character_ability_default).toInt()
+                            // The data is guarded with toIntOrNull but the fallback used an unguarded
+        // toInt(). character_ability_default is "10" in the only locale we ship,
+        // so this is latent - but any locale rendering it differently ("—",
+        // "N/A", full-width or Arabic-Indic digits) threw NumberFormatException
+        // while rendering the sheet.
+        ?: stringResource(R.string.character_ability_default).toIntOrNull()
+        ?: 10
                         val mod = abilityModifier(score)
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(

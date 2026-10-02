@@ -7,6 +7,8 @@
 Rules Search endpoint — Raw FTS5 lookup (no LLM).
 """
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
@@ -39,8 +41,8 @@ class RulesSearchResponse(BaseModel):
 
 @router.get("/search", response_model=RulesSearchResponse)
 async def search_rules(
-    q: str = Query(..., description="Search query"),
-    edition: str = Query("both", description="Edition: 1e, 2e, or both"),
+    q: str = Query(..., min_length=1, max_length=200, description="Search query"),
+    edition: Literal["1e", "2e", "both"] = Query("both", description="Edition: 1e, 2e, or both"),
     limit: int = Query(5, ge=1, le=20),
     repo: CampaignRepository = Depends(get_repo),
 ) -> RulesSearchResponse:

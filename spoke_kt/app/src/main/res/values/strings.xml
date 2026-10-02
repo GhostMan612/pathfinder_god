@@ -83,6 +83,7 @@
     <string name="a11y_condition_apply">Add %1$s</string>
     <string name="a11y_condition_remove">Remove %1$s</string>
     <string name="a11y_condition_chip">Condition %1$s. Double tap to add.</string>
+    <string name="a11y_condition_applied">%1$s is applied. Double tap to remove.</string>
     <string name="a11y_turn_change">Round %1$d. %2$s acts.</string>
     <string name="a11y_turn_idle">No combat running.</string>
     <string name="a11y_combat_summon">Summon from the vault</string>

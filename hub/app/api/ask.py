@@ -9,7 +9,9 @@ Ask/Stream endpoints — GM Q&A with WebSocket streaming.
 
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 from app.api.deps import get_repo
 from app.db.repository import CampaignRepository
@@ -19,10 +21,14 @@ router = APIRouter(prefix="/ask", tags=["gm"])
 
 
 class AskRequest(BaseModel):
-    query: str
-    edition: str = "both"
-    mode: str | None = None
-    history: list[list[str]] = []
+    query: str = Field(..., min_length=1, max_length=4000)
+    # Literal rather than str: edition previously fell through to a silent
+    # "search both editions" path for any unrecognised spelling. mode likewise.
+    edition: Literal["1e", "2e", "both"] = "both"
+    mode: Literal[
+        "character", "npc", "monster", "boss", "map", "campaign", "encounter"
+    ] | None = None
+    history: list[list[str]] = Field(default_factory=list, max_length=20)
 
 
 class AskResponse(BaseModel):

@@ -98,9 +98,12 @@ def test_rules_search_edition_filter(client):
 
 
 def test_rules_search_empty_query(client):
+    # An empty query is now a 422, not an empty 200: q carries min_length=1, so
+    # a blank search is rejected up front instead of being turned into a MATCH
+    # expression that could not match. Returning 200 with results=[] was the
+    # old behaviour and encoded the missing bound.
     r = client.get("/rules/search", params={"q": "", "edition": "2e"})
-    assert r.status_code == 200
-    assert r.json()["results"] == []
+    assert r.status_code == 422
 
 
 def test_generate_invalid_kind_returns_400(client):

@@ -199,8 +199,24 @@ export default tool({
       add("androidtest-sourceset", existsSync(at) && walk(at).length > 0, existsSync(at) ? `${walk(at).length} files` : "src/androidTest MISSING")
       const tags = allKt.reduce((n, f) => n + (read(f).match(/testTag\(|GodTags\./g) ?? []).length, 0)
       add("testtags", tags > 0, `${tags} testTag references`)
-      const desc = allKt.reduce((n, f) => n + (read(f).match(/contentDescription\s*=/g) ?? []).length, 0)
-      add("content-descriptions", desc > 30, `${desc} contentDescription assignments`)
+            // A raw count of `contentDescription =` is the wrong measurement: it can
+      // be satisfied by `contentDescription = ""`, which takes precedence over
+      // the child Text in a merged node and leaves the control with a click
+      // action but NO accessible name. That exact anti-pattern satisfied this
+      // check twice before it was removed.
+      //
+      // Count only real (non-empty) assignments, and separately FAIL on any
+      // empty-string override so the harmful form cannot come back.
+      const body = allKt.map((f) => read(f)).join("\n");
+      const emptyOverrides = (body.match(/contentDescription\s*=\s*""/g) ?? []).length;
+      const desc = (body.match(/contentDescription\s*=\s*(?!""\s*[,)}])/g) ?? []).length;
+      add(
+        "content-descriptions",
+        desc > 25 && emptyOverrides === 0,
+        emptyOverrides > 0
+          ? `${desc} real descriptions but ${emptyOverrides} empty-string override(s) leave those controls unnamed`
+          : `${desc} real contentDescription assignments, no empty overrides`,
+      )
       const live = allKt.filter((f) => /liveRegion\s*=/.test(read(f)))
       add("live-regions", live.length > 0, `${live.length} file(s) declare liveRegion`)
       const small = allKt.filter((f) => /godTouch(Height|Size)\(/.test(read(f)))

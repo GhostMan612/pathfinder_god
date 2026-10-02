@@ -72,7 +72,10 @@ fun RuleCard(
             }
             GodBadge(
                 text = rule.system.uppercase(),
-                tone = if (rule.system == "2e") GodTone.Accent else GodTone.Critical,
+                // Case-insensitive: the rules DB is an external extract that stores editions
+    // uppercase ('2E'), so "2E" rendered a second-edition card in the Critical
+    // red tone purely because of data casing.
+    tone = if (rule.system.trim().equals("2e", ignoreCase = true)) GodTone.Accent else GodTone.Critical,
             )
             Text(
                 text = if (expanded) {

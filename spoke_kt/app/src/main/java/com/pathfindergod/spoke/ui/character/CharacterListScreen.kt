@@ -160,9 +160,10 @@ private fun CharacterCard(
                 fontWeight = FontWeight.Bold,
                 color = CritRed,
                 modifier = Modifier
-                    .semantics {
-                        contentDescription = ""
-                    }
+                    // No contentDescription override: an empty string suppresses
+                    // the child Text in the merged node, leaving the Delete
+                    // control with a click action but no accessible name. The
+                    // visible text is the label.
                     .clickable(
                         onClickLabel = stringResource(R.string.a11y_hero_delete, character.name),
                         role = Role.Button,

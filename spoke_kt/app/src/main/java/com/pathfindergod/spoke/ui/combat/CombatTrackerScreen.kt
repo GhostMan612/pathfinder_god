@@ -136,9 +136,11 @@ fun CombatTrackerScreen(
                 style = MaterialTheme.typography.titleMedium,
                 color = GoldAccent,
                 modifier = Modifier
-                    .semantics {
-                        contentDescription = ""
-                    }
+                    // No contentDescription override: an empty string takes
+                    // precedence over the child Text in the merged node, which
+                    // left the control with a click action but no name. The
+                    // visible "Summon" is the label; onClickLabel carries the
+                    // disambiguating action hint.
                     .clickable(
                         onClickLabel = stringResource(R.string.a11y_combat_summon),
                         role = Role.Button,

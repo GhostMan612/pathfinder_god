@@ -8,7 +8,9 @@ Generate endpoints — Typed generators (character, npc, monster, boss, map, cam
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Path
-from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 from app.agents.character_builder import BuildResult, CharacterBuilderAgent
 from app.agents.rules_lawyer import RulesLawyerAgent
@@ -32,8 +34,8 @@ class BuildCharacterResponse(BaseModel):
 
 
 class GenerateRequest(BaseModel):
-    prompt: str
-    edition: str = "both"
+    prompt: str = Field(..., min_length=1, max_length=4000)
+    edition: Literal["1e", "2e", "both"] = "both"
 
 
 class GenerateResponse(BaseModel):

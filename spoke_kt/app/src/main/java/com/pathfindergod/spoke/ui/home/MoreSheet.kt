@@ -71,6 +71,7 @@ fun MoreSheet(
                     contentPadding = PaddingValues(Dimens.cardPaddingTight),
                     onClick = { onOpen(destination) },
                     onClickLabel = stringResource(R.string.a11y_open_destination),
+                    contentDescription = stringResource(destination.labelRes),
                     stateDescription = if (here) {
                         stringResource(R.string.a11y_current_destination)
                     } else {

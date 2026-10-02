@@ -38,13 +38,19 @@ private fun Modifier.enforceTouchTarget(min: Dp, growWidth: Boolean): Modifier =
         val target = min.roundToPx()
         val grownWidth = if (growWidth) maxOf(placeable.width, target) else placeable.width
         val grownHeight = maxOf(placeable.height, target)
+        // coerceIn, not coerceAtMost: a Modifier.layout measure policy must return a
+        // size satisfying the incoming constraints, and coerceAtMost only
+        // enforced the upper bound. If constraints.minWidth exceeded the grown
+        // width, the modifier reported a size below the minimum it was given,
+        // which parents using weights or requiredWidth may treat as undefined.
+        // Modifier.defaultMinSize, the built-in equivalent, uses coerceIn.
         val width = if (constraints.hasBoundedWidth) {
-            grownWidth.coerceAtMost(constraints.maxWidth)
+            grownWidth.coerceIn(constraints.minWidth, constraints.maxWidth)
         } else {
             grownWidth
         }
         val height = if (constraints.hasBoundedHeight) {
-            grownHeight.coerceAtMost(constraints.maxHeight)
+            grownHeight.coerceIn(constraints.minHeight, constraints.maxHeight)
         } else {
             grownHeight
         }
