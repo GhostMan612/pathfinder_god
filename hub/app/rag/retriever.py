@@ -10,6 +10,8 @@ RAG Retriever — Hybrid vector + FTS5 search for rule context.
 import logging
 import sqlite3
 
+import anyio
+
 from app.config import get_settings
 from app.db.repository import CampaignRepository
 from app.rag._fts import build_match_query, editions_for
@@ -36,6 +38,14 @@ class Retriever:
         return await self._fts5_search(query, edition, k)
 
     async def _fts5_search(self, query: str, edition: str, k: int) -> list[dict]:
+        # The body below is synchronous sqlite3 work on a 58 MB database,
+        # measured at ~294 ms per query, and /ask runs it twice (query() plus
+        # get_sources()). Calling it directly from an async def froze the event
+        # loop for ~600-900 ms per request, stalling /health, the WebSocket
+        # /stream and the metrics middleware. Offload to a worker thread.
+        return await anyio.to_thread.run_sync(self._fts5_search_sync, query, edition, k)
+
+    def _fts5_search_sync(self, query: str, edition: str, k: int) -> list[dict]:
         db_path = self._get_db_path(edition)
 
         escaped = build_match_query(query)
