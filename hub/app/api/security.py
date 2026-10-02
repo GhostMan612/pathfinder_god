@@ -97,17 +97,35 @@ class RateLimiter:
     def is_allowed(self, key: str) -> bool:
         now = time.time()
         window_start = now - self.window_seconds
-        
+
+        # Prune every stale bucket, not just this key's. Pruning only the key
+        # being checked meant each distinct client key's timestamp list lived
+        # forever - unbounded memory growth, previously triggerable by one client
+        # spoofing X-Forwarded-For with random values.
+        self._prune(window_start)
+
+        if len(self._requests) > 10_000:
+            # Refuse new clients rather than grow without bound.
+            return False
+
         if key in self._requests:
             self._requests[key] = [ts for ts in self._requests[key] if ts > window_start]
         else:
             self._requests[key] = []
-        
+
         if len(self._requests[key]) >= self.requests:
             return False
-        
+
         self._requests[key].append(now)
         return True
+
+    def _prune(self, window_start: float) -> None:
+        stale = [
+            k for k, ts in self._requests.items()
+            if not ts or ts[-1] <= window_start
+        ]
+        for k in stale:
+            del self._requests[k]
     
     def get_remaining(self, key: str) -> int:
         now = time.time()
@@ -191,10 +209,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         
         client_ip = request.client.host if request.client else "unknown"
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            client_ip = forwarded.split(",")[0].strip()
-        
+        # Do NOT read X-Forwarded-For here. There is no trusted proxy in front of
+        # the hub, so any client chose its own rate-limit bucket by sending a
+        # random header - the 100 req/min limit was fully bypassable, and every
+        # spoofed value permanently added a bucket to the limiter's table.
+
         if not self.limiter.is_allowed(client_ip):
             reset_time = self.limiter.get_reset_time(client_ip)
             return JSONResponse(

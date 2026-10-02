@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.api.deps import get_repo
+from app.api.security import require_auth
 from app.db.repository import CampaignRepository
 from app.rag import misslog
 from app.rag.fetch_one import fetch_one
@@ -57,8 +58,8 @@ async def search_rules(
 
 
 class FetchRequest(BaseModel):
-    q: str
-    edition: str = "both"
+    q: str = Field(..., min_length=1, max_length=200)
+    edition: Literal["1e", "2e", "both"] = "both"
 
 
 class MissedQuery(BaseModel):
@@ -73,11 +74,21 @@ class MissedBatch(BaseModel):
 
 
 @router.post("/fetch", response_model=RuleHit)
-async def fetch_missing_rule(body: FetchRequest) -> RuleHit:
+async def fetch_missing_rule(
+    body: FetchRequest,
+    user: dict = Depends(require_auth),
+) -> RuleHit:
     """On-demand scrape: fetch one missing term into the DB, permanently.
 
     1e terms are scraped live (AoN 1e search, PRD spell fallback). Anything
     else is queued to data/misses.jsonl for the chunked fleet backfill.
+
+    Requires auth. This was the one endpoint that made an outbound HTTP request
+    AND permanently wrote scraped third-party content into the shared
+    pathfinder_rag.db - up to 8000 chars of remote HTML that /rules/search then
+    returned and the orchestrator spliced straight into the LLM prompt. Unguarded,
+    any LAN client could both grow the 58MB DB without bound and plant a durable
+    prompt-injection payload.
     """
     hit = await fetch_one(body.q, body.edition)
     if hit is None:

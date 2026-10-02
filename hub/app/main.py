@@ -25,6 +25,8 @@ from app.api import (
 )
 from app.api.monitoring import MetricsMiddleware
 from app.api.security import (
+    AUTHORIZATION_HEADER,
+    API_KEY_HEADER_NAME,
     RateLimitMiddleware,
     RequestLoggingMiddleware,
     SecurityHeadersMiddleware,
@@ -62,13 +64,31 @@ def create_app() -> FastAPI:
     app.add_middleware(RateLimitMiddleware, requests_per_minute=100)
     app.add_middleware(MetricsMiddleware)
 
-    # CORS for Spoke (phone on LAN)
+    # CORS for the Spoke (phone on the LAN).
+    #
+    # allow_origins=["*"] with allow_credentials=True meant any web page the user
+    # visited could issue cross-origin fetches to http://<laptop-lan-ip>:8000 and
+    # read the responses - /ask and /rules/search were unauthenticated, and the
+    # /campaign data endpoints were behind the API-key check that has since been
+    # closed. Starlette emits Access-Control-Allow-Origin: * together with
+    # Access-Control-Allow-Credentials: true, which is the worst of both.
+    #
+    # The Spoke is a native Android client and does not use CORS at all; only the
+    # Command Center and local tooling are browser origins, and they run on
+    # localhost. Pinned to real origins, and credentials are off - the API key
+    # travels in an explicit header, never as a cookie.
+    allowed_origins = [
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://10.0.2.2:8000",
+        f"http://{settings.host}:{settings.port}",
+    ]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=allowed_origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Content-Type", API_KEY_HEADER_NAME, AUTHORIZATION_HEADER],
     )
 
     # Routers

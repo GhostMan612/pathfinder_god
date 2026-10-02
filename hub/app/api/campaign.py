@@ -172,7 +172,11 @@ async def reset_campaign(
 
 
 @router.post("/summarize-session", response_model=SummarizeSessionResponse)
-async def summarize_session(request: SummarizeSessionRequest) -> SummarizeSessionResponse:
+async def summarize_session(
+    request: SummarizeSessionRequest,
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+) -> SummarizeSessionResponse:
     """Turn raw session events into an atmospheric journal entry."""
     clean = [e.strip() for e in request.events if e and e.strip()]
     if not clean:
@@ -479,6 +483,7 @@ class NPCRequest(BaseModel):
 async def list_npcs(
     campaign_id: int = 1,
     repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
 ) -> list[dict]:
     npcs = repo.get_npcs(campaign_id)
     return [dict(npc.__dict__) for npc in npcs]
@@ -489,6 +494,7 @@ async def create_npc(
     npc: NPCRequest,
     campaign_id: int = 1,
     repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
 ) -> dict:
     npc_id = repo.upsert_npc(
         campaign_id=campaign_id,
@@ -518,6 +524,7 @@ class PartyMemberRequest(BaseModel):
 async def list_party(
     campaign_id: int = 1,
     repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
 ) -> list[dict]:
     return repo.get_party(campaign_id)
 
@@ -527,6 +534,7 @@ async def add_party_member(
     member: PartyMemberRequest,
     campaign_id: int = 1,
     repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
 ) -> dict:
     member_id = repo.upsert_party_member(
         campaign_id=campaign_id,
