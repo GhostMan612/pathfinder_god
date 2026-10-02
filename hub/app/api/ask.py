@@ -43,12 +43,15 @@ async def ask_endpoint(
     repo: CampaignRepository = Depends(get_repo),
 ) -> AskResponse:
     orchestrator = LLMOrchestrator(repo)
-    result = await orchestrator.generate(
-        prompt=request.query,
-        edition=request.edition,
-        mode=request.mode,
-        history=request.history,
-    )
+    try:
+        result = await orchestrator.generate(
+            prompt=request.query,
+            edition=request.edition,
+            mode=request.mode,
+            history=request.history,
+        )
+    finally:
+        await orchestrator.close()
     return AskResponse(**result.__dict__)
 
 

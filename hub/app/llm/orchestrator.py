@@ -53,6 +53,32 @@ class LLMOrchestrator:
         from app.agents.continuity import ContinuityKeeper
         self.continuity_keeper = ContinuityKeeper(repo, self)
 
+    async def close(self) -> None:
+        """Release the httpx clients this orchestrator owns.
+
+        An orchestrator is built per request (/ask, /generate/{kind}, the
+        continuity background task) and each one lazily created its own
+        httpx.AsyncClient, whose socket pool was never closed. That
+        accumulated connections and file handles for the life of the process.
+        """
+        for holder in (
+            getattr(self, "ollama", None),
+            getattr(self, "rules_lawyer", None),
+            getattr(self, "npc_compiler", None),
+        ):
+            client = getattr(holder, "ollama", None)
+            if client is not None:
+                try:
+                    await client.close()
+                except Exception:  # noqa: BLE001 - shutdown must not raise
+                    logger.debug("failed to close an Ollama client", exc_info=True)
+
+    async def __aenter__(self) -> "LLMOrchestrator":
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        await self.close()
+
     # ──────────────────────────────────────────────────────────────
     # Main Generation Entry Point
     # ──────────────────────────────────────────────────────────────
@@ -134,7 +160,7 @@ class LLMOrchestrator:
         try:
             if self.settings.rag_enabled:
                 context = await self.retriever.query(prompt, edition=edition, k=self.settings.rag_limit)
-                prompt = self._build_rag_prompt(prompt, context, edition, mode)
+                prompt = self._build_rag_prompt(prompt, context, edition, mode, history)
 
             # Prepare tool definitions for Ollama
             tools = RULES_LAWYER_TOOLS + NPC_COMPILER_TOOLS + [
@@ -275,7 +301,7 @@ class LLMOrchestrator:
         try:
             if self.settings.rag_enabled:
                 context = await self.retriever.query(prompt, edition=edition, k=self.settings.rag_limit)
-                prompt = self._build_rag_prompt(prompt, context, edition, mode)
+                prompt = self._build_rag_prompt(prompt, context, edition, mode, history)
 
             async for chunk in self.ollama.stream(
                 prompt=prompt,
@@ -336,7 +362,37 @@ Citation Fidelity (MANDATORY):
 - Do not reproduce stat blocks verbatim or copy more than 300 chars from any source.
 - Prefer summarization over quotation to respect ORC licensing."""
 
-    def _build_rag_prompt(self, prompt: str, context: list[dict], edition: str, mode: str | None) -> str:
+    def _history_block(self, history: list[list[str]] | None) -> str:
+        """Render prior turns, mirroring the CLI path in agent/gm.py.
+
+        /ask and /stream both accepted and validated `history`, and then never
+        referenced it again - the identifier appeared nowhere in either body. The
+        Spoke sends it expecting follow-up questions to work, so every "and what
+        about him?" was answered with no idea what "him" referred to.
+        """
+        if not history:
+            return ""
+        lines = []
+        for turn in history[-6:]:
+            if not isinstance(turn, (list, tuple)) or len(turn) < 2:
+                continue
+            question, answer = turn[0], turn[1]
+            if question:
+                lines.append(f"User: {question}")
+            if answer:
+                lines.append(f"GM: {answer}")
+        if not lines:
+            return ""
+        return "Earlier in this conversation:\n" + "\n".join(lines) + "\n\n"
+
+    def _build_rag_prompt(
+        self,
+        prompt: str,
+        context: list[dict],
+        edition: str,
+        mode: str | None,
+        history: list[list[str]] | None = None,
+    ) -> str:
         context_text = "\n\n---\n\n".join(
             f"[{c.get('source_book', 'Unknown')}] {c.get('name', 'Rule')}: {c.get('content', '')[:500]}"
             for c in context
@@ -344,7 +400,7 @@ Citation Fidelity (MANDATORY):
         return f"""Context from rulebooks:
 {context_text}
 
-User request: {prompt}"""
+{self._history_block(history)}User request: {prompt}"""
 
     def _format_raw_excerpts(self, hits: list[dict], query: str) -> str:
         if not hits:

@@ -68,11 +68,14 @@ class TestSummarizeSession:
         assert journal.event_count == 0
 
     @pytest.mark.asyncio
-    async def test_llm_failure_degrades_gracefully(self):
+    async def test_llm_failure_is_reported_not_silently_empty(self):
+        # This used to assert summary == "" and pass. That encoded the bug: the
+        # endpoint answered 200 with an empty summary and the Spoke wrote an
+        # empty chronicle entry as if the session had been summarised. A failure
+        # must surface so the caller can answer 503.
         agent = ContinuityAgent(_FakeLlm(fail=True))
-        journal = await agent.summarize_session(EVENTS, "Abomination Vaults")
-        assert journal.summary == ""
-        assert journal.event_count == 3
+        with pytest.raises(RuntimeError, match="local LLM unavailable"):
+            await agent.summarize_session(EVENTS, "Abomination Vaults")
 
 
 class _KeeperLlm:

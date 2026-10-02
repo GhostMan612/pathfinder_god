@@ -318,10 +318,12 @@ class ContinuityAgent:
                 num_predict=400,
             )
         except Exception as e:
+            # Returning an empty SessionJournal here reported success: the
+            # endpoint answered 200 with summary="" and the Spoke wrote an
+            # empty chronicle entry as though the session had been summarised.
+            # Propagate so the caller can answer 503.
             logger.warning(f"ContinuityAgent summarization failed: {e}")
-            return SessionJournal(
-                campaign_name=campaign_name, summary="", event_count=len(clean)
-            )
+            raise RuntimeError(f"local LLM unavailable: {e}") from e
         return SessionJournal(
             campaign_name=campaign_name,
             summary=summary.strip(),

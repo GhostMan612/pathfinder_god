@@ -94,11 +94,14 @@ async def generate_endpoint(
         )
 
     orchestrator = LLMOrchestrator(repo)
-    result = await orchestrator.generate(
-        prompt=request.prompt,
-        edition=request.edition,
-        mode=kind,
-    )
+    try:
+        result = await orchestrator.generate(
+            prompt=request.prompt,
+            edition=request.edition,
+            mode=kind,
+        )
+    finally:
+        await orchestrator.close()
     return GenerateResponse(
         answer=result.answer,
         backend=result.backend,

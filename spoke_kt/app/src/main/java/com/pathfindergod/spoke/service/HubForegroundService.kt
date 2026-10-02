@@ -78,12 +78,20 @@ class HubForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_CONNECT -> {
-                streamUrl = intent.getStringExtra(EXTRA_URL)
+            ACTION_DISCONNECT -> {
+                dropLink()
+                stopSelf()
+            }
+            else -> {
+                // Covers ACTION_CONNECT *and* the START_STICKY null-intent
+                // restart. Previously the null case matched nothing, so the
+                // service came back with a stale "idle" notification and never
+                // re-established the link. With a dataSync foreground type
+                // Android 12+ kills it after ~6h and this path always ran.
+                streamUrl = intent?.getStringExtra(EXTRA_URL)
                     ?: AppPreferences(this).streamUrl()
                 maintainLink()
             }
-            ACTION_DISCONNECT -> dropLink()
         }
         return START_STICKY
     }

@@ -180,6 +180,8 @@ async def summarize_session(request: SummarizeSessionRequest) -> SummarizeSessio
     agent = ContinuityAgent(llm)
     try:
         journal = await agent.summarize_session(clean, request.campaign_name)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
     finally:
         await llm.close()
     return SummarizeSessionResponse(summary=journal.summary, event_count=journal.event_count)

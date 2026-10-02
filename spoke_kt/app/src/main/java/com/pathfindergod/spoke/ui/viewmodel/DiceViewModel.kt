@@ -139,7 +139,12 @@ class DiceViewModel(
         )
         audio.buttonPress()
         viewModelScope.launch {
-            runCatching { repository.persist(stamped) }
+            // The saved id was previously discarded, so state.record.id stayed 0
+            // forever and any future "delete this roll" would target row 0.
+            val saved = runCatching { repository.persist(stamped) }.getOrNull()
+            if (saved != null && _state.value.record?.rolledAt == saved.rolledAt) {
+                _state.value = _state.value.copy(record = saved)
+            }
         }
     }
 
@@ -167,11 +172,15 @@ class DiceViewModel(
             fresh.none { it.rolledAt == row.rolledAt && it.notation == row.notation }
         }
         if (unseen.isEmpty()) return
-        val restored = unseen.reversed().mapIndexed { index, record ->
+        // rows arrives newest-first (ORDER BY id DESC) and roll() prepends, so
+        // history is newest-first everywhere. Reversing here made a restored
+        // list oldest-first: after every restart the newest roll sat at the
+        // bottom of a 200-row list, and the order flipped again on first roll.
+        val restored = unseen.mapIndexed { index, record ->
             RollEntry(key = -(index + 1L), record = record)
         }
         _state.value = _state.value.copy(
-            history = (_state.value.history + restored).takeLast(MAX_ROLL_HISTORY),
+            history = (restored + _state.value.history).take(MAX_ROLL_HISTORY),
         )
     }
 }

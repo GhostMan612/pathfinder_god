@@ -5,6 +5,8 @@
 
 package com.pathfindergod.spoke.data.repository
 
+import androidx.room.withTransaction
+import com.pathfindergod.spoke.data.local.AppDatabase
 import com.pathfindergod.spoke.data.local.RollDao
 import com.pathfindergod.spoke.data.local.RollEntity
 import com.pathfindergod.spoke.ui.dice.DegreeOfSuccess
@@ -15,14 +17,20 @@ const val MAX_ROLL_HISTORY = 200
 
 class RollRepository(
     private val dao: RollDao,
+    private val db: AppDatabase? = null,
 ) {
+    /** Runs [block] inside a Room transaction when a database handle is available. */
+    suspend fun <T> transaction(block: suspend () -> T): T =
+        if (db != null) db.withTransaction { block() } else block()
     suspend fun recent(limit: Int = MAX_ROLL_HISTORY): List<RollRecord> =
         dao.recent(limit).map(::toRecord)
 
-    suspend fun persist(record: RollRecord): RollRecord {
+    suspend fun persist(record: RollRecord): RollRecord = transaction {
+        // Transactional: a process death between insert and trim left the
+        // MAX_ROLL_HISTORY invariant unenforced.
         val id = dao.insert(toEntity(record))
         dao.trimTo(MAX_ROLL_HISTORY)
-        return record.copy(id = id)
+        record.copy(id = id)
     }
 
     suspend fun clear() {
