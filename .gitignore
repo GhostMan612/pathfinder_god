@@ -37,6 +37,8 @@ _archive/
 
 # Campaign save files (runtime state, per-user)
 data/campaign_state*.json
+# Append-only runtime miss log written by POST /rules/missed and /rules/fetch.
+data/misses.jsonl
 
 # Command Center runtime logs
 tools/command_center/logs/
