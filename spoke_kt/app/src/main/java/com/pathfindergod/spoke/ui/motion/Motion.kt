@@ -14,6 +14,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import kotlinx.coroutines.delay
@@ -24,7 +25,11 @@ fun StaggerIn(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
-    var visible by remember { mutableStateOf(false) }
+    // rememberSaveable, not remember: inside a keyed Lazy item both are disposed
+    // when the row scrolls out of the window and recreated when it scrolls back,
+    // so scrolling a 200-row roll history down and up replayed every row's fade
+    // and slide. Saveable state survives disposal, so an item animates once.
+    var visible by rememberSaveable(index) { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         delay((index * 70).coerceAtMost(560).toLong())
         visible = true

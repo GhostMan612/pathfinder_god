@@ -160,7 +160,7 @@ private fun OracleBody(
         ) {
             EditionChip(
                 label = stringResource(R.string.rules_edition_all),
-                tag = GodTags.navTab("rules:all"),
+                tag = GodTags.rulesEdition("all"),
                 selected = edition == null,
             ) {
                 edition = null
@@ -168,7 +168,7 @@ private fun OracleBody(
             }
             EditionChip(
                 label = stringResource(R.string.rules_edition_1e),
-                tag = GodTags.navTab("rules:1e"),
+                tag = GodTags.rulesEdition("1e"),
                 selected = edition == "1e",
             ) {
                 edition = "1e"
@@ -176,7 +176,7 @@ private fun OracleBody(
             }
             EditionChip(
                 label = stringResource(R.string.rules_edition_2e),
-                tag = GodTags.navTab("rules:2e"),
+                tag = GodTags.rulesEdition("2e"),
                 selected = edition == "2e",
             ) {
                 edition = "2e"

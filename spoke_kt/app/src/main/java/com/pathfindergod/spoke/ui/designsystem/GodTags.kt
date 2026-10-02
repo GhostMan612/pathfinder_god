@@ -56,6 +56,16 @@ object GodTags {
 
     fun rule(rowId: Long): String = "pg:rules:card:$rowId"
     const val RULES_QUERY = "pg:rules:query"
+
+    // Edition chips used GodTags.navTab("rules:all"/"rules:1e"/"rules:2e"),
+    // borrowing the bottom-bar namespace for filter chips. Two nodes sharing a
+    // tag in one tree break onNodeWithTag lookups.
+    fun rulesEdition(edition: String): String = "pg:rules:edition:$edition"
+
+    // The map viewer reused heroBack for its own back link, so a test that
+    // navigated to a map and asserted the back button could match the hero
+    // detail node instead.
+    const val MAP_BACK = "pg:map:back"
     const val RULES_CLEAR = "pg:rules:clear"
     const val RULES_RESULT_COUNT = "pg:rules:result:count"
 

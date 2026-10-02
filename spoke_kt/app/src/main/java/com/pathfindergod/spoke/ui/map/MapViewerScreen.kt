@@ -94,7 +94,7 @@ fun MapViewerScreen(
                 GodBackLink(
                     text = godRtlText(R.string.map_back, R.string.map_back_rtl),
                     onClick = onBack,
-                    testTag = GodTags.heroBack,
+                    testTag = GodTags.MAP_BACK,
                     modifier = Modifier.padding(top = Spacing.md),
                 )
             }
@@ -153,7 +153,7 @@ private fun MapCanvas(
             GodBackLink(
                 text = godRtlText(R.string.map_back, R.string.map_back_rtl),
                 onClick = onBack,
-                testTag = GodTags.heroBack,
+                testTag = GodTags.MAP_BACK,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
                 GodChip(
