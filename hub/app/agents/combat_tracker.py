@@ -124,17 +124,39 @@ class CombatTrackerAgent:
             if name.lower().startswith("persistent"):
                 display = re.sub(r"\s*\d+d\d+\s*", " ", name).strip() or name
                 dice_match = re.search(r"(\d+d\d+)", name)
+                pending = 0
                 if dice_match:
-                    total, _, _ = roll_dice(dice_match.group(1))
-                    hp = max(0, hp - total)
-                    notes_parts.append(f"Took {total} {display} damage.")
+                    pending, _, _ = roll_dice(dice_match.group(1))
+                else:
+                    # Persistent damage without dice notation uses the
+                    # condition's flat value, e.g. "Persistent Fire 2" = 2.
+                    try:
+                        pending = int(cond.get("value", 0) or 0)
+                    except (TypeError, ValueError):
+                        pending = 0
+
+                # PF2e: the creature makes a flat check on a DC equal to the
+                # damage BEFORE taking that damage, and success ends the
+                # condition. The old order applied the damage first and used a
+                # fixed DC 15, so a creature that escaped still lost HP and the
+                # Spoke was told "Recovered" and "Took 2 damage" at once.
+                if pending <= 0:
+                    notes_parts.append(f"No persistent {display} damage; condition ends.")
+                    continue
 
                 flat_check = random.randint(1, 20)
-                if flat_check >= 15:
-                    notes_parts.append(f"Flat check {flat_check}: Recovered from {display}.")
+                if flat_check >= pending:
+                    notes_parts.append(
+                        f"Flat check {flat_check} vs DC {pending}: "
+                        f"Recovered from {display}."
+                    )
                     continue
-                else:
-                    notes_parts.append(f"Flat check {flat_check}: {display} persists.")
+
+                hp = max(0, hp - pending)
+                notes_parts.append(
+                    f"Flat check {flat_check} vs DC {pending}: failed, "
+                    f"took {pending} {display} damage."
+                )
 
             elif name.lower() == "dying":
                 if hp <= 0:

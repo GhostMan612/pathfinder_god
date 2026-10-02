@@ -4,23 +4,6 @@ info:
   description: A local Pathfinder GM (RAG + Ollama) served to the companion app.
   version: 0.1.0
 paths:
-  /health:
-    get:
-      tags:
-      - monitoring
-      - monitoring
-      summary: Health
-      description: 'Basic liveness probe - indicates the service is running.
-
-        Does NOT check dependencies.'
-      operationId: health_health_get
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HealthResponse'
   /ask:
     post:
       tags:
@@ -625,6 +608,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /health:
+    get:
+      tags:
+      - monitoring
+      - monitoring
+      summary: Health
+      description: 'Basic liveness probe - indicates the service is running.
+
+        Does NOT check dependencies.'
+      operationId: health_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
   /ready:
     get:
       tags:
@@ -635,15 +635,6 @@ paths:
 
         Verifies all critical dependencies.'
       operationId: readiness_ready_get
-      parameters:
-      - name: data_dir
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Data Dir
       responses:
         '200':
           description: Successful Response
@@ -651,12 +642,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReadinessResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
   /health/detailed:
     get:
       tags:
@@ -665,15 +650,6 @@ paths:
       summary: Detailed Health
       description: Detailed health check with system info and dependency status.
       operationId: detailed_health_health_detailed_get
-      parameters:
-      - name: data_dir
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Data Dir
       responses:
         '200':
           description: Successful Response
@@ -681,12 +657,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DetailedHealthResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
   /metrics:
     get:
       tags:
@@ -1633,33 +1603,50 @@ components:
       properties:
         name:
           type: string
+          maxLength: 120
+          minLength: 1
           title: Name
         alias:
           anyOf:
           - type: string
+            maxLength: 120
           - type: 'null'
           title: Alias
         role:
           type: string
+          enum:
+          - ally
+          - enemy
+          - neutral
+          - unknown
           title: Role
           default: unknown
         level:
           anyOf:
           - type: integer
+            maximum: 30.0
+            minimum: 0.0
           - type: 'null'
           title: Level
         ancestry:
           anyOf:
           - type: string
+            maxLength: 60
           - type: 'null'
           title: Ancestry
         class:
           anyOf:
           - type: string
+            maxLength: 60
           - type: 'null'
           title: Class
         disposition:
           type: string
+          enum:
+          - friendly
+          - hostile
+          - wary
+          - unknown
           title: Disposition
           default: unknown
         notes:

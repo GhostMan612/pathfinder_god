@@ -250,21 +250,40 @@ class TestPersistentDamageFlatCheck:
         assert "Flat check" in notes
 
     def test_persistent_damage_reports_taken_damage(self):
-        """Persistent damage notes report the rolled damage."""
+        """Persistent damage notes report the rolled damage when the check fails.
+
+        The old assertion was `damage >= 1`, which encoded the bug: the old code
+        applied the damage BEFORE the flat check, so a creature that recovered
+        still bled. Under the corrected order a d20 flat check against a DC of
+        1-6 usually succeeds, so 0 damage is the expected outcome most of the
+        time - `damage >= 1` was only ever passing by luck.
+        """
         conditions = [{"name": "Persistent Fire 1d6", "value": 1}]
         updated, notes, damage = CombatTrackerAgent.end_of_turn(
             conditions, current_hp=30
         )
-        assert damage >= 1
-        assert "Took" in notes
-        assert "Persistent Fire damage" in notes
+        assert 0 <= damage <= 6
+        assert "Flat check" in notes
+        if damage == 0:
+            assert "Recovered" in notes
+            assert "took" not in notes
+        else:
+            assert "took" in notes
 
     def test_persistent_damage_drops_to_zero_adds_dying(self):
-        """Damage dropping HP to 0 appends Dying 1."""
-        conditions = [{"name": "Persistent Fire 1d6", "value": 1}]
-        updated, notes, damage = CombatTrackerAgent.end_of_turn(
-            conditions, current_hp=1
-        )
-        assert damage >= 1
+        """Damage dropping HP to 0 appends Dying 1.
+
+        Retried until the flat check actually fails, because a d20 check against
+        a DC of 1-6 succeeds most of the time and asserting a single roll is
+        inherently flaky.
+        """
+        for _ in range(200):
+            conditions = [{"name": "Persistent Fire 1d6", "value": 1}]
+            updated, notes, damage = CombatTrackerAgent.end_of_turn(
+                conditions, current_hp=1
+            )
+            if damage >= 1:
+                break
+        assert damage >= 1, "flat check never failed in 200 attempts"
         assert any(c["name"] == "Dying" and c["value"] == 1 for c in updated)
         assert "Dying 1." in notes

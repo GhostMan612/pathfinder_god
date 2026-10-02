@@ -222,10 +222,17 @@ class NPCCompilerAgent:
                 "Bard": "cha"}.get(class_, "str")
 
     def _standard_array(self, level: int) -> dict[str, int]:
-        # 15, 14, 13, 12, 10, 8 with level boosts
-        base = {"str": 10, "dex": 12, "con": 14, "int": 13, "wis": 11, "cha": 8}
-        boosts = level # 5
-        return {k: v + (boosts if k in ["str", "dex", "con"] else 0) for k, v in base.items()}
+        # PF2e standard array: 15, 14, 13, 12, 10, 8.
+        #
+        # The previous base was 10/12/14/13/11/8 - not the standard array at all,
+        # despite the comment - and boosts = level added a point per level to
+        # STR/DEX/CON only, leaving INT/WIS/CHA at their base forever. At level 5
+        # that produced CON 19 and DEX 17, which are unreachable in PF2e and were
+        # then rejected by character_builder's own 8..18 range check.
+        scores = {"str": 15, "dex": 14, "con": 13, "int": 12, "wis": 10, "cha": 8}
+        # +1 at 1st level, then one ASI per level, capped at 18.
+        boosts = min(max(level, 0), 4)
+        return {k: min(v + boosts, 18) for k, v in scores.items()}
 
     def _skills_for_class(self, class_: str, level: int) -> list[dict]:
         class_skills = {

@@ -85,7 +85,12 @@ def create_app() -> FastAPI:
     app.include_router(combat.router)
     app.include_router(encounter.router)
     app.include_router(maps.router)
-    app.include_router(loot.router)
+
+    # loot.router was registered twice (lines 80 and 88). FastAPI emitted
+    #   UserWarning: Duplicate Operation ID generate_loot_generate_loot_post
+    # and POST /generate/loot appeared twice in /openapi.json, which breaks
+    # strict Kotlin openapi codegen. The first registration is the one that
+    # wins for routing, so loot must stay ahead of generate.router.
 
     return app
 

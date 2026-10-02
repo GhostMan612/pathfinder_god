@@ -164,14 +164,24 @@ class CharacterBuilderAgent:
             if model.proficiencies.defenses.fortitude < 1:
                 errors.append("Cleric requires fortitude >= trained (rank 1+)")
 
-        # 5. Use RulesLawyer validate_action for a sampling of key actions
-        #    (Trip, Hide, Recall Knowledge) to ensure skill ranks match class
-        key_actions = ["trip", "hide", "recall knowledge"]
+        # 5. RulesLawyer validate_action over a sampling of key actions.
+        #    Advisory only - these must NEVER invalidate a character.
+        #    Tripping and hiding require no proficiency in PF2e Core (you take a
+        #    circumstance penalty instead), and "recall knowledge" resolves to
+        #    Arcana in ACTION_SKILL, but the rules use the *relevant* Lore skill
+        #    (Religion/Nature/Arcana/Occultism/Society). Appending an error here
+        #    made build() return valid=False, so every character without trained
+        #    arcana - most of them - was permanently unbuildable.
+        key_actions = ["trip", "hide", "sneak"]
         sheet_dict = model.model_dump(mode="python")
         for action in key_actions:
             result: ValidationResult = self._lawyer.validate_action_sync(action, sheet_dict)
             if not result.legal:
-                errors.append(f"Action validation failed: {result.reason}")
+                logger.info(
+                    "advisory: %s untrained for this character (%s)",
+                    action,
+                    result.reason,
+                )
 
         return errors
 

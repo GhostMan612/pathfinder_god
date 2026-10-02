@@ -84,7 +84,10 @@ class DiceRoller:
         if term.is_flat:
             v = term.sign * term.flat
             return TermResult(term, [], [], v)
-        rolls = [random.randint(1, term.sides) for _ in range(term.count)]
+        # Use self._rng, not the module-level random. The stored RNG was dead, so
+        # roll_dice(notation, rng=...) silently discarded it and monster HP was
+        # never reproducible despite encounter_builder passing an RNG in.
+        rolls = [self._rng.randint(1, term.sides) for _ in range(term.count)]
         kept = list(rolls)
         if term.keep_highest >= 0:
             kept.sort(reverse=True)
@@ -148,7 +151,8 @@ def roll_dice(
     notation: str, rng: random.Random | None = None
 ) -> tuple[int, list[int], list[int]]:
     """Roll dice and return (total, all_rolls, kept_rolls)."""
-    roller = DiceRoller()
+    # The rng was accepted and thrown away, so seeding had no effect.
+    roller = DiceRoller(rng=rng)
     result = roller.roll(notation)
     all_rolls = []
     kept_rolls = []
