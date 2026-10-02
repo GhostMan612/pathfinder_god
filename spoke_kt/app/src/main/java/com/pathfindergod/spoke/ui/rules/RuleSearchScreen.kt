@@ -66,33 +66,50 @@ private class RuleVmFactory(
 }
 
 @Composable
-internal fun rememberRuleSearchViewModel(): RuleSearchViewModel? {
+internal fun rememberRuleSearchState(): RuleSearchState {
     val context = LocalContext.current
     var database by remember { mutableStateOf<RulesDatabase?>(null) }
     var failed by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         try {
             DatabaseAssetManager.ensureExtracted(context.applicationContext)
-            database = RulesDatabase.open(context.applicationContext)
+            database = RulesDatabase.get(context.applicationContext)
         } catch (_: Exception) {
             failed = true
         }
     }
-    if (failed) return null
-    val current = database ?: return null
+    if (failed) return RuleSearchState(null, true)
+    val current = database ?: return RuleSearchState(null, false)
     val repository = remember(current) { RuleRepository(current) }
-    return viewModel(factory = remember(current) { RuleVmFactory(repository) })
+    val vm = viewModel<RuleSearchViewModel>(
+        factory = remember(current) { RuleVmFactory(repository) },
+    )
+    return RuleSearchState(vm, false)
 }
+
+internal data class RuleSearchState(
+    val viewModel: RuleSearchViewModel?,
+    val failed: Boolean,
+)
 
 @Composable
 fun RuleSearchScreen() {
-    val viewModel = rememberRuleSearchViewModel()
+    val state = rememberRuleSearchState()
+    val viewModel = state.viewModel
     if (viewModel == null) {
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
         ) {
-            GodStatusText(text = stringResource(R.string.rules_extracting))
+            // `failed` used to return null too, so a corrupt asset, a full disk
+            // or a failed rename rendered "Unearthing the rulebook..." forever
+            // with no error, no retry and no way to tell a broken install from a
+            // slow one.
+            if (state.failed) {
+                GodStatusText(text = stringResource(R.string.rules_extract_failed))
+            } else {
+                GodStatusText(text = stringResource(R.string.rules_extracting))
+            }
         }
     } else {
         OracleBody(viewModel = viewModel)

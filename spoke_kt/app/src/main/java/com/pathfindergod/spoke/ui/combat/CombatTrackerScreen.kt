@@ -64,6 +64,7 @@ import com.pathfindergod.spoke.ui.designsystem.GodTexture
 import com.pathfindergod.spoke.ui.designsystem.GodTone
 import com.pathfindergod.spoke.ui.designsystem.Spacing
 import com.pathfindergod.spoke.ui.designsystem.godTouchHeight
+import com.pathfindergod.spoke.ui.theme.CritRed
 import com.pathfindergod.spoke.ui.theme.GoldAccent
 import com.pathfindergod.spoke.ui.theme.ParchmentSurface
 import com.pathfindergod.spoke.ui.theme.StatusGreen
@@ -105,6 +106,7 @@ fun CombatTrackerScreen(
     val audio = remember(context) { AudioService.get(context) }
     var summoning by rememberSaveable { mutableStateOf(false) }
     var name by rememberSaveable { mutableStateOf("") }
+    var nameError by rememberSaveable { mutableStateOf(false) }
     var initiative by rememberSaveable { mutableStateOf("") }
     var hp by rememberSaveable { mutableStateOf("") }
     val activeName = state.combatants.getOrNull(state.activeIndex)?.name
@@ -195,7 +197,14 @@ fun CombatTrackerScreen(
                 contentDescription = stringResource(R.string.a11y_combat_add),
                 testTag = GodTags.COMBAT_ADD,
                 onClick = {
-                    if (name.isBlank()) return@GodChip
+                    // An early `return@GodChip` with no feedback, no error text,
+                    // no announcement and no audio was indistinguishable from a
+                    // dropped tap. Surface the reason instead.
+                    if (name.isBlank()) {
+                        nameError = true
+                        return@GodChip
+                    }
+                    nameError = false
                     val maxHp = hp.toIntOrNull()?.coerceAtLeast(1) ?: 20
                     viewModel.addCombatant(
                         Combatant(
@@ -211,6 +220,13 @@ fun CombatTrackerScreen(
                     initiative = ""
                     hp = ""
                 },
+            )
+        }
+        if (nameError) {
+            GodStatusText(
+                text = stringResource(R.string.combat_name_required),
+                color = CritRed,
+                modifier = Modifier.padding(top = Spacing.xs),
             )
         }
         if (state.combatants.isEmpty()) {

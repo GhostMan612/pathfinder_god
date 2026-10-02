@@ -30,5 +30,20 @@ abstract class RulesDatabase : RoomDatabase() {
                 .openHelperFactory(factory)
                 .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
+
+        @Volatile
+        private var instance: RulesDatabase? = null
+
+        /**
+         * Process-wide singleton. `open` was a plain factory, and the call site
+         * invoked it inside `remember { }` in a composable, so every visit to the
+         * Rules tab - which navigation disposes - reopened the 58 MB rules DB
+         * with a new connection pool and InvalidationTracker poller, none ever
+         * closed.
+         */
+        fun get(context: Context): RulesDatabase =
+            instance ?: synchronized(this) {
+                instance ?: open(context.applicationContext).also { instance = it }
+            }
     }
 }

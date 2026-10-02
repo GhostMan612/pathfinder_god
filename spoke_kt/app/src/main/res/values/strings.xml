@@ -84,6 +84,7 @@
     <string name="a11y_condition_remove">Remove %1$s</string>
     <string name="a11y_condition_chip">Condition %1$s. Double tap to add.</string>
     <string name="a11y_condition_applied">%1$s is applied. Double tap to remove.</string>
+    <string name="rules_extract_failed">Rulebook unavailable. Reinstall the app to restore search.</string>
     <string name="a11y_turn_change">Round %1$d. %2$s acts.</string>
     <string name="a11y_turn_idle">No combat running.</string>
     <string name="a11y_combat_summon">Summon from the vault</string>
@@ -179,6 +180,8 @@
     <string name="combat_summon">Summon</string>
     <string name="combat_add">Add</string>
     <string name="combat_field_name">Name</string>
+    <string name="combat_name_required">Enter a name before adding a combatant.</string>
+    <string name="encounter_theme_required">Enter a theme before conjuring an encounter.</string>
     <string name="combat_end_turn">END TURN</string>
     <string name="combat_empty">No combatants — add the party and roll initiative.</string>
     <string name="combat_vault">Vault</string>

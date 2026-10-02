@@ -102,6 +102,7 @@ fun EncounterScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     var level by rememberSaveable { mutableStateOf("3") }
     var theme by rememberSaveable { mutableStateOf("") }
+    var themeError by rememberSaveable { mutableStateOf(false) }
     var difficulty by rememberSaveable { mutableStateOf("moderate") }
     val loading = state.phase == EncounterPhase.Loading
     Column(modifier = Modifier.fillMaxSize().padding(Spacing.lg)) {
@@ -154,7 +155,13 @@ fun EncounterScreen(
                 enabled = !loading,
                 onClickLabel = stringResource(R.string.a11y_encounter_conjure),
                 onClick = {
-                    if (theme.isBlank()) return@GodPrimaryButton
+                    // Same silent-no-op problem as the combat Add button: an
+                    // early return with no feedback reads as a dropped tap.
+                    if (theme.isBlank()) {
+                        themeError = true
+                        return@GodPrimaryButton
+                    }
+                    themeError = false
                     viewModel.generateEncounter(
                         level.toIntOrNull()?.coerceIn(1, 20) ?: 1,
                         difficulty,
@@ -162,6 +169,13 @@ fun EncounterScreen(
                     )
                 },
                 modifier = Modifier.padding(top = Spacing.md),
+            )
+        }
+        if (themeError) {
+            GodStatusText(
+                text = stringResource(R.string.encounter_theme_required),
+                color = CritRed,
+                modifier = Modifier.padding(top = Spacing.xs),
             )
         }
         (state.phase as? EncounterPhase.Error)?.let { error ->
