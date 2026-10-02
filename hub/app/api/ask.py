@@ -79,12 +79,12 @@ async def stream_endpoint(
     repo: CampaignRepository = Depends(get_repo),
 ) -> None:
     await websocket.accept()
+    orchestrator: LLMOrchestrator | None = None
     try:
         data = await websocket.receive_json()
         request = AskRequest(**data)
 
         orchestrator = LLMOrchestrator(repo)
-
         # Send start event. backend is reported per frame from now on: the
         # orchestrator yields (backend, chunk), so an offline fallback is no
         # longer mislabelled as an Ollama answer.
@@ -122,6 +122,14 @@ async def stream_endpoint(
             StreamEvent(type="error", message=str(e)).model_dump()
         )
     finally:
+        # The orchestrator owns three httpx clients, each with its own socket
+        # pool. stream_endpoint never closed them, so every stream connection
+        # permanently leaked three connection pools plus their file handles.
+        if orchestrator is not None:
+            try:
+                await orchestrator.close()
+            except Exception:
+                pass
         try:
             await websocket.close()
         except Exception:

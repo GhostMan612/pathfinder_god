@@ -142,6 +142,14 @@ CREATE INDEX IF NOT EXISTS idx_items_campaign ON items(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_quests_campaign ON quests(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_decisions_campaign ON player_decisions(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_party_campaign ON party_members(campaign_id);
+-- party_members declares UNIQUE(campaign_id, name) inside CREATE TABLE IF NOT
+-- EXISTS, so a database created before that line was added never received it and
+-- upsert_party_member's ON CONFLICT clause matched no constraint:
+-- "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint",
+-- making POST /campaign/party a live 500. A CREATE UNIQUE INDEX runs against an
+-- existing table, so this repairs the live database on next start.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_party_members_unique
+    ON party_members(campaign_id, name);
 CREATE INDEX IF NOT EXISTS idx_npcs_name ON npcs(name);
 CREATE INDEX IF NOT EXISTS idx_locations_name ON locations(name);
 CREATE INDEX IF NOT EXISTS idx_items_name ON items(name);

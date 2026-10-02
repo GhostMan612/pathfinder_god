@@ -81,7 +81,14 @@ class DiceViewModel(
         _state.value = if (die == current.die) {
             current
         } else {
-            current.copy(die = die, advantage = Advantage.STRAIGHT)
+            // Drop the previous result: keeping it left `face` reading the old
+            // die's kept value, so tapping d6 after rolling a natural 20 drew a
+            // hexagon containing the glyph "20" and re-announced the d20 crit.
+            current.copy(
+                die = die,
+                advantage = Advantage.STRAIGHT,
+                record = null,
+            )
         }
     }
 

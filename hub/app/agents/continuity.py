@@ -166,12 +166,29 @@ class ContinuityKeeper:
             logger.warning("Entity extraction returned non-JSON; returning empty entities")
             return ExtractedEntities()
 
+        if not isinstance(data, dict):
+            # phi4-mini sometimes returns a bare array or an object-shaped array.
+            # data.get() then raised AttributeError, and because the caller
+            # swallows exceptions into a warning, /campaign/note returned 200
+            # having written no entities, no summary and no session row.
+            logger.warning(
+                "Entity extraction returned %s, not an object; returning empty entities",
+                type(data).__name__,
+            )
+            return ExtractedEntities()
+
+        def _entries(key: str) -> list[dict]:
+            raw = data.get(key) or []
+            if not isinstance(raw, list):
+                return []
+            return [e for e in raw if isinstance(e, dict)]
+
         return ExtractedEntities(
-            npcs=[self._entity("npc", e) for e in data.get("npcs", [])],
-            locations=[self._entity("location", e) for e in data.get("locations", [])],
-            items=[self._entity("item", e) for e in data.get("items", [])],
-            quests=[self._entity("quest", e) for e in data.get("quests", [])],
-            decisions=[self._entity("decision", e) for e in data.get("decisions", [])],
+            npcs=[self._entity("npc", e) for e in _entries("npcs")],
+            locations=[self._entity("location", e) for e in _entries("locations")],
+            items=[self._entity("item", e) for e in _entries("items")],
+            quests=[self._entity("quest", e) for e in _entries("quests")],
+            decisions=[self._entity("decision", e) for e in _entries("decisions")],
         )
 
     @staticmethod
@@ -268,7 +285,30 @@ class ContinuityKeeper:
         except json.JSONDecodeError:
             logger.warning("Fact extraction returned non-JSON; returning empty facts")
             return []
-        return [Fact(**f) for f in fact_data]
+        if not isinstance(fact_data, list):
+            logger.warning(
+                "Fact extraction returned %s, not an array; returning empty facts",
+                type(fact_data).__name__,
+            )
+            return []
+        # A single malformed entry used to raise TypeError/ValueError out of
+        # Fact(**f), which the caller swallowed - so one bad object from the
+        # model discarded every other fact in the response.
+        out: list[Fact] = []
+        for f in fact_data:
+            if not isinstance(f, dict):
+                continue
+            try:
+                out.append(
+                    Fact(
+                        fact=str(f.get("fact", "")),
+                        category=str(f.get("category") or "mechanic"),
+                        confidence=float(f.get("confidence", 1.0)),
+                    )
+                )
+            except (TypeError, ValueError) as exc:
+                logger.warning(f"skipping malformed fact {f!r}: {exc}")
+        return out
 
     def get_campaign_context(self, campaign_id: int) -> dict[str, Any]:
         """Build context for next session: recent summary + relevant entities."""

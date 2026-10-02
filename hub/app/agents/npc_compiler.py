@@ -159,11 +159,24 @@ class NPCCompilerAgent:
 
         # Parse ancestry/class from concept (simplified)
         concept_lower = concept.lower()
-        ancestry = "Human"
-        if "dwarf" in concept_lower: ancestry = "Dwarf"
-        elif "elf" in concept_lower: ancestry = "Elf"
-        elif "goblin" in concept_lower: ancestry = "Goblin"
-        elif "halfling" in concept_lower: ancestry = "Halfling"
+        # Match on stems. The previous equality-free substring test looked correct but
+        # "dwarf" is not a substring of "dwarven" (d-w-a-r-f vs d-w-a-r-v), nor is
+        # "elf" of "elven". Every adjectival form therefore fell through to Human,
+        # so a "Dwarven alchemist" got Human feats.
+        for stem, name in (
+            ("halfling", "Halfling"),
+            ("dwarf", "Dwarf"),
+            ("gnome", "Gnome"),
+            ("goblin", "Goblin"),
+            ("elf", "Elf"),
+            ("half-orc", "Half-Orc"),
+            ("orc", "Orc"),
+            ("tiefling", "Tiefling"),
+            ("human", "Human"),
+        ):
+            if stem in concept_lower:
+                ancestry = name
+                break
 
         class_ = "Fighter"
         if "wizard" in concept_lower: class_ = "Wizard"
@@ -276,16 +289,19 @@ async def save_npc_to_db_tool(npc_json: dict, repo: CampaignRepository) -> dict:
     """Tool: save_npc_to_db(npc_json)"""
     npc_id = repo.upsert_npc(
         campaign_id=1,
-        name=npc_json["name"],
-        alias=None,
+        name=npc_json.get("name") or "Unknown",
+        # NPCStatBlock declares class_, and create_npc_tool returns
+        # npc.__dict__, so there is no "class" key - the documented
+        # create_npc -> save_npc_to_db flow raised KeyError: 'class'.
+        alias=npc_json.get("alias"),
         # schema.sql CHECKs restrict role to ally|enemy|neutral|unknown and
         # disposition to friendly|hostile|wary|unknown. "npc"/"neutral" both
         # violated those, so every save raised IntegrityError and the GM was
         # told the NPC had been stored when it had not.
         role="neutral",
-        level=npc_json["level"],
-        ancestry=npc_json["ancestry"],
-        class_=npc_json["class"],
+        level=npc_json.get("level"),
+        ancestry=npc_json.get("ancestry"),
+        class_=npc_json.get("class_") or npc_json.get("class"),
         disposition="unknown",
         notes=json.dumps({"personality": npc_json.get("personality", ""), "hooks": npc_json.get("hooks", [])})
     )

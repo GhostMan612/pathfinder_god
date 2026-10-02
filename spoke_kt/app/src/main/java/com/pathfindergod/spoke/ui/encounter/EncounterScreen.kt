@@ -89,7 +89,7 @@ internal fun rememberEncounterViewModel(): EncounterViewModel {
     val prefs = remember { AppPreferences(context) }
     val api = remember { HubApiFactory.get(prefs.restUrl()) }
     val repository = remember {
-        EncounterRepository(AppDatabase.create(context.applicationContext), api)
+        EncounterRepository(AppDatabase.get(context.applicationContext), api)
     }
     return viewModel(factory = remember { EncounterVmFactory(repository, api) })
 }
@@ -211,7 +211,9 @@ fun EncounterScreen(
                 }
                 itemsIndexed(
                     state.activeMonsters,
-                    key = { _, monster -> monster.name + monster.level },
+                    // The hub parses the LLM array with no dedupe, so two entries can share a name
+    // and level. A duplicate lazy key throws and kills the process.
+    key = { index, _ -> "monster-$index" },
                 ) { index, monster ->
                     StaggerIn(index = index, modifier = Modifier.animateItem()) {
                         MonsterCard(monster = monster)

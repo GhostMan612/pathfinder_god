@@ -74,7 +74,7 @@ internal fun rememberCharacterViewModel(): CharacterViewModel {
     val prefs = remember { AppPreferences(context) }
     val repository = remember {
         CharacterRepository(
-            AppDatabase.create(context.applicationContext),
+            AppDatabase.get(context.applicationContext),
             buildHubApi(prefs.restUrl()),
         )
     }

@@ -591,7 +591,12 @@ private fun PitRig.install(assets: PitAssets) {
     }
     installDie(assets)
     installGround(assets)
-    if (!assets.discardOnChange || booted) installDisc(assets)
+    // Always reinstall the contact disc. The old guard was
+    // `if (!assets.discardOnChange || booted)`, and discardOnChange is true, so
+    // on a die change the condition was false - but releaseBuffers() above had
+    // already destroyed discRenderable. Rolling a d20 then tapping d4 made the
+    // soft shadow vanish for the rest of the session.
+    installDisc(assets)
     mesh = assets.mesh
     currentDie = assets.die
     refreshDisplay()

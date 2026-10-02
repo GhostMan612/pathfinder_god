@@ -116,6 +116,11 @@ fun CombatantCard(
                 rise.snapTo(0f)
                 rise.animateTo(1f, tween(900))
                 floater = null
+                // hpDelta was never cleared, so hpDescription stayed pinned to
+                // the FIRST HP change. Heal a combatant back to full and the
+                // live region still announced "Goblin took 5 damage, now
+                // 12/12" - a false statement about current HP.
+                hpDelta = null
             }
             if (delta < 0) {
                 launch {

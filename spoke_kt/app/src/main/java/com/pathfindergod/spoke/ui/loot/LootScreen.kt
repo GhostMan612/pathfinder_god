@@ -196,7 +196,11 @@ private fun HoardList(
         modifier = modifier.fillMaxWidth().padding(top = Spacing.md),
         verticalArrangement = Arrangement.spacedBy(Dimens.gridSpacing),
     ) {
-        itemsIndexed(items, key = { _, item -> item.name + item.level }) { index, item ->
+        // Keyed on index, not name+level: the hub returns one LLM-authored item per
+    // request with no uniqueness check, so two Generate taps routinely yield
+    // identical names at identical levels. A duplicate key throws from the lazy
+    // list's saveable-state registry and takes the process down.
+    itemsIndexed(items, key = { index, _ -> "loot-$index" }) { index, item ->
             StaggerIn(index = index, modifier = Modifier.animateItem()) {
                 LootCard(item = item, craftDc = craftDc)
             }

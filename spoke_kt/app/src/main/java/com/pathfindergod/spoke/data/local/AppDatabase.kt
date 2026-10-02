@@ -67,5 +67,22 @@ abstract class AppDatabase : RoomDatabase() {
                 .openHelperFactory(factory)
                 .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
+
+        @Volatile
+        private var instance: AppDatabase? = null
+
+        /**
+         * Process-wide singleton. `create` was a plain factory returning a new
+         * RoomDatabase on every call, and all seven call sites invoke it inside
+         * `remember { }` in a composable. Because navigation uses
+         * popUpTo(saveState)/restoreState, which *disposes* the destination,
+         * every tab visit minted another live database - its own SQLite
+         * connection pool and InvalidationTracker poller - and nothing ever
+         * closed any of them.
+         */
+        fun get(context: Context): AppDatabase =
+            instance ?: synchronized(this) {
+                instance ?: create(context.applicationContext).also { instance = it }
+            }
     }
 }

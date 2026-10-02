@@ -18,6 +18,8 @@ from fastapi import (
     Request,
     Response,
 )
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from app.agents.continuity import ContinuityAgent, ContinuityKeeper
@@ -260,50 +262,114 @@ async def import_campaign(
         repo.get_or_create_campaign(campaign_id)
         if import_data.replace_existing:
             with repo._conn() as conn:
-                conn.execute("UPDATE campaigns SET name=?, edition=? WHERE id=?", 
-                           (import_data.campaign.get("name"), import_data.campaign.get("edition"), campaign_id))
-    
+                # campaigns.name and .edition are NOT NULL, so a partial
+                # campaign payload used to raise IntegrityError -> 500.
+                conn.execute(
+                    "UPDATE campaigns SET name=?, edition=? WHERE id=?",
+                    (
+                        import_data.campaign.get("name") or f"Campaign {campaign_id}",
+                        import_data.campaign.get("edition") or "2e",
+                        campaign_id,
+                    ),
+                )
+
+    # Every block below used to splat the raw row with **row. export_campaign
+    # emits SELECT *-shaped dicts carrying id, campaign_id, created_at,
+    # updated_at and DB column names (class, type, stats_json, traits_json),
+    # while the repository signatures want class_, type_, stats, traits. The
+    # first campaign_id collision alone was
+    #   TypeError: upsert_party_member() got multiple values for 'campaign_id'
+    # so /campaign/import could not import its own export - backup/restore was
+    # 100% broken. Fields are now whitelisted and renamed explicitly.
+    def _json_list(value) -> list:
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except (TypeError, ValueError):
+                return []
+        return value or []
+
     if import_data.party:
         if import_data.replace_existing:
             with repo._conn() as conn:
                 conn.execute("DELETE FROM party_members WHERE campaign_id = ?", (campaign_id,))
         for member in import_data.party:
-            repo.upsert_party_member(campaign_id=campaign_id, **member)
-    
+            repo.upsert_party_member(
+                campaign_id=campaign_id,
+                name=str(member.get("name") or "Unnamed"),
+                player_name=member.get("player_name"),
+                class_=member.get("class_", member.get("class")),
+                level=int(member.get("level") or 1),
+                ancestry=member.get("ancestry"),
+                background=member.get("background"),
+                stats=_json_list(member.get("stats", member.get("stats_json"))) or None,
+            )
+
     if import_data.npcs:
         if import_data.replace_existing:
             with repo._conn() as conn:
                 conn.execute("DELETE FROM npcs WHERE campaign_id = ?", (campaign_id,))
         for npc in import_data.npcs:
-            repo.upsert_npc(campaign_id=campaign_id, **npc)
-    
+            repo.upsert_npc(
+                campaign_id=campaign_id,
+                name=str(npc.get("name") or "Unnamed"),
+                alias=npc.get("alias"),
+                role=npc.get("role") or "unknown",
+                level=npc.get("level"),
+                ancestry=npc.get("ancestry"),
+                class_=npc.get("class_", npc.get("class")),
+                disposition=npc.get("disposition") or "unknown",
+                notes=npc.get("notes"),
+            )
+
     if import_data.locations:
         if import_data.replace_existing:
             with repo._conn() as conn:
                 conn.execute("DELETE FROM locations WHERE campaign_id = ?", (campaign_id,))
         for loc in import_data.locations:
-            repo.upsert_location(campaign_id=campaign_id, **loc)
-    
+            repo.upsert_location(
+                campaign_id=campaign_id,
+                name=str(loc.get("name") or "Unnamed"),
+                type_=loc.get("type") or loc.get("type_") or "other",
+                parent_name=loc.get("parent_name"),
+                description=loc.get("description"),
+            )
+
     if import_data.items:
         if import_data.replace_existing:
             with repo._conn() as conn:
                 conn.execute("DELETE FROM items WHERE campaign_id = ?", (campaign_id,))
         for item in import_data.items:
-            repo.upsert_item(campaign_id=campaign_id, **item)
-    
+            repo.upsert_item(
+                campaign_id=campaign_id,
+                name=str(item.get("name") or "Unnamed"),
+                type_=item.get("type") or item.get("type_") or "other",
+                level=item.get("level"),
+                traits=_json_list(item.get("traits", item.get("traits_json"))),
+                holder_name=item.get("holder_name"),
+                location_name=item.get("location_name"),
+                notes=item.get("notes"),
+            )
+
     if import_data.quests:
         if import_data.replace_existing:
             with repo._conn() as conn:
                 conn.execute("DELETE FROM quests WHERE campaign_id = ?", (campaign_id,))
         for quest in import_data.quests:
-            repo.upsert_quest(campaign_id=campaign_id, **quest)
-    
-    if import_data.party_members:
-        if import_data.replace_existing:
-            with repo._conn() as conn:
-                conn.execute("DELETE FROM party_members WHERE campaign_id = ?", (campaign_id,))
-        for member in import_data.party_members:
-            repo.upsert_party_member(campaign_id=campaign_id, **member)
+            repo.upsert_quest(
+                campaign_id=campaign_id,
+                name=str(quest.get("name") or "Unnamed"),
+                status=quest.get("status") or "active",
+                giver_name=quest.get("giver_name"),
+                description=quest.get("description"),
+                objectives=_json_list(quest.get("objectives", quest.get("objectives_json"))),
+                rewards=_json_list(quest.get("rewards", quest.get("rewards_json"))),
+            )
+
+    # party_members is deliberately NOT handled here: it targets the same table as
+    # `party` (get_party() and SELECT * FROM party_members are the same rows).
+    # With replace_existing the second DELETE wiped what the first block had
+    # just inserted, so a payload where the two differed lost the party silently.
 
     if import_data.sessions:
         if import_data.replace_existing:
@@ -396,13 +462,16 @@ async def download_backup(
 
 
 class NPCRequest(BaseModel):
-    name: str
-    alias: str | None = None
-    role: str = "unknown"
-    level: int | None = None
-    ancestry: str | None = None
-    class_: str | None = Field(None, alias="class")
-    disposition: str = "unknown"
+    name: str = Field(..., min_length=1, max_length=120)
+    alias: str | None = Field(None, max_length=120)
+    # schema.sql CHECKs restrict these to a fixed set. As free strings any other
+    # value raised an unhandled sqlite3.IntegrityError -> 500, so
+    # {"name":"X","role":"silly"} returned a server error instead of a 422.
+    role: Literal["ally", "enemy", "neutral", "unknown"] = "unknown"
+    level: int | None = Field(None, ge=0, le=30)
+    ancestry: str | None = Field(None, max_length=60)
+    class_: str | None = Field(None, alias="class", max_length=60)
+    disposition: Literal["friendly", "hostile", "wary", "unknown"] = "unknown"
     notes: str | None = None
 
 

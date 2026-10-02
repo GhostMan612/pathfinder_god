@@ -10,6 +10,8 @@ biographies and backstories the project calls for.
 """
 from __future__ import annotations
 
+import re
+
 _MODE_TOKENS: list[tuple[str, tuple[str, ...]]] = [
     ("character", ("character", "build", "build me", "level", "class", "race", "ancestry",
                    "background", "feat", "ability score", "wizard", "rogue", "pc", "player character")),
@@ -72,9 +74,22 @@ MODE_INSTRUCTIONS: dict[str, str] = {
 def detect_mode(user_query: str) -> str:
     """Classify a request into a generation mode (defaults to ``general``)."""
     lowered = user_query.lower()
+    # Word-boundary matching. Substring matching had no boundaries, and
+    # "character" is tested first, so its tokens won over everything:
+    #   "build me a dungeon map"  -> character   ('class' inside 'dungeon'... and
+    #                                         "dungeon" matched a character token)
+    #   "describe the classic duel" -> character ('class' inside 'classic')
+    #   "the grace of the gods"   -> character ('race' inside 'grace')
+    # MODE_INSTRUCTIONS then framed the answer as a character build.
+    words = set(re.findall(r"[a-z0-9'-]+", lowered))
+    padded = f" {lowered} "
     for mode, tokens in _MODE_TOKENS:
-        if any(tok in lowered for tok in tokens):
-            return mode
+        for tok in tokens:
+            if " " in tok:
+                if f" {tok} " in padded:
+                    return mode
+            elif tok in words:
+                return mode
     return "general"
 
 

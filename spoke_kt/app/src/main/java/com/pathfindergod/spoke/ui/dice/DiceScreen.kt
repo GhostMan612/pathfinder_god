@@ -5,6 +5,8 @@
 
 package com.pathfindergod.spoke.ui.dice
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -77,7 +79,7 @@ private class DiceVmFactory(
 @Composable
 fun DiceScreen(initialDie: Die? = null) {
     val context = LocalContext.current
-    val database = remember { AppDatabase.create(context.applicationContext) }
+    val database = remember { AppDatabase.get(context.applicationContext) }
     val repository = remember(database) { RollRepository(database.rollDao()) }
     val audio = remember { AudioService.get(context) }
     val preferences = remember { AppPreferences(context.applicationContext) }
@@ -286,7 +288,13 @@ private fun CountRow(
     onSelect: (Int) -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        // Scrollable: there is no horizontalScroll anywhere in this lane, so a
+        // Row of 11 chips on a 360dp screen squeezed the last ones below the
+        // 48dp minimum. TN 20 / TN 25 - the highest-value targets - collapsed
+        // to untappable slivers.
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(Spacing.xs, Alignment.CenterHorizontally),
     ) {
         Text(
@@ -314,7 +322,13 @@ private fun ModifierRow(
     onSelect: (Int) -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        // Scrollable: there is no horizontalScroll anywhere in this lane, so a
+        // Row of 11 chips on a 360dp screen squeezed the last ones below the
+        // 48dp minimum. TN 20 / TN 25 - the highest-value targets - collapsed
+        // to untappable slivers.
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(Spacing.xs, Alignment.CenterHorizontally),
     ) {
         Text(
@@ -342,7 +356,13 @@ private fun KeepRow(
     onSelect: (Int?) -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        // Scrollable: there is no horizontalScroll anywhere in this lane, so a
+        // Row of 11 chips on a 360dp screen squeezed the last ones below the
+        // 48dp minimum. TN 20 / TN 25 - the highest-value targets - collapsed
+        // to untappable slivers.
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(Spacing.xs, Alignment.CenterHorizontally),
     ) {
         Text(
@@ -382,7 +402,9 @@ private fun ModeRow(
 ) {
     Column {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(Spacing.xs, Alignment.CenterHorizontally),
         ) {
             Advantage.entries.forEach { entry ->

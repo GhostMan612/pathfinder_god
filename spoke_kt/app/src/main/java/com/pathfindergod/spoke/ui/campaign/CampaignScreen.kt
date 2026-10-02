@@ -84,7 +84,7 @@ internal fun rememberCampaignViewModel(): CampaignViewModel {
     val prefs = remember { AppPreferences(context) }
     val api = remember { HubApiFactory.get(prefs.restUrl()) }
     val repository = remember {
-        CampaignRepository(AppDatabase.create(context.applicationContext), api)
+        CampaignRepository(AppDatabase.get(context.applicationContext), api)
     }
     return viewModel(factory = remember { CampaignVmFactory(repository) })
 }
@@ -156,7 +156,9 @@ fun CampaignScreen(
                     modifier = Modifier.fillMaxWidth().weight(1f).padding(top = Spacing.md),
                     verticalArrangement = Arrangement.spacedBy(Dimens.gridSpacing),
                 ) {
-                    itemsIndexed(notes, key = { _, note -> note.hashCode() }) { index, note ->
+                    // Raw LLM note strings can repeat, and String.hashCode() collides. A duplicate
+    // key throws from the lazy list's saveable-state registry.
+    itemsIndexed(notes, key = { index, _ -> "note-$index" }) { index, note ->
                         StaggerIn(index = index, modifier = Modifier.animateItem()) {
                             GodCard(contentPadding = PaddingValues(Dimens.cardPaddingTight)) {
                                 Text(

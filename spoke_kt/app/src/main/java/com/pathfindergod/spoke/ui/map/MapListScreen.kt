@@ -84,7 +84,7 @@ internal fun rememberMapViewModel(): MapViewModel {
     val prefs = remember { AppPreferences(context) }
     val api = remember { HubApiFactory.get(prefs.restUrl()) }
     val repository = remember {
-        MapRepository(AppDatabase.create(context.applicationContext), api)
+        MapRepository(AppDatabase.get(context.applicationContext), api)
     }
     return viewModel(factory = remember { MapVmFactory(repository, api) })
 }
