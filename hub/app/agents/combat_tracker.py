@@ -181,8 +181,13 @@ class CombatTrackerAgent:
             else:
                 pass
 
-            cond["value"] = value
-            updated.append(cond)
+            # Work on a copy. end_of_turn was writing cond["value"] and
+            # cond["duration_rounds"] onto the caller's dicts and returning the
+            # same objects, so the caller's list was mutated as a side effect
+            # and "updated" aliased the input.
+            entry = dict(cond)
+            entry["value"] = value
+            updated.append(entry)
 
         damage_taken = max(0, int(current_hp) - hp)
         if damage_taken > 0 and hp <= 0 and not any(

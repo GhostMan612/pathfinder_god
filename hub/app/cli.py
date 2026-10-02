@@ -53,10 +53,19 @@ def main() -> None:
             print("Goodbye.")
             break
         if query == "/save":
-            for speaker, message in history:
-                if speaker == "user":
-                    continue
-            print(f"Saved campaign state to {store.path}")
+            # The loop body was empty and store.save()/add_note() was never
+            # called, so /save printed "Saved campaign state to ..." having
+            # written nothing. Persist the GM transcript as a note.
+            transcript = "\n".join(
+                f"{speaker.title()}: {message}"
+                for speaker, message in history
+                if speaker != "user"
+            )
+            if transcript.strip():
+                store.add_note("[session transcript]", transcript)
+                print(f"Saved campaign state to {store.path}")
+            else:
+                print("Nothing to save yet - roll or ask something first.")
             continue
         if query == "/new":
             store.reset()

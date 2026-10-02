@@ -40,8 +40,13 @@ async def generate_loot(
     llm = OllamaClient(settings.ollama_host)
     lawyer = RulesLawyerAgent(repo)
     agent = LootGeneratorAgent(llm, lawyer)
-    result: LootBuildResult = await agent.build(request.prompt)
-    await llm.close()
+    try:
+        result: LootBuildResult = await agent.build(request.prompt)
+    finally:
+        # try/finally, not a bare close: LootGeneratorAgent.build awaits
+        # calculate_dc outside any internal try, so an exception there used to
+        # propagate and leak the httpx client and its socket pool.
+        await llm.close()
     return LootResponse(
         valid=result.valid,
         item=result.item.model_dump(mode="python") if result.item else None,

@@ -18,7 +18,11 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
+import logging
+
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from ..config import Settings
 from ..rag.search import RuleHit
@@ -69,8 +73,16 @@ class LLMRouter:
     ) -> LLMResult:
         """Return a full answer, walking the fallback chain until one works."""
         text = await self._ollama(prompt, system)
-        if text is not None:
+        # Guard on content, not just None. _ollama returns
+        # resp.json().get("response", ""), which is "" when Ollama answers 200
+        # with an empty body, and "" is not None - so complete() returned an
+        # empty answer as a successful Ollama result and never reached the
+        # fallback. The documented "you always get a useful answer, even fully
+        # offline" contract broke exactly when Ollama was half-alive.
+        if text and text.strip():
             return LLMResult(text=text, backend="ollama")
+        if text is not None:
+            logger.debug("Ollama returned an empty completion; using raw excerpts")
 
         return LLMResult(text=_raw_excerpts(hits or []), backend="raw-excerpts")
 

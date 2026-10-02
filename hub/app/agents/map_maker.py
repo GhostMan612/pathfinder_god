@@ -12,6 +12,7 @@ Generates print-ready battle maps from natural language: a Player view
 from __future__ import annotations
 
 import base64
+import asyncio
 import io
 import json
 import logging
@@ -290,7 +291,13 @@ class MapMakerAgent:
             )
 
         try:
-            gm_b64, player_b64 = self.render(layout, grid_enabled)
+            # render() is fully synchronous Pillow work - two 2500x2500 RGBA
+            # images plus PNG encoding, measured at 318 ms - called directly
+            # from an async def. That blocked the event loop for a third of a
+            # second per map request, stalling /health and every WS stream.
+            gm_b64, player_b64 = await asyncio.to_thread(
+                self.render, layout, grid_enabled
+            )
         except Exception as e:
             logger.error(f"Map rendering failed: {e}")
             return BuildResult(False, None, None, None, f"Map rendering failed: {e}")

@@ -10,7 +10,7 @@ Rules Search endpoint — Raw FTS5 lookup (no LLM).
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.api.deps import get_repo
 from app.db.repository import CampaignRepository
@@ -62,12 +62,14 @@ class FetchRequest(BaseModel):
 
 
 class MissedQuery(BaseModel):
-    q: str
-    edition: str = "both"
+    q: str = Field(..., min_length=1, max_length=200)
+    edition: Literal["1e", "2e", "both"] = "both"
 
 
 class MissedBatch(BaseModel):
-    queries: list[MissedQuery]
+    # Bounded: the batch was parsed whole before the [:200] slice, and each
+    # entry costs a synchronous open/write/close on the event loop.
+    queries: list[MissedQuery] = Field(..., max_length=200)
 
 
 @router.post("/fetch", response_model=RuleHit)

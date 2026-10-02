@@ -13,6 +13,7 @@ the database permanently more complete.
 from __future__ import annotations
 
 import json
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -44,7 +45,11 @@ def log_miss(query: str, edition: str = "both", source: str = "spoke") -> None:
 
 def read_misses(limit: int = 500) -> list[dict[str, Any]]:
     try:
-        lines = miss_path().read_text(encoding="utf-8").splitlines()
+        # Read only the tail. misses.jsonl is append-only with no size cap and is
+        # reachable via POST /rules/missed, so limit=1000 used to load the whole
+        # file into memory just to slice the last 1000 lines.
+        with miss_path().open("r", encoding="utf-8") as fh:
+            lines = list(deque(fh, maxlen=max(limit, 1)))
     except FileNotFoundError:
         return []
     except Exception:

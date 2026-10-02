@@ -70,8 +70,12 @@ async def build_character_endpoint(
     llm = OllamaClient(settings.ollama_host)
     lawyer = RulesLawyerAgent(repo)
     agent = CharacterBuilderAgent(llm, lawyer)
-    result: BuildResult = await agent.build(request.prompt)
-    await llm.close()
+    try:
+        result: BuildResult = await agent.build(request.prompt)
+    finally:
+        # try/finally: _validate_with_lawyer runs outside any internal try, so
+        # an exception there leaked the httpx client and its socket pool.
+        await llm.close()
     return BuildCharacterResponse(
         valid=result.valid,
         character=result.character.model_dump(mode="python") if result.character else None,

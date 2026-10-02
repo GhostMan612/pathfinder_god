@@ -62,7 +62,16 @@ async def generate_map(request: MapRequest) -> MapResponse:
         await llm.close()
 
     if not result.valid:
-        raise HTTPException(status_code=400, detail=result.error or "Invalid map layout")
+        # result.error can be "LLM generation failed: ...", "Map rendering
+        # failed: ..." or "Pillow not available" - all server-side. Reporting
+        # them as 400 told the client its request was malformed when the hub was
+        # at fault. Only a genuinely invalid layout is a 400.
+        error = result.error or "Invalid map layout"
+        client_fault = "invalid json" in error.lower() or "out of bounds" in error.lower()
+        raise HTTPException(
+            status_code=400 if client_fault else 500,
+            detail=error,
+        )
 
     return MapResponse(
         valid=result.valid,
