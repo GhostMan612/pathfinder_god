@@ -139,8 +139,21 @@ async def get_current_user(
     """Extract and validate user identity from JWT or API key."""
     
     if api_key:
-        if api_key.startswith("pfg_"):
+        # This used to be `if api_key.startswith("pfg_"): return ...`, so any
+        # string beginning with pfg_ authenticated as a valid principal.
+        # hash_api_key and verify_api_key were dead code - never called anywhere -
+        # and /campaign/export proved it by returning a full campaign dump to
+        # X-API-Key: pfg_x. The hub binds 0.0.0.0:8000, so anything on the LAN
+        # could read and destroy the campaign.
+        expected = (settings.api_key_sha256 or "").strip()
+        if not expected:
+            raise HTTPException(
+                status_code=401,
+                detail="API-key authentication is not configured",
+            )
+        if verify_api_key(api_key, expected):
             return {"type": "api_key", "key": api_key[:8] + "..."}
+        raise HTTPException(status_code=403, detail="Invalid API key")
     
     if credentials:
         try:

@@ -5,8 +5,10 @@
 """Shared test fixtures — a tiny FTS5 rules DB standing in for the 500MB real one."""
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 import sys
+from app.config import get_settings as _cached_get_settings
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -18,6 +20,8 @@ from app import main
 from app.config import Settings
 from app.service import GodService
 from app.state.campaign import CampaignStore
+
+TEST_API_KEY = "pfg_test_key_12345"
 
 _SAMPLE_ROWS = [
     ("2E", "action", "Flanking",
@@ -67,8 +71,21 @@ def _hermetic_settings(rules_db_dir: Path, monkeypatch):
     test_settings = Settings(
         data_dir=rules_db_dir,
         campaign_state_path=rules_db_dir / "campaign_state.json",
+        # get_current_user verified only that a key started with "pfg_", so this
+        # fixture's hard-coded header authenticated without any comparison at
+        # all. api_key_sha256 is the value the real Spoke must present.
+        api_key_sha256=hashlib.sha256(TEST_API_KEY.encode()).hexdigest(),
     )
     monkeypatch.setattr(app.config, "get_settings", lambda: test_settings)
+    # `Depends(get_settings)` captured the function object when the routes were
+    # declared, so rebinding the module attribute alone did not affect
+    # get_current_user. Set the env var and clear the lru_cache so the real
+    # dependency re-reads a Settings that carries api_key_sha256.
+    monkeypatch.setenv(
+        "PFGOD_API_KEY_SHA256",
+        hashlib.sha256(TEST_API_KEY.encode()).hexdigest(),
+    )
+    _cached_get_settings.cache_clear()
     for module_name, module in list(sys.modules.items()):
         if not module_name.startswith("app."):
             continue
@@ -88,6 +105,7 @@ def _create_test_client(rules_db_dir: Path) -> TestClient:
     test_settings = Settings(
         data_dir=rules_db_dir,
         campaign_state_path=rules_db_dir / "campaign_state.json",
+        api_key_sha256=hashlib.sha256(TEST_API_KEY.encode()).hexdigest(),
     )
     svc = GodService(test_settings)
 
@@ -156,5 +174,5 @@ def client(rules_db_dir: Path):
 def authenticated_client(rules_db_dir: Path) -> TestClient:
     """Client with a valid API key for authenticated endpoints."""
     client = _create_test_client(rules_db_dir)
-    client.headers["X-API-Key"] = "pfg_test_key_12345"
+    client.headers["X-API-Key"] = TEST_API_KEY
     return client
