@@ -34,3 +34,16 @@ include = ["app*"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# pytest-asyncio leaves its loop scope unset by default, which emits a
+# PytestDeprecationWarning every run and changes meaning in a future release.
+asyncio_default_fixture_loop_scope = "function"
+# "Zero warnings" is a gate, not a vibe: any warning -- ours or a dependency's -- fails
+# the suite, so a regression cannot quietly reintroduce one.
+filterwarnings = [
+    "error",
+    # Third-party, import-time, and unfixable from this repo without a framework major
+    # bump: starlette 1.6.0 deprecates httpx in starlette.testclient and asks for httpx2.
+    # Our pins (fastapi 0.141.1 / starlette 1.6.0 / httpx 0.28.1) are the released
+    # combination; the only upgrade that clears it is a starlette release we do not have.
+    "ignore:Using .httpx. with .starlette.testclient. is deprecated",
+]

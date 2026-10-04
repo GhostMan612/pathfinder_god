@@ -8,7 +8,7 @@ Campaign API — REST endpoints for campaign state, notes, and continuity.
 """
 import json
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import (
     APIRouter,
@@ -232,7 +232,7 @@ async def export_campaign(
         party_members=party_members,
         notes=notes,
         decisions=decisions,
-        exported_at=datetime.utcnow().isoformat(),
+        exported_at=datetime.now(UTC).isoformat(),
         version="1.0",
     )
     
@@ -456,7 +456,7 @@ async def download_backup(
 
     from fastapi.responses import Response
     
-    filename = f"pathfinder_campaign_{campaign_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
+    filename = f"pathfinder_campaign_{campaign_id}_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}.json"
     
     return Response(
         content=json.dumps(export.model_dump(), indent=2, ensure_ascii=False),

@@ -14,7 +14,7 @@ import logging
 import secrets
 import time
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import jwt
 from fastapi import Depends, HTTPException, Request, Response
@@ -57,7 +57,7 @@ def create_access_token(
     if settings is None:
         settings = get_settings()
     
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    expire = datetime.now(UTC) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode = {"sub": subject, "exp": expire, "type": "access"}
     return jwt.encode(to_encode, settings.secret_key, algorithm=ALGORITHM)
 
@@ -67,7 +67,7 @@ def create_refresh_token(subject: str, settings: Settings | None = None) -> str:
     if settings is None:
         settings = get_settings()
     
-    expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    expire = datetime.now(UTC) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     to_encode = {"sub": subject, "exp": expire, "type": "refresh"}
     return jwt.encode(to_encode, settings.secret_key, algorithm=ALGORITHM)
 
@@ -335,7 +335,7 @@ class AuditLogger:
                 "identifier": identifier,
                 "ip": ip,
                 "method": method,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
         )
     
@@ -349,7 +349,7 @@ class AuditLogger:
                 "endpoint": endpoint,
                 "ip": ip,
                 "success": success,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
         )
     
@@ -363,7 +363,7 @@ class AuditLogger:
                 "resource": resource,
                 "action": action,
                 "ip": ip,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
         )
     
@@ -377,7 +377,7 @@ class AuditLogger:
                 "action": action,
                 "target": target,
                 "ip": ip,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
         )
     
@@ -391,7 +391,7 @@ class AuditLogger:
                 "details": details,
                 "ip": ip,
                 "severity": severity,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
         )
 

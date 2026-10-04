@@ -12,7 +12,7 @@ from __future__ import annotations
 import platform
 import sys
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 
 import psutil
 from fastapi import APIRouter, Depends
@@ -175,7 +175,7 @@ async def health(settings: Settings = Depends(get_settings)):
         version=settings.version,
         ollama_model=settings.ollama_model,
         databases_found=[p.name for p in settings.db_paths if p.exists()],
-        timestamp=datetime.utcnow().isoformat(),
+        timestamp=datetime.now(UTC).isoformat(),
         uptime_seconds=round(time.time() - _start_time, 1),
     )
 
@@ -221,7 +221,7 @@ async def readiness(
     return ReadinessResponse(
         status=status,
         checks=checks,
-        timestamp=datetime.utcnow().isoformat(),
+        timestamp=datetime.now(UTC).isoformat(),
     )
 
 
@@ -293,7 +293,7 @@ async def detailed_health(
         environment=settings.environment,
         ollama_model=settings.ollama_model,
         databases_found=[p.name for p in settings.db_paths if p.exists()],
-        timestamp=datetime.utcnow().isoformat(),
+        timestamp=datetime.now(UTC).isoformat(),
         uptime_seconds=round(time.time() - _start_time, 1),
         system=system_info,
         database=database_info,
@@ -356,7 +356,7 @@ async def version(settings: Settings = Depends(get_settings)):
         "ollama_model": settings.ollama_model,
         "python_version": sys.version.split()[0],
         "platform": platform.platform(),
-        "build_date": datetime.utcnow().isoformat(),
+        "build_date": datetime.now(UTC).isoformat(),
     }
 
 
