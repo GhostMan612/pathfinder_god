@@ -10,7 +10,28 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+
+def _repo_root() -> Path:
+    """Resolve the repo root no matter how scripts.py is launched.
+
+    - From source (python tools/command_center/main.py), services.py's own path is
+      <repo>/tools/command_center/services.py, so parents[2] with no env var is the repo.
+    - From the PyInstaller exe (PathfinderGodCommandCenter.exe), __file__ points inside
+      the temp _MEIPASS unpack dir, so parents[2] lands on a temp path and every
+      start_hub then fails with "No module named app" / WinError 3. Use the exe's own
+      location instead: <repo>/tools/command_center/dist/PathfinderGodCommandCenter.exe,
+      whose parents[3] is the repo root.
+    - Override with the PFGOD_REPO_ROOT env var when the exe is relocated.
+    """
+    env = os.environ.get("PFGOD_REPO_ROOT")
+    if env:
+        return Path(env)
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parents[3]
+    return Path(__file__).resolve().parents[2]
+
+
+REPO_ROOT = _repo_root()
 HUB_DIR = REPO_ROOT / "hub"
 VENV_PYTHON = Path(r"C:\venv-hub\venv\Scripts\python.exe")
 CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
@@ -31,7 +52,7 @@ class ManagedProcess:
         full_env = os.environ.copy()
         if env:
             full_env.update(env)
-        log_dir = Path(__file__).parent / "logs"
+        log_dir = REPO_ROOT / "tools" / "command_center" / "logs"
         log_dir.mkdir(exist_ok=True)
         log_file = log_dir / f"{self.name.lower()}.log"
         try:
@@ -80,7 +101,7 @@ class ManagedProcess:
             return True, f"{self.name} force-killed"
 
     def get_log_tail(self, lines: int = 50) -> str:
-        log_file = Path(__file__).parent / "logs" / f"{self.name.lower()}.log"
+        log_file = REPO_ROOT / "tools" / "command_center" / "logs" / f"{self.name.lower()}.log"
         if not log_file.exists():
             return "No log file yet."
         try:
