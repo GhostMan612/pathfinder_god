@@ -53,11 +53,13 @@ class Settings(BaseSettings):
     ollama_timeout_s: float = 600.0
 
     # --- Task model routing (different agents earn different models) ---
-    # The hub has two strong small models installed. Use the CPU-friendly
-    # reasoner for live GM chat, and the fast JSON-specialized one for the
-    # structured builders. Override any of these from .env with PFGOD_MODEL_*.
-    model_chat: str = "phi4-mini"        # /ask + /stream live GM narration
-    model_reasoning: str = "phi4-mini"   # Rules Lawyer grounding/citations
+    # The hub has two strong small models installed. qwen2.5:3b carries the
+    # live GM chat because it is the only one that reliably performs the
+    # ReAct tool loop (Rules Lawyer / NPC Compiler / Continuity), while
+    # phi4-mini carries the hard reasoning the Rules Lawyer does. Override
+    # any of these from .env with PFGOD_MODEL_*.
+    model_chat: str = "qwen2.5:3b"      # /ask + /stream live GM narration (tool-capable)
+    model_reasoning: str = "phi4-mini"  # Rules Lawyer grounding/citations
     model_builders: str = "qwen2.5:3b"   # character/npc/loot/map/encounter JSON
     model_continuity: str = "qwen2.5:3b" # session compression
 

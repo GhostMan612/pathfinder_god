@@ -301,6 +301,20 @@ class CampaignRepository:
                 (summary, campaign_id),
             )
 
+    def get_active_campaign_id(self) -> int:
+        """Return the most recently touched campaign (fallback: 1).
+
+        The continuity agent tools receive an explicit campaign_id from the
+        player's app, but the live GM's injected campaign block does not - so
+        it reasons about the campaign that has seen the most recent save/summary
+        rather than blindly reading id=1.
+        """
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT id FROM campaigns ORDER BY updated_at DESC, id DESC LIMIT 1"
+            ).fetchone()
+            return row[0] if row else 1
+
     def search_sessions(self, query: str, campaign_id: int = 1, limit: int = 5) -> list[dict]:
         """Full-text search across saved session summaries/facts/logs.
 
