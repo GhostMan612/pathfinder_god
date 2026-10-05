@@ -184,13 +184,29 @@ class LLMOrchestrator:
                     "type": "function",
                     "function": {
                         "name": "get_campaign_context",
-                        "description": "Get campaign context for next session (summary + relevant entities)",
+                        "description": "Get campaign context for next session (chronicle + bounded entities + latest facts)",
                         "parameters": {
                             "type": "object",
                             "properties": {
                                 "campaign_id": {"type": "integer"}
                             },
                             "required": ["campaign_id"]
+                        }
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "search_sessions",
+                        "description": "Recall past sessions/events from the campaign history by keyword (use instead of assuming memory)",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "query": {"type": "string"},
+                                "campaign_id": {"type": "integer", "default": 1},
+                                "limit": {"type": "integer", "default": 5}
+                            },
+                            "required": ["query"]
                         }
                     }
                 }
@@ -274,6 +290,12 @@ class LLMOrchestrator:
                 )
             elif tool_name == "get_campaign_context":
                 return self.continuity_keeper.get_campaign_context(arguments["campaign_id"])
+            elif tool_name == "search_sessions":
+                return self.continuity_keeper.search_sessions(
+                    arguments["query"],
+                    arguments.get("campaign_id", 1),
+                    arguments.get("limit", 5),
+                )
             else:
                 return {"error": f"Unknown tool: {tool_name}"}
         except Exception as e:

@@ -155,7 +155,35 @@ class ContinuityKeeper:
             raw_log=session_log,
         )
 
+        # 6. Fold this session into the campaign's evergreen chronicle so the
+        # GM can carry continuity forward without stuffing every log into the
+        # prompt. FTS5 sessions_fts is already kept in sync by a trigger.
+        await self._refresh_chronicle(campaign_id, summary)
+
         return SessionSummary(summary=summary, facts=facts, entities=entities)
+
+    async def _refresh_chronicle(self, campaign_id: int, new_summary: str) -> None:
+        """Merge the fresh session summary into one rolling campaign summary."""
+        prev = self.repo.get_campaign_summary(campaign_id) or ""
+        prompt = (
+            CHRONICLER_SYSTEM
+            + "\n\nPrevious campaign chronicle:\n"
+            + (prev if prev else "(none yet)")
+            + "\n\nNew session summary:\n"
+            + new_summary
+            + "\n\nRewrite as one concise, current campaign chronicle. Carry forward unresolved threads."
+        )
+        try:
+            merged = (await self.llm.generate(prompt, system="")) or ""
+            merged = merged.strip()
+            if merged:
+                self.repo.update_campaign_summary(campaign_id, merged)
+        except Exception:
+            logger.warning("chronicle refresh failed", exc_info=True)
+
+    def search_sessions(self, query: str, campaign_id: int = 1, limit: int = 5) -> list[dict]:
+        """Recall past sessions by keyword (long-campaign memory)."""
+        return self.repo.search_sessions(query=query, campaign_id=campaign_id, limit=limit)
 
     async def _extract_entities(self, log: str) -> ExtractedEntities:
         prompt = f"{ENTITY_EXTRACTION_SYSTEM}\n\nLog:\n{log}\n\nReturn ONLY valid JSON."
@@ -311,20 +339,36 @@ class ContinuityKeeper:
         return out
 
     def get_campaign_context(self, campaign_id: int) -> dict[str, Any]:
-        """Build context for next session: recent summary + relevant entities."""
-        session = self.repo.get_latest_session(campaign_id)
-        if not session:
-            return {"summary": "", "entities": {}, "facts": []}
+        """Build context for next session WITHOUT leaking the whole database.
 
+        The crisp campaign chronicle (re-rendered after each session) plus the
+        latest session's summary/facts seed every turn. Entities are bounded to
+        the most recent handful rather than the full table, so a long campaign
+        does not consume the context window. Full history is recallable via
+        search_sessions(), not stuffed into the prompt.
+        """
+        chronicle = self.repo.get_campaign_summary(campaign_id) or ""
+        session = self.repo.get_latest_session(campaign_id)
+
+        # Bound entity dumps; full table retrieval for a specific entity goes
+        # through the recall tool / search_sessions, not this context block.
+        npcs = self.repo.get_npcs(campaign_id) or []
+        locations = self.repo.get_locations(campaign_id) or []
+        quests = self.repo.get_active_quests(campaign_id) or []
         entities = {
-            "npcs": self.repo.get_npcs(campaign_id),
-            "locations": self.repo.get_locations(campaign_id),
-            "quests": self.repo.get_active_quests(campaign_id),
+            "npcs": npcs[:8],
+            "locations": locations[:8],
+            "quests": quests[:5],
         }
+
+        if not session and not chronicle:
+            return {"chronicle": "", "summary": "", "entities": entities, "facts": []}
+
         return {
-            "summary": session.summary,
+            "chronicle": chronicle,
+            "summary": chronicle or (session.summary if session else ""),
             "entities": entities,
-            "facts": session.facts,
+            "facts": session.facts if session else [],
         }
 
 

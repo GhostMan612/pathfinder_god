@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL DEFAULT 'Unnamed Campaign',
     edition TEXT NOT NULL DEFAULT '2e',
+    summary TEXT,                    -- evergreen campaign chronicle (re-rendered per session)
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -211,3 +212,33 @@ CREATE TABLE IF NOT EXISTS session_notes (
 
 CREATE INDEX IF NOT EXISTS idx_session_notes_campaign ON session_notes(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_session_notes_session ON session_notes(campaign_id, session_num);
+
+-- ──────────────────────────────────────────────────────────────
+-- Session recall (FTS5) for long campaigns.
+-- External-content mirror of `sessions`, built once and kept in sync by the
+-- triggers below. Lets the GM recall any past session's events instead of
+-- stuffing the whole transcript history into its context window.
+-- ──────────────────────────────────────────────────────────────
+
+CREATE VIRTUAL TABLE IF NOT EXISTS sessions_fts USING fts5(
+    summary, facts_json, raw_log,
+    content='sessions', content_rowid='id',
+    tokenize='porter unicode61'
+);
+
+CREATE TRIGGER IF NOT EXISTS sessions_fts_insert AFTER INSERT ON sessions BEGIN
+  INSERT INTO sessions_fts(rowid, summary, facts_json, raw_log)
+  VALUES (new.id, new.summary, new.facts_json, new.raw_log);
+END;
+
+CREATE TRIGGER IF NOT EXISTS sessions_fts_delete AFTER DELETE ON sessions BEGIN
+  INSERT INTO sessions_fts(sessions_fts, rowid, summary, facts_json, raw_log)
+  VALUES ('delete', old.id, old.summary, old.facts_json, old.raw_log);
+END;
+
+CREATE TRIGGER IF NOT EXISTS sessions_fts_update AFTER UPDATE ON sessions BEGIN
+  INSERT INTO sessions_fts(sessions_fts, rowid, summary, facts_json, raw_log)
+  VALUES ('delete', old.id, old.summary, old.facts_json, old.raw_log);
+  INSERT INTO sessions_fts(rowid, summary, facts_json, raw_log)
+  VALUES (new.id, new.summary, new.facts_json, new.raw_log);
+END;

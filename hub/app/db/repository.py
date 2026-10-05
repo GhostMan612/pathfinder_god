@@ -23,6 +23,7 @@ class Campaign:
     edition: str
     created_at: str
     updated_at: str
+    summary: str | None = None
 
 
 @dataclass
@@ -150,6 +151,20 @@ class CampaignRepository:
         if schema_path.exists():
             with self._conn() as conn:
                 conn.executescript(schema_path.read_text(encoding="utf-8"))
+                # Older campaign.db files predate the evergreen campaign summary
+                # column; ALTER idempotently so reused DBs gain it in place.
+                try:
+                    conn.execute("ALTER TABLE campaigns ADD COLUMN summary TEXT")
+                except sqlite3.OperationalError:
+                    pass
+                # Index any already-saved sessions into the recall FTS table so
+                # long campaigns are searchable from the very first run after
+                # the schema upgrade. For content= external tables this is safe
+                # to re-run -- 'rebuild' drops and rebuilds the index.
+                try:
+                    conn.execute("INSERT INTO sessions_fts(sessions_fts) VALUES('rebuild')")
+                except sqlite3.OperationalError:
+                    pass
 
     # ──────────────────────────────────────────────────────────────
     # Campaigns
@@ -269,6 +284,55 @@ class CampaignRepository:
                     response,
                 ),
             )
+
+    def get_campaign_summary(self, campaign_id: int = 1) -> str:
+        """Return the evergreen campaign chronicle, or '' if none yet."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT summary FROM campaigns WHERE id = ?", (campaign_id,)
+            ).fetchone()
+            return row[0] if row and row[0] else ""
+
+    def update_campaign_summary(self, campaign_id: int, summary: str) -> None:
+        with self._conn() as conn:
+            self._ensure_campaign(conn, campaign_id)
+            conn.execute(
+                "UPDATE campaigns SET summary = ? WHERE id = ?",
+                (summary, campaign_id),
+            )
+
+    def search_sessions(self, query: str, campaign_id: int = 1, limit: int = 5) -> list[dict]:
+        """Full-text search across saved session summaries/facts/logs.
+
+        This is the long-campaign recall primitive: instead of dumping every
+        historical turn into the LLM prompt, the GM retrieves the few sessions
+        that match its current question. The FTS5 table mirrors `sessions` and
+        is kept in sync by triggers declared in schema.sql.
+        """
+        if not query or not query.strip():
+            return []
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT s.campaign_id, s.session_num, s.summary, s.facts_json,
+                       substr(s.raw_log, 1, 1200) AS excerpt
+                FROM sessions s
+                JOIN sessions_fts ON sessions_fts.rowid = s.id
+                WHERE sessions_fts MATCH ? AND s.campaign_id = ?
+                ORDER BY bm25(sessions_fts)
+                LIMIT ?
+                """,
+                (query, campaign_id, limit),
+            ).fetchall()
+            out = []
+            for r in rows:
+                d = dict(r)
+                try:
+                    d["facts_json"] = json.loads(d.get("facts_json") or "[]")
+                except Exception:
+                    d["facts_json"] = []
+                out.append(d)
+            return out
 
     # ──────────────────────────────────────────────────────────────
     # NPCs
