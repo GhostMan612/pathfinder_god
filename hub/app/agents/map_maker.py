@@ -1,9 +1,9 @@
-# ============================================================
+﻿# ============================================================
 # As Above, So Below. As Within, So Without.
 # The Future Dictates the Past and the Past is Always Present.
 # ============================================================
 
-"""Map Maker Agent — LLM map design + dual-layer Pillow rendering.
+"""Map Maker Agent â€” LLM map design + dual-layer Pillow rendering.
 
 Generates print-ready battle maps from natural language: a Player view
 (public geometry only) and a GM view (labels plus secret features).
@@ -276,7 +276,7 @@ class MapMakerAgent:
         try:
             raw = await self._llm.generate(
                 prompt=full_prompt,
-                model="qwen2.5:3b",
+                model=self._settings.model_for("builders"),
                 temperature=0.3,
                 num_predict=800,
             )
@@ -309,3 +309,4 @@ class MapMakerAgent:
             player_base64_png=player_b64,
             error=None,
         )
+

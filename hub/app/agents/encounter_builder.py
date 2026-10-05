@@ -1,9 +1,9 @@
-# ============================================================
+﻿# ============================================================
 # As Above, So Below. As Within, So Without.
 # The Future Dictates the Past and the Past is Always Present.
 # ============================================================
 
-"""Encounter Builder Agent — Deterministic PF2e XP budget + LLM monster selection.
+"""Encounter Builder Agent â€” Deterministic PF2e XP budget + LLM monster selection.
 
 Workflow:
 1. Calculate exact XP budget using PF2e Remaster tables.
@@ -28,9 +28,9 @@ from app.rag.retriever import Retriever
 logger = logging.getLogger(__name__)
 
 
-# ──────────────────────────────────────────────────────────────
-# PF2e Remaster XP Tables (deterministic — never LLM)
-# ──────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# PF2e Remaster XP Tables (deterministic â€” never LLM)
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 # Base XP budget for 4 players by threat level
 THREAT_BUDGET_4: dict[str, int] = {
@@ -258,7 +258,7 @@ class EncounterBuilderAgent:
         prompt = f"{SYSTEM_PROMPT}\n\nTarget XP: {target_xp}\nAvailable monsters:\n{candidate_summary}"
         raw = await self._llm.generate(
             prompt=prompt,
-            model=self._settings.ollama_model,
+            model=self._settings.model_for("builders"),
             temperature=0.2,
             num_predict=800,
         )

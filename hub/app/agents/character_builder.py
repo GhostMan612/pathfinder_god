@@ -1,9 +1,9 @@
-# ============================================================
+﻿# ============================================================
 # As Above, So Below. As Within, So Without.
 # The Future Dictates the Past and the Past is Always Present.
 # ============================================================
 
-"""Character Builder Agent — LLM blueprint + Rules Lawyer validation.
+"""Character Builder Agent â€” LLM blueprint + Rules Lawyer validation.
 
 Two-stage pipeline:
 1. LLM generates a complete PF2e character JSON blueprint from a natural prompt.
@@ -91,7 +91,7 @@ class CharacterBuilderAgent:
         try:
             raw = await self._llm.generate(
                 prompt=full_prompt,
-                model=self._settings.ollama_model,
+                model=self._settings.model_for("builders"),
                 temperature=0.3,
                 num_predict=1200,
             )
@@ -210,7 +210,7 @@ def _sync_validate_action(lawyer: RulesLawyerAgent, action: str, character_sheet
     if rank >= 1:
         return ValidationResult(
             legal=True,
-            reason=f"Action '{action}' legal. {skill.capitalize()} rank {rank} ≥ trained.",
+            reason=f"Action '{action}' legal. {skill.capitalize()} rank {rank} â‰¥ trained.",
             rule_citation=f"Core Rulebook - {skill.capitalize()}",
         )
     else:

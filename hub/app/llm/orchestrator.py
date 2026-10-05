@@ -1,10 +1,10 @@
-# ============================================================
+﻿# ============================================================
 # As Above, So Below. As Within, So Without.
 # The Future Dictates the Past and the Past is Always Present.
 # ============================================================
 
 """
-LLM Orchestrator — 2-tier fallback (Ollama → Raw FTS5 excerpts).
+LLM Orchestrator â€” 2-tier fallback (Ollama â†’ Raw FTS5 excerpts).
 
 The GM Storyteller can call these agent tools:
 - Rules Lawyer: lookup_rule, calculate_dc, validate_action
@@ -79,9 +79,9 @@ class LLMOrchestrator:
     async def __aexit__(self, *exc) -> None:
         await self.close()
 
-    # ──────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     # Main Generation Entry Point
-    # ──────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def _supports_tools(self, model: str) -> bool:
         """qwen2.5 family natively supports ReAct tool calling; phi4-mini does not reliably."""
@@ -98,9 +98,9 @@ class LLMOrchestrator:
     ) -> str:
         """3-turn ReAct loop for tool-capable models (qwen2.5:3b Q4_K_M).
 
-        Turn 1: model decides tool_calls → Turn 2: execute tools → Turn 3: narrative.
+        Turn 1: model decides tool_calls â†’ Turn 2: execute tools â†’ Turn 3: narrative.
         Falls back to single generate if no tool_calls.
-        Gemini §15.3 minimal loop, adapted to async httpx + our repo tools.
+        Gemini Â§15.3 minimal loop, adapted to async httpx + our repo tools.
         """
         messages: list[dict] = [
             {"role": "system", "content": system},
@@ -109,7 +109,7 @@ class LLMOrchestrator:
         # Turn 1
         msg1 = await self.ollama.chat(
             messages=messages,
-            model=self.settings.ollama_model,
+            model=self.settings.model_for("chat"),
             tools=tools,
             temperature=self.settings.ollama_temperature,
             num_predict=self.settings.ollama_num_predict,
@@ -117,7 +117,7 @@ class LLMOrchestrator:
         # Ollama returns {role, content, tool_calls: [{function:{name, arguments}}]}
         tool_calls = msg1.get("tool_calls") or []
         if not tool_calls:
-            # No tool needed — direct answer
+            # No tool needed â€” direct answer
             return msg1.get("content", "")
 
         messages.append(msg1)
@@ -139,7 +139,7 @@ class LLMOrchestrator:
         # Turn 3: final narrative
         msg3 = await self.ollama.chat(
             messages=messages,
-            model=self.settings.ollama_model,
+            model=self.settings.model_for("chat"),
             temperature=self.settings.ollama_temperature,
             num_predict=self.settings.ollama_num_predict,
         )
@@ -196,14 +196,14 @@ class LLMOrchestrator:
                 }
             ]
 
-            # Use agentic ReAct loop for qwen2.5:3b (5-7 tok/s → 8-11 tok/s with Q4), keep single generate for phi4-mini
-            if self._supports_tools(self.settings.ollama_model):
+            # Use agentic ReAct loop for qwen2.5:3b (5-7 tok/s â†’ 8-11 tok/s with Q4), keep single generate for phi4-mini
+            if self._supports_tools(self.settings.model_for("chat")):
                 answer = await self._agentic_chat(prompt, system, original_prompt, edition, tools)
             else:
                 answer = await self.ollama.generate(
                     prompt=prompt,
                     system=system,
-                    model=self.settings.ollama_model,
+                    model=self.settings.model_for("chat"),
                     temperature=self.settings.ollama_temperature,
                     num_predict=self.settings.ollama_num_predict,
                 )
@@ -239,9 +239,9 @@ class LLMOrchestrator:
             sources=sources,
         )
 
-    # ──────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     # Tool Handlers (called when Ollama invokes a tool)
-    # ──────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async def handle_tool_call(self, tool_name: str, arguments: dict) -> dict:
         """Execute a tool call and return result."""
@@ -306,7 +306,7 @@ class LLMOrchestrator:
             async for chunk in self.ollama.stream(
                 prompt=prompt,
                 system=system,
-                model=self.settings.ollama_model,
+                model=self.settings.model_for("chat"),
             ):
                 yield ("ollama", chunk)
 
@@ -320,9 +320,9 @@ class LLMOrchestrator:
                 logger.warning(f"raw fallback also failed: {inner}")
                 yield ("error", f"[Error: {e}]")
 
-    # ──────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     # Prompt Builders
-    # ──────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     def _build_system_prompt(self, mode: str | None, edition: str) -> str:
         mode_desc = {
@@ -335,7 +335,7 @@ class LLMOrchestrator:
             "encounter": "Generate a balanced encounter with XP budget, terrain, and tactics.",
         }.get(mode, "Act as the Pathfinder GM.")
 
-        return f"""You are the Pathfinder God — a master GM with perfect rules knowledge for Pathfinder {edition.upper()}e.
+        return f"""You are the Pathfinder God â€” a master GM with perfect rules knowledge for Pathfinder {edition.upper()}e.
 {mode_desc}
 
 You are a PLAYER'S GM, not a rule server. Your job is to run the table, so:
@@ -363,7 +363,7 @@ Workflow for generation requests:
 2. Agent returns structured JSON
 3. You format it narratively for the player
 
-Be concise but evocative. Never hallucinate rules — if unsure, call the tool.
+Be concise but evocative. Never hallucinate rules â€” if unsure, call the tool.
 
 Citation Fidelity (MANDATORY):
 - Cite your sources using the exact format: [Source Book - Rule Name].
@@ -418,7 +418,7 @@ Citation Fidelity (MANDATORY):
         lines = [f"Raw rule excerpts for '{query}':\n"]
         for i, hit in enumerate(hits, 1):
             lines.append(
-                f"{i}. **{hit['name']}** ({hit.get('system', '?')}) — {hit.get('source_book', 'Unknown')}\n"
+                f"{i}. **{hit['name']}** ({hit.get('system', '?')}) â€” {hit.get('source_book', 'Unknown')}\n"
                 f"   {hit['content'][:300]}..."
             )
         return "\n".join(lines)

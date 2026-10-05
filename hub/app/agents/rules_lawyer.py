@@ -1,10 +1,10 @@
-# ============================================================
+﻿# ============================================================
 # As Above, So Below. As Within, So Without.
 # The Future Dictates the Past and the Past is Always Present.
 # ============================================================
 
 """
-Rules Lawyer Agent — Phase 5: Fact-checker with Ollama function calling.
+Rules Lawyer Agent â€” Phase 5: Fact-checker with Ollama function calling.
 
 Tools (exact schemas from design chat):
 - lookup_rule(query) -> searches vector DB of Archives of Nethys / SRD
@@ -26,9 +26,9 @@ from app.rag.retriever import Retriever
 
 logger = logging.getLogger(__name__)
 
-# ──────────────────────────────────────────────────────────────
-# Deterministic PF2e Remaster tables (Gemini §15.4 — never LLM)
-# ──────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# Deterministic PF2e Remaster tables (Gemini Â§15.4 â€” never LLM)
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 # Table 10-5: Level-Based DCs (CRB Remaster). -1/0 for negative levels.
 LEVEL_DC: dict[int, int] = {
@@ -45,7 +45,7 @@ SIMPLE_DC: dict[str, int] = {
 
 RARITY_ADJ: dict[str, int] = {"common": 0, "uncommon": 2, "rare": 5, "unique": 10}
 
-# Action → required skill (deterministic validate_action). Keys lowercased.
+# Action â†’ required skill (deterministic validate_action). Keys lowercased.
 ACTION_SKILL: dict[str, str] = {
     "trip": "athletics", "grapple": "athletics", "shove": "athletics",
     "disarm": "athletics", "reposition": "athletics",
@@ -59,7 +59,7 @@ ACTION_SKILL: dict[str, str] = {
     "deception": "deception", "intimidation": "intimidation",
 }
 
-# ── Strict Pydantic mirror of spoke/lib/models/character.dart ──
+# â”€â”€ Strict Pydantic mirror of spoke/lib/models/character.dart â”€â”€
 
 class AbilityScoresModel(BaseModel):
     str: int = 10
@@ -124,9 +124,9 @@ class CharacterSheetModel(BaseModel):
             data["abilities"]["int"] = data["abilities"].pop("int")
         return cls.model_validate(data)
 
-# ──────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Tool Definitions (exact from design chat)
-# ──────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 RULES_LAWYER_TOOLS = [
     {
@@ -277,7 +277,7 @@ class RulesLawyerAgent:
     ) -> ValidationResult:
         """Deterministic validation: check proficiency rank for action's required skill.
 
-        Never guesses — looks up ACTION_SKILL then checks CharacterSheetModel.
+        Never guesses â€” looks up ACTION_SKILL then checks CharacterSheetModel.
         Mirrors spoke/lib/models/character.dart SkillProficiencies index: 0=untrained.
         """
         key = (action or "").strip().lower()
@@ -288,11 +288,11 @@ class RulesLawyerAgent:
         sheet = CharacterSheetModel.from_any(character_sheet)
 
         if skill is None:
-            # Unknown action — fallback to rule lookup for citation, assume legal but flag
+            # Unknown action â€” fallback to rule lookup for citation, assume legal but flag
             rule_result = await self.lookup_rule(f"{action} action traits")
             return ValidationResult(
                 legal=True,
-                reason=f"Unknown action '{action}' not in deterministic table; per {rule_result.name}: {rule_result.content[:160]} — assuming legal, narrate with caution.",
+                reason=f"Unknown action '{action}' not in deterministic table; per {rule_result.name}: {rule_result.content[:160]} â€” assuming legal, narrate with caution.",
                 rule_citation=f"{rule_result.source_book} - {rule_result.name}",
             )
 
@@ -302,7 +302,7 @@ class RulesLawyerAgent:
         if rank >= 1:
             return ValidationResult(
                 legal=True,
-                reason=f"Success: Action '{action}' is legal. Roll {skill.capitalize()} vs DC (proficiency rank {rank} ≥ trained).",
+                reason=f"Success: Action '{action}' is legal. Roll {skill.capitalize()} vs DC (proficiency rank {rank} â‰¥ trained).",
                 rule_citation=f"Core Rulebook - {skill.capitalize()}",
             )
         else:
@@ -312,9 +312,9 @@ class RulesLawyerAgent:
                 rule_citation=f"Core Rulebook - {skill.capitalize()} (Untrained)",
             )
 
-    # ──────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     # Ollama Function Calling Interface
-    # ──────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async def run_with_tools(self, user_query: str) -> str:
         """Run the agent with Ollama function calling."""
@@ -328,14 +328,14 @@ class RulesLawyerAgent:
         response = await client.generate(
             prompt=json.dumps(messages),
             system="",
-            model=self.settings.ollama_model,
+            model=self.settings.model_for("reasoning"),
         )
         return response
 
 
-# ──────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Standalone Tool Functions (for direct calling)
-# ──────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async def lookup_rule_tool(query: str, repo: CampaignRepository) -> dict:
     agent = RulesLawyerAgent(repo)

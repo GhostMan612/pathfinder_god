@@ -52,6 +52,38 @@ class Settings(BaseSettings):
     ollama_temperature: float = 0.3
     ollama_timeout_s: float = 600.0
 
+    # --- Task model routing (different agents earn different models) ---
+    # The hub has two strong small models installed. Use the CPU-friendly
+    # reasoner for live GM chat, and the fast JSON-specialized one for the
+    # structured builders. Override any of these from .env with PFGOD_MODEL_*.
+    model_chat: str = "phi4-mini"        # /ask + /stream live GM narration
+    model_reasoning: str = "phi4-mini"   # Rules Lawyer grounding/citations
+    model_builders: str = "qwen2.5:3b"   # character/npc/loot/map/encounter JSON
+    model_continuity: str = "qwen2.5:3b" # session compression
+
+    def model_for(self, task: str) -> str:
+        """Return the model assigned to a logical task, falling back to the
+        single all-purpose model name for unknown tasks."""
+        table = {
+            "chat": self.model_chat,
+            "gm": self.model_chat,
+            "narrator": self.model_chat,
+            "reasoning": self.model_reasoning,
+            "rules": self.model_reasoning,
+            "lawyer": self.model_reasoning,
+            "builder": self.model_builders,
+            "builders": self.model_builders,
+            "json": self.model_builders,
+            "character": self.model_builders,
+            "npc": self.model_builders,
+            "map": self.model_builders,
+            "encounter": self.model_builders,
+            "loot": self.model_builders,
+            "continuity": self.model_continuity,
+            "summary": self.model_continuity,
+        }
+        return table.get(task, self.ollama_model)
+
     # --- Server ---
     host: str = "0.0.0.0"
     port: int = 8000

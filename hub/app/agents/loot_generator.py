@@ -1,9 +1,9 @@
-# ============================================================
+﻿# ============================================================
 # As Above, So Below. As Within, So Without.
 # The Future Dictates the Past and the Past is Always Present.
 # ============================================================
 
-"""Loot Generator Agent — LLM concept + deterministic PF2e crafting validation.
+"""Loot Generator Agent â€” LLM concept + deterministic PF2e crafting validation.
 
 Two-stage pipeline:
 1. LLM dreams up a thematic magic item from a natural prompt.
@@ -103,7 +103,7 @@ class LootGeneratorAgent:
         try:
             raw = await self._llm.generate(
                 prompt=full_prompt,
-                model=self._settings.ollama_model,
+                model=self._settings.model_for("builders"),
                 temperature=0.4,
                 num_predict=700,
             )
@@ -184,3 +184,4 @@ class LootGeneratorAgent:
                 errors.append(f"Damage '{item.damage}' is not NdM notation")
 
         return errors
+
