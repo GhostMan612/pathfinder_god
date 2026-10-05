@@ -10,11 +10,19 @@ import random
 import re
 import sys
 import threading
+import wave
+from io import BytesIO
 from pathlib import Path
 
 import hub_api
+import requests
 import services
 import sfx
+
+try:  # optional: live microphone capture for /voice/transcribe
+    import sounddevice as _sd
+except Exception:  # pragma: no cover - optional extra
+    _sd = None
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
@@ -516,13 +524,24 @@ class GuideTab(QWidget):
         row.addWidget(self._input, stretch=1)
         row.addWidget(self._edition)
         row.addWidget(b)
+        mic = QPushButton("Mic")
+        mic.setToolTip("Hold-to-talk for ~4s, transcribe, then ask the God")
+        mic.clicked.connect(self._voice_input)
+        row.addWidget(mic)
         root.addLayout(row)
         self._chat.setHtml("<i>The God awaits your question. Start the Hub in Services first.</i>")
         self._load_chat_history()
+        self._vsig = self._VoiceSignal()
+        self._vsig.transcript.connect(self._on_voice_transcript)
+        self._vsig.fail.connect(self._on_voice_fail)
 
     class _ChunkSignal(QObject):
         chunk = Signal(str)
         done = Signal(str)
+        fail = Signal(str)
+
+    class _VoiceSignal(QObject):
+        transcript = Signal(str)
         fail = Signal(str)
 
     def _send(self):
@@ -579,6 +598,49 @@ class GuideTab(QWidget):
         self._chat.append(f"<p><i style='color:{PALETTE['red']}'>stream failed: {msg}</i></p>")
         self._chat_history.append({"role": "assistant", "content": f"<i>stream failed: {msg}</i>"})
         self._save_chat_history()
+
+    def _voice_input(self):
+        if self._streaming:
+            self._status_bar.showMessage("busy streaming — wait for the reply", 4000)
+            return
+        if _sd is None:
+            self._status_bar.showMessage(
+                "sounddevice is not installed (pip install sounddevice)", 6000)
+            return
+        self._status_bar.showMessage("Listening…", 5000)
+
+        def job():
+            try:
+                sr = 16000
+                dur = 4
+                rec = _sd.rec(int(sr * dur), samplerate=sr, channels=1, dtype="int16")
+                _sd.wait()
+                buf = BytesIO()
+                with wave.open(buf, "wb") as w:
+                    w.setnchannels(1)
+                    w.setsampwidth(2)
+                    w.setframerate(sr)
+                    w.writeframes(rec.tobytes())
+                files = {"file": ("mic.wav", buf.getvalue(), "audio/wav")}
+                r = requests.post(
+                    hub_api.HUB_URL + "/voice/transcribe", files=files, timeout=120)
+                r.raise_for_status()
+                text = (r.json().get("text") or "").strip()
+                if text:
+                    self._vsig.transcript.emit(text)
+                else:
+                    self._vsig.fail.emit("no speech detected")
+            except Exception as e:
+                self._vsig.fail.emit(str(e))
+
+        threading.Thread(target=job, daemon=True).start()
+
+    def _on_voice_transcript(self, text):
+        self._input.setText(text)
+        self._send()
+
+    def _on_voice_fail(self, msg):
+        self._status_bar.showMessage(f"voice: {msg}", 6000)
 
     def _load_chat_history(self):
         try:

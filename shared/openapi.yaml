@@ -840,6 +840,67 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /voice/transcribe:
+    post:
+      tags:
+      - voice
+      summary: Transcribe Audio
+      operationId: transcribe_audio_voice_transcribe_post
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required:
+              - file
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranscribeResponse'
+        '501':
+          description: ASR/TTS package absent; install faster-whisper / pyttsx3
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /voice/speak:
+    post:
+      tags:
+      - voice
+      summary: Speak Text
+      operationId: speak_voice_speak_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SpeakRequest'
+        required: true
+      responses:
+        '200':
+          description: WAV audio of the rendered text
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        '501':
+          description: ASR/TTS package absent; install faster-whisper / pyttsx3
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     AskRequest:
@@ -1934,6 +1995,38 @@ components:
       - msg
       - type
       title: ValidationError
+    TranscribeResponse:
+      properties:
+        text:
+          type: string
+          title: Text
+        language:
+          type: string
+          title: Language
+        duration_s:
+          type: number
+          title: Duration S
+      type: object
+      required:
+      - text
+      - language
+      - duration_s
+      title: TranscribeResponse
+    SpeakRequest:
+      properties:
+        text:
+          type: string
+          maxLength: 4000
+          minLength: 1
+          title: Text
+        voice:
+          type: string
+          title: Voice
+          default: default
+      type: object
+      required:
+      - text
+      title: SpeakRequest
   securitySchemes:
     HTTPBearer:
       type: http

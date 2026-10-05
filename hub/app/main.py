@@ -21,6 +21,7 @@ from app.api import (
     maps,
     monitoring,
     rules,
+    voice,
 )
 from app.api.monitoring import MetricsMiddleware
 from app.api.security import (
@@ -123,6 +124,7 @@ def create_app() -> FastAPI:
     app.include_router(combat.router)
     app.include_router(encounter.router)
     app.include_router(maps.router)
+    app.include_router(voice.router)
 
     # loot.router was registered twice (lines 80 and 88). FastAPI emitted
     #   UserWarning: Duplicate Operation ID generate_loot_generate_loot_post

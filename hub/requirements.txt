@@ -1,6 +1,10 @@
 aiohttp==3.14.3
 attrs==26.1.0
 beautifulsoup4==4.15.0
+# Voice: local ASR + offline TTS (optional — hub returns 501 if absent)
+faster-whisper==1.2.1
+pyttsx3==2.99
+sounddevice==0.5.6
 fastapi==0.141.1
 httpx==0.28.1
 ollama==0.6.2
@@ -8,6 +12,7 @@ Pillow==12.3.0
 psutil==7.2.2
 pydantic==2.13.5
 pydantic_settings==2.15.0
+python-multipart==0.0.32
 PyJWT==2.14.0
 pysqlite3==0.6.0
 pytest==9.1.1
