@@ -9,6 +9,7 @@ Campaign API — REST endpoints for campaign state, notes, and continuity.
 import json
 import logging
 from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import (
     APIRouter,
@@ -18,8 +19,6 @@ from fastapi import (
     Request,
     Response,
 )
-from typing import Literal
-
 from pydantic import BaseModel, Field
 
 from app.agents.continuity import ContinuityAgent, ContinuityKeeper

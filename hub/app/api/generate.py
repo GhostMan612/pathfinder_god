@@ -7,9 +7,9 @@
 Generate endpoints — Typed generators (character, npc, monster, boss, map, campaign, encounter).
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Path
 from typing import Literal
 
+from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel, Field
 
 from app.agents.character_builder import BuildResult, CharacterBuilderAgent

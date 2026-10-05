@@ -18,8 +18,8 @@ import psutil
 from fastapi import APIRouter, Depends
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
-from app.api.deps import get_repo
 
+from app.api.deps import get_repo
 from app.config import Settings, get_settings
 from app.db.repository import CampaignRepository
 

@@ -8,11 +8,9 @@
 # url pfsrd://...}. Inserts new rows and UPGRADES legacy Unknown Source
 # rows with sourced official content.
 import json
-import re
 import sqlite3
 import sys
 from pathlib import Path
-from typing import Any, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -65,7 +63,7 @@ class PsrdImporter:
     def __init__(self, psrd_root: Path, db_path: Path):
         self.psrd_root = psrd_root
         self.db_path = db_path
-        self.conn: Optional[sqlite3.Connection] = None
+        self.conn: sqlite3.Connection | None = None
         self.stats = {"seen": 0, "inserted": 0, "upgraded": 0, "skipped": 0, "errors": 0}
 
     def connect(self) -> None:
@@ -80,7 +78,7 @@ class PsrdImporter:
             self.conn.close()
             self.conn = None
 
-    def _row(self, path: Path, book: str, section: str) -> Optional[dict]:
+    def _row(self, path: Path, book: str, section: str) -> dict | None:
         try:
             doc = json.loads(path.read_text(encoding="utf-8"))
         except Exception:

@@ -7,9 +7,12 @@
 Pathfinder GM Agent — unified RAG with 2e→1e fallback.
 Local Ollama models only.
 """
-import requests, time, argparse
-import pysqlite3 as sqlite3
+import argparse
+import time
 from pathlib import Path
+
+import pysqlite3 as sqlite3
+import requests
 
 DB = Path("pathfinder_rag.db")
 

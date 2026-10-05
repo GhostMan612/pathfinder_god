@@ -15,10 +15,9 @@ phone without blocking, and so a slow/hung backend can't wedge the server.
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-
-import logging
 
 import httpx
 

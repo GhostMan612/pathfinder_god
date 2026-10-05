@@ -6,13 +6,11 @@
 # Source: https://www.aonprd.com | License: Paizo Community Use Policy
 
 import asyncio
+import re
 import sqlite3
 import sys
-import re
-import time
-from pathlib import Path
-from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urljoin
 
 import aiohttp
@@ -20,9 +18,8 @@ from bs4 import BeautifulSoup
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from fleet import Checkpoint, DomainLimiter
+from fleet import Checkpoint, DomainLimiter, FetchError
 from fleet import fetch as fleet_fetch
-from fleet import FetchError
 
 
 @dataclass
@@ -41,8 +38,8 @@ class Aon1eScraper:
     def __init__(self, db_path: Path, rate_limit: float = 1.0):
         self.db_path = db_path
         self.rate_limit = rate_limit
-        self.conn: Optional[sqlite3.Connection] = None
-        self.session: Optional[aiohttp.ClientSession] = None
+        self.conn: sqlite3.Connection | None = None
+        self.session: aiohttp.ClientSession | None = None
         self.stats = {
             "total": 0,
             "imported": 0,
@@ -86,7 +83,7 @@ class Aon1eScraper:
             self.conn.close()
             self.conn = None
 
-    async def _fetch(self, url: str) -> Optional[str]:
+    async def _fetch(self, url: str) -> str | None:
         """Fetch via the fleet (rotating UA, probed rate limits, backoff)."""
         try:
             return await fleet_fetch(self.session, url, limiter=self._limiter)
@@ -105,7 +102,7 @@ class Aon1eScraper:
         text = re.sub(r'[ \t]{2,}', ' ', text)
         return text.strip()
 
-    def _parse_list_page(self, html: str, base_url: str, category: str) -> List[Dict[str, str]]:
+    def _parse_list_page(self, html: str, base_url: str, category: str) -> list[dict[str, str]]:
         soup = BeautifulSoup(html, "html.parser")
         entries = []
 
@@ -149,7 +146,7 @@ class Aon1eScraper:
 
         return entries
 
-    async def _fetch_detail_page(self, url: str) -> Optional[str]:
+    async def _fetch_detail_page(self, url: str) -> str | None:
         html = await self._fetch(url)
         if not html:
             return None
@@ -170,7 +167,7 @@ class Aon1eScraper:
         text = re.sub(r'\s+', ' ', text)
         return text.strip()
 
-    def _build_content(self, entry_data: Dict[str, str], detail_text: str, category: str) -> str:
+    def _build_content(self, entry_data: dict[str, str], detail_text: str, category: str) -> str:
         parts = []
 
         name = entry_data.get("name", "")
@@ -194,7 +191,7 @@ class Aon1eScraper:
         return "\n\n".join(parts)
 
     async def scrape_category(
-        self, category: str, max_pages: Optional[int] = None, offset: int = 0
+        self, category: str, max_pages: int | None = None, offset: int = 0
     ) -> int:
         url = self.category_urls.get(category)
         if not url:
@@ -273,9 +270,9 @@ class Aon1eScraper:
 
     async def scrape_all(
         self,
-        max_per_category: Optional[int] = None,
+        max_per_category: int | None = None,
         offset: int = 0,
-        categories: Optional[list] = None,
+        categories: list | None = None,
         resume: bool = False,
     ):
         self.conn = sqlite3.connect(self.db_path)
@@ -310,7 +307,7 @@ class Aon1eScraper:
 
         if self._ckpt is not None:
             self._ckpt.save(force=True)
-        print(f"\n=== AoN 1e Scraping Complete ===")
+        print("\n=== AoN 1e Scraping Complete ===")
         print(f"Total Imported: {total_imported}")
         await self.session.close()
         self.conn.close()

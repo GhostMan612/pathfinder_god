@@ -8,7 +8,7 @@ import os
 import re
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 try:
     import ollama  # type: ignore
@@ -24,7 +24,7 @@ DEFAULT_DBS = [
 ]
 
 
-def normalize_edition(raw_edition: Optional[str]) -> str:
+def normalize_edition(raw_edition: str | None) -> str:
     if raw_edition is None:
         return "both"
     cleaned = str(raw_edition).strip().lower()
@@ -50,22 +50,18 @@ def detect_mode(user_query: str) -> str:
     return "general"
 
 
-def available_databases(edition: str) -> List[Path]:
-    chosen: List[Path] = []
+def available_databases(edition: str) -> list[Path]:
+    chosen: list[Path] = []
     seen = set()
     for db_path in DEFAULT_DBS:
         if db_path.exists() and db_path not in seen:
-            if edition == "both":
-                chosen.append(db_path)
-            elif edition == "1e" and db_path.name in {"pathfinder_god.db", "pathfinder_rag.db", "pathfinder_1e_rag.db"}:
-                chosen.append(db_path)
-            elif edition == "2e" and db_path.name in {"pathfinder_god.db", "pathfinder_rag.db", "pathfinder_2e_rag.db"}:
+            if edition == "both" or edition == "1e" and db_path.name in {"pathfinder_god.db", "pathfinder_rag.db", "pathfinder_1e_rag.db"} or edition == "2e" and db_path.name in {"pathfinder_god.db", "pathfinder_rag.db", "pathfinder_2e_rag.db"}:
                 chosen.append(db_path)
             seen.add(db_path)
     return chosen
 
 
-def _connect(db_path: Path) -> Optional[sqlite3.Connection]:
+def _connect(db_path: Path) -> sqlite3.Connection | None:
     try:
         conn = sqlite3.connect(str(db_path), timeout=10.0)
         conn.execute("PRAGMA busy_timeout = 10000")
@@ -75,12 +71,12 @@ def _connect(db_path: Path) -> Optional[sqlite3.Connection]:
         return None
 
 
-def query_db(search_term: str, edition: str = "both", limit: int = 3) -> List[Tuple[str, str]]:
+def query_db(search_term: str, edition: str = "both", limit: int = 3) -> list[tuple[str, str]]:
     clean_term = re.sub(r"[^\w\s]", "", search_term)
     words = [word for word in clean_term.split() if len(word) > 3]
     search_query = " OR ".join(words) if words else clean_term or search_term
 
-    results: List[Tuple[str, str]] = []
+    results: list[tuple[str, str]] = []
     for db_path in available_databases(edition):
         conn = _connect(db_path)
         if conn is None:
@@ -149,7 +145,7 @@ def build_context(user_query: str, edition: str = "both") -> str:
     )
 
 
-def build_prompt(user_query: str, mode: str, edition: str, context: str, history: Optional[List[Tuple[str, str]]] = None) -> str:
+def build_prompt(user_query: str, mode: str, edition: str, context: str, history: list[tuple[str, str]] | None = None) -> str:
     mode_instructions = {
         "character": "You are an expert Pathfinder character builder. Create a practical character concept with class, ancestry, background, key abilities, equipment, and a short playstyle summary.",
         "campaign": "You are an expert Pathfinder campaign designer. Write a compelling campaign premise, structure, and key plot beats that fit Pathfinder tone.",
@@ -246,20 +242,20 @@ Reward: What payoff awaits success?
 """
 
 
-def save_campaign_state(path: Path, state: Dict[str, Any]) -> None:
+def save_campaign_state(path: Path, state: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
         json.dump(state, handle, indent=2)
 
 
-def load_campaign_state(path: Path) -> Dict[str, Any]:
+def load_campaign_state(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {"party": [], "notes": []}
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
 
 
-def parse_command(raw_input: str) -> Tuple[str, Optional[str]]:
+def parse_command(raw_input: str) -> tuple[str, str | None]:
     command = raw_input.strip()
     if not command.startswith("/"):
         return ("chat", None)
@@ -299,7 +295,7 @@ def generate_fallback(user_query: str, mode: str, edition: str) -> str:
     )
 
 
-def run_agent(user_query: str, edition: Optional[str] = None, history: Optional[List[Tuple[str, str]]] = None) -> str:
+def run_agent(user_query: str, edition: str | None = None, history: list[tuple[str, str]] | None = None) -> str:
     normalized_edition = normalize_edition(edition)
     mode = detect_mode(user_query)
     context = build_context(user_query, edition=normalized_edition)
@@ -328,7 +324,7 @@ def main() -> None:
     parser.add_argument("--state-file", default=str(ROOT / "campaign_state.json"), help="Path to the JSON campaign state file")
     args = parser.parse_args()
 
-    history: List[Tuple[str, str]] = []
+    history: list[tuple[str, str]] = []
     state_path = Path(args.state_file)
     state = load_campaign_state(state_path)
 

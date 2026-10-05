@@ -6,23 +6,20 @@
 # Source: https://2e.aonprd.com | License: Paizo Community Use Policy
 
 import asyncio
+import re
 import sqlite3
 import sys
-import re
-import time
-from pathlib import Path
-from typing import Any, Dict, List, Optional
-from urllib.parse import urljoin
 from dataclasses import dataclass
+from pathlib import Path
+from urllib.parse import urljoin
 
 import aiohttp
 from bs4 import BeautifulSoup
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from fleet import Checkpoint, DomainLimiter
+from fleet import Checkpoint, DomainLimiter, FetchError
 from fleet import fetch as fleet_fetch
-from fleet import FetchError
 
 
 @dataclass
@@ -41,8 +38,8 @@ class Aon2eScraper:
     def __init__(self, db_path: Path, rate_limit: float = 1.0):
         self.db_path = db_path
         self.rate_limit = rate_limit
-        self.conn: Optional[sqlite3.Connection] = None
-        self.session: Optional[aiohttp.ClientSession] = None
+        self.conn: sqlite3.Connection | None = None
+        self.session: aiohttp.ClientSession | None = None
         self.stats = {
             "total": 0,
             "imported": 0,
@@ -88,7 +85,7 @@ class Aon2eScraper:
             self.conn.close()
             self.conn = None
 
-    async def _fetch(self, url: str) -> Optional[str]:
+    async def _fetch(self, url: str) -> str | None:
         """Fetch via the fleet (rotating UA, probed rate limits, backoff)."""
         try:
             return await fleet_fetch(self.session, url, limiter=self._limiter)
@@ -112,7 +109,7 @@ class Aon2eScraper:
         text = re.sub(r'[ \t]{2,}', ' ', text)
         return text.strip()
 
-    def _parse_list_page(self, html: str, base_url: str, category: str) -> List[Dict[str, str]]:
+    def _parse_list_page(self, html: str, base_url: str, category: str) -> list[dict[str, str]]:
         """Parse a list page (e.g., Spells.aspx) to extract entry links."""
         soup = BeautifulSoup(html, "html.parser")
         entries = []
@@ -161,7 +158,7 @@ class Aon2eScraper:
 
         return entries
 
-    async def _fetch_detail_page(self, url: str) -> Optional[str]:
+    async def _fetch_detail_page(self, url: str) -> str | None:
         """Fetch and clean a detail page."""
         html = await self._fetch(url)
         if not html:
@@ -183,7 +180,7 @@ class Aon2eScraper:
         text = re.sub(r'\n{3,}', '\n\n', text)
         return text.strip()
 
-    def _build_content(self, entry_data: Dict[str, str], detail_text: str, category: str) -> str:
+    def _build_content(self, entry_data: dict[str, str], detail_text: str, category: str) -> str:
         parts = []
 
         name = entry_data.get("name", "")
@@ -215,7 +212,7 @@ class Aon2eScraper:
         return text.strip()
 
     async def scrape_category(
-        self, category: str, max_pages: Optional[int] = None, offset: int = 0
+        self, category: str, max_pages: int | None = None, offset: int = 0
     ) -> int:
         """Scrape a single category (chunk: entries[offset:offset+max_pages])."""
         url = self.category_urls.get(category)
@@ -296,9 +293,9 @@ class Aon2eScraper:
 
     async def scrape_all(
         self,
-        max_per_category: Optional[int] = None,
+        max_per_category: int | None = None,
         offset: int = 0,
-        categories: Optional[list] = None,
+        categories: list | None = None,
         resume: bool = False,
     ):
         self.conn = sqlite3.connect(self.db_path)
@@ -333,7 +330,7 @@ class Aon2eScraper:
 
         if self._ckpt is not None:
             self._ckpt.save(force=True)
-        print(f"\n=== AoN 2e Scraping Complete ===")
+        print("\n=== AoN 2e Scraping Complete ===")
         print(f"Total Imported: {total_imported}")
         await self.session.close()
         self.conn.close()

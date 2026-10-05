@@ -70,7 +70,7 @@ class LLMOrchestrator:
             if client is not None:
                 try:
                     await client.close()
-                except Exception:  # noqa: BLE001 - shutdown must not raise
+                except Exception:
                     logger.debug("failed to close an Ollama client", exc_info=True)
 
     async def __aenter__(self) -> "LLMOrchestrator":

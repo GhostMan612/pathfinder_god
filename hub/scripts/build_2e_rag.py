@@ -22,8 +22,6 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 from db_normalize import (
-    UNKNOWN,
-    canonical_category,
     clean_content,
     dedupe_key,
     normalize_edition,

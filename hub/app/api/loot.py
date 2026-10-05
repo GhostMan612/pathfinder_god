@@ -5,9 +5,8 @@
 
 """Loot Generator API — LLM concept + Rules Lawyer crafting validation."""
 
-from fastapi import APIRouter, Depends
-from typing import Literal
 
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from app.agents.loot_generator import LootBuildResult, LootGeneratorAgent

@@ -10,8 +10,6 @@ Run after changing any route/model so the Flutter client stays in lockstep:
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import yaml
 
 from app.config import REPO_ROOT

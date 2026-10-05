@@ -13,7 +13,6 @@ import re
 import sqlite3
 import sys
 from pathlib import Path
-from typing import Any, Optional
 
 TAG_RE = re.compile(r"\{@\w+\s+([^}|]+)(?:\|([^}]+))?\}")
 UNKNOWN = "Unknown Source"
@@ -44,7 +43,7 @@ class Pf2oolsImporter:
     def __init__(self, pf2ools_root: Path, db_path: Path):
         self.pf2ools_root = pf2ools_root
         self.db_path = db_path
-        self.conn: Optional[sqlite3.Connection] = None
+        self.conn: sqlite3.Connection | None = None
         self.stats = {"seen": 0, "inserted": 0, "upgraded": 0, "skipped": 0, "errors": 0}
 
     def connect(self) -> None:
@@ -59,7 +58,7 @@ class Pf2oolsImporter:
             self.conn.close()
             self.conn = None
 
-    def _row(self, path: Path) -> Optional[dict]:
+    def _row(self, path: Path) -> dict | None:
         try:
             doc = json.loads(path.read_text(encoding="utf-8"))
         except Exception:

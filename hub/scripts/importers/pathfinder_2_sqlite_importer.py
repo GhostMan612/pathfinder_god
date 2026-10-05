@@ -8,11 +8,10 @@
 # page_start}], traits, level, ...}]} plus data/spells|monsters/*.yaml
 # single-entity docs. data/sources.yaml maps abbr -> full book title.
 # Inserts new rows and UPGRADES legacy Unknown Source rows.
-import re
 import sqlite3
 import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
@@ -79,7 +78,7 @@ class Pathfinder2SqliteImporter:
     def __init__(self, data_root: Path, db_path: Path):
         self.data_root = data_root
         self.db_path = db_path
-        self.conn: Optional[sqlite3.Connection] = None
+        self.conn: sqlite3.Connection | None = None
         self.stats = {"seen": 0, "inserted": 0, "upgraded": 0, "skipped": 0, "errors": 0}
         self.abbr_map: dict[str, str] = {}
 

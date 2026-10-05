@@ -8,8 +8,9 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 import sys
-from app.config import get_settings as _cached_get_settings
 from pathlib import Path
+
+from app.config import get_settings as _cached_get_settings
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 

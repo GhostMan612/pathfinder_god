@@ -27,14 +27,14 @@ import aiohttp
 SCRIPTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from fleet import (  # noqa: E402
+import random
+
+from fleet import (
     PROBE_FILE,
-    USER_AGENTS,
     PROJECT_TAG,
+    USER_AGENTS,
     robots_snapshot,
 )
-
-import random
 
 TARGETS = {
     "2e.aonprd.com": [

@@ -16,7 +16,7 @@ import hub_api
 import services
 import sfx
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QIcon, QAction
+from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -573,7 +573,6 @@ class GuideTab(QWidget):
         # Save the assistant's response
         # The full response is in the chat widget; we need to extract it
         # For simplicity, we'll just mark that a response was completed
-        pass
 
     def _on_fail(self, msg):
         self._streaming = False

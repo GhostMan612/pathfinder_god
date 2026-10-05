@@ -17,7 +17,6 @@ from app.api import (
     combat,
     encounter,
     generate,
-    health,
     loot,
     maps,
     monitoring,
@@ -25,8 +24,8 @@ from app.api import (
 )
 from app.api.monitoring import MetricsMiddleware
 from app.api.security import (
-    AUTHORIZATION_HEADER,
     API_KEY_HEADER_NAME,
+    AUTHORIZATION_HEADER,
     RateLimitMiddleware,
     RequestLoggingMiddleware,
     SecurityHeadersMiddleware,
