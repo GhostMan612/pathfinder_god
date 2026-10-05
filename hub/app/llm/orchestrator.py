@@ -153,7 +153,7 @@ class LLMOrchestrator:
         history: list[list[str]] | None = None,
     ) -> LLMResult:
         # Build system prompt with available tools
-        system = self._build_system_prompt(mode, edition)
+        system = self._build_system_prompt(mode, edition) + self._campaign_block()
         original_prompt = prompt  # Save original for fallback
 
         # Tier 1: Ollama with RAG + Agent Tools
@@ -318,7 +318,7 @@ class LLMOrchestrator:
         all here, unlike on /ask, so /stream answered nothing useful with Ollama
         down. Now it yields the same raw-excerpts fallback generate() uses.
         """
-        system = self._build_system_prompt(mode, edition)
+        system = self._build_system_prompt(mode, edition) + self._campaign_block()
 
         try:
             if self.settings.rag_enabled:
@@ -415,6 +415,30 @@ Citation Fidelity (MANDATORY):
         if not lines:
             return ""
         return "Earlier in this conversation:\n" + "\n".join(lines) + "\n\n"
+
+    def _campaign_block(self) -> str:
+        """Inject the evergreen campaign chronicle so the live GM never forgets.
+
+        Before this, continuity only surfaced through the /campaign/note and
+        summarize-session tools, so the GM answering a live /ask or /stream had
+        no idea what the party had done in past sessions. The chronicle is the
+        one rolling summary stored in campaigns.summary; older detail is
+        searchable via the search_sessions tool instead of being dumped here.
+        """
+        try:
+            ctx = self.continuity_keeper.get_campaign_context(1)
+            chronicle = ctx.get("chronicle") or ctx.get("summary", "")
+            if not chronicle:
+                return ""
+            return (
+                "\n\nCampaign chronicle (your grounding for what has happened):\n"
+                + chronicle
+                + "\n\nUse it as ground truth. Do not quote it unprompted. If a "
+                  "player references past sessions and you are unsure, call the "
+                  "search_sessions tool."
+            )
+        except Exception:
+            return ""
 
     def _build_rag_prompt(
         self,

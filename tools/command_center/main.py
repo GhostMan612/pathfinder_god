@@ -563,17 +563,19 @@ class GuideTab(QWidget):
         sig.fail.connect(self._on_fail)
 
         def job():
+            answer = []
             try:
                 for event in hub_api.stream_events(query, edition):
                     etype = event.get("type", "")
                     if etype == "chunk":
                         sig.chunk.emit(event.get("text", "") or "")
+                        answer.append(event.get("text", "") or "")
                     elif etype == "error":
                         sig.fail.emit(event.get("message", "hub error"))
                         return
                     elif etype == "end":
                         break
-                sig.done.emit("")
+                sig.done.emit("".join(answer))
             except Exception as e:
                 sig.fail.emit(str(e))
 
@@ -585,13 +587,44 @@ class GuideTab(QWidget):
         cursor.insertText(text)
         self._chat.setTextCursor(cursor)
 
-    def _on_done(self, _):
+    def _on_done(self, answer_text):
         self._streaming = False
         self._chat.append("")
         sfx.tap()
-        # Save the assistant's response
-        # The full response is in the chat widget; we need to extract it
-        # For simplicity, we'll just mark that a response was completed
+        self._speak_answer(answer_text)
+
+    def _speak_answer(self, text):
+        """Speak the GM's reply aloud via the Hub TTS endpoint (offline pyttsx3)."""
+        if not text or not text.strip():
+            return
+        def job():
+            try:
+                import tempfile
+                import winsound
+
+                r = requests.post(
+                    hub_api.HUB_URL + "/voice/speak",
+                    json={"text": text},
+                    timeout=60,
+                )
+                r.raise_for_status()
+                fd, path = tempfile.mkstemp(suffix=".wav")
+                try:
+                    import os
+                    with os.fdopen(fd, "wb") as fh:
+                        fh.write(r.content)
+                    # Synchronous so the temp WAV is only deleted after it finishes.
+                    winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_PURGE)
+                finally:
+                    try:
+                        os.unlink(path)
+                    except OSError:
+                        pass
+            except Exception:
+                # TTS is best-effort: a missing package must never break the chat.
+                pass
+
+        threading.Thread(target=job, daemon=True).start()
 
     def _on_fail(self, msg):
         self._streaming = False
