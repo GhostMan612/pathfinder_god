@@ -24,6 +24,7 @@ class Campaign:
     created_at: str
     updated_at: str
     summary: str | None = None
+    combat_json: str | None = None
 
 
 @dataclass
@@ -155,6 +156,10 @@ class CampaignRepository:
                 # column; ALTER idempotently so reused DBs gain it in place.
                 try:
                     conn.execute("ALTER TABLE campaigns ADD COLUMN summary TEXT")
+                except sqlite3.OperationalError:
+                    pass
+                try:
+                    conn.execute("ALTER TABLE campaigns ADD COLUMN combat_json TEXT")
                 except sqlite3.OperationalError:
                     pass
                 # Index any already-saved sessions into the recall FTS table so
@@ -299,6 +304,22 @@ class CampaignRepository:
             conn.execute(
                 "UPDATE campaigns SET summary = ? WHERE id = ?",
                 (summary, campaign_id),
+            )
+
+    def get_combat_json(self, campaign_id: int = 1) -> str:
+        """Return the live combat scene JSON, or '' if none set."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT combat_json FROM campaigns WHERE id = ?", (campaign_id,)
+            ).fetchone()
+            return row[0] if row and row[0] else ""
+
+    def set_combat_json(self, campaign_id: int, scene_json: str) -> None:
+        with self._conn() as conn:
+            self._ensure_campaign(conn, campaign_id)
+            conn.execute(
+                "UPDATE campaigns SET combat_json = ? WHERE id = ?",
+                (scene_json, campaign_id),
             )
 
     def get_active_campaign_id(self) -> int:

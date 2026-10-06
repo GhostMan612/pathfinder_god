@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
     name TEXT NOT NULL DEFAULT 'Unnamed Campaign',
     edition TEXT NOT NULL DEFAULT '2e',
     summary TEXT,                    -- evergreen campaign chronicle (re-rendered per session)
+    combat_json TEXT,               -- live combat scene pushed by the client
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

@@ -5,10 +5,12 @@
 
 """Combat API endpoints — Deterministic combat resolution endpoints."""
 
-from fastapi import APIRouter
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 
 from app.agents.combat_tracker import CombatTrackerAgent, StrikeResult
+from app.api.deps import get_repo
+from app.db.repository import CampaignRepository
 
 router = APIRouter(prefix="/combat", tags=["combat"])
 
@@ -77,3 +79,31 @@ async def end_turn(request: EndTurnRequest) -> EndTurnResponse:
         notes=notes,
         damage_taken=damage_taken,
     )
+
+
+class CombatSceneIn(BaseModel):
+    campaign_id: int = 1
+    scene: str = Field(..., max_length=4000)
+
+
+class CombatSceneOut(BaseModel):
+    campaign_id: int
+    scene: str
+
+
+@router.post("/scene", response_model=CombatSceneOut)
+async def set_scene(
+    request: CombatSceneIn,
+    repo: CampaignRepository = Depends(get_repo),
+) -> CombatSceneOut:
+    """Persist the current combat scene so the live GM can reason about it."""
+    repo.set_combat_json(request.campaign_id, request.scene)
+    return CombatSceneOut(campaign_id=request.campaign_id, scene=request.scene)
+
+
+@router.get("/scene", response_model=CombatSceneOut)
+async def get_scene(
+    campaign_id: int = 1,
+    repo: CampaignRepository = Depends(get_repo),
+) -> CombatSceneOut:
+    return CombatSceneOut(campaign_id=campaign_id, scene=repo.get_combat_json(campaign_id))

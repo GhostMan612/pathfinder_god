@@ -436,14 +436,22 @@ Citation Fidelity (MANDATORY):
                 self.repo.get_active_campaign_id()
             )
             chronicle = ctx.get("chronicle") or ctx.get("summary", "")
-            if not chronicle:
+            combat = self.repo.get_combat_json(
+                self.repo.get_active_campaign_id()
+            ) or ""
+            if not chronicle and not combat:
                 return ""
+            parts = "\n\nCampaign chronicle (your grounding for what has happened):\n" + (chronicle or "(none)")
+            if combat:
+                parts += (
+                    "\n\nCurrent combat scene (use this for HP, turn order, conditions):\n"
+                    + combat
+                )
             return (
-                "\n\nCampaign chronicle (your grounding for what has happened):\n"
-                + chronicle
-                + "\n\nUse it as ground truth. Do not quote it unprompted. If a "
-                  "player references past sessions and you are unsure, call the "
-                  "search_sessions tool."
+                parts
+                + "\n\nUse this as ground truth. Do not quote it unprompted. If a "
+                "player references past sessions and you are unsure, call the "
+                "search_sessions tool."
             )
         except Exception:
             return ""
