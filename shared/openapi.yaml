@@ -790,6 +790,50 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /combat/scene:
+    post:
+      tags:
+      - combat
+      summary: Set Scene
+      operationId: set_scene_combat_scene_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CombatSceneIn'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CombatSceneOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - combat
+      summary: Get Scene
+      operationId: get_scene_combat_scene_get
+      parameters:
+      - name: campaign_id
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 1
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CombatSceneOut'
   /encounter/generate:
     post:
       tags:
@@ -939,6 +983,10 @@ components:
           type: array
           maxItems: 20
           title: History
+        campaign_id:
+          type: integer
+          title: Campaign Id
+          default: 1
       type: object
       required:
       - query
@@ -2027,6 +2075,33 @@ components:
       required:
       - text
       title: SpeakRequest
+    CombatSceneIn:
+      properties:
+        campaign_id:
+          type: integer
+          title: Campaign Id
+          default: 1
+        scene:
+          type: string
+          maxLength: 4000
+          title: Scene
+      type: object
+      required:
+      - scene
+      title: CombatSceneIn
+    CombatSceneOut:
+      properties:
+        campaign_id:
+          type: integer
+          title: Campaign Id
+        scene:
+          type: string
+          title: Scene
+      type: object
+      required:
+      - campaign_id
+      - scene
+      title: CombatSceneOut
   securitySchemes:
     HTTPBearer:
       type: http

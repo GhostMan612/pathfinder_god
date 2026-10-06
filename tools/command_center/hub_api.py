@@ -84,11 +84,12 @@ def ask(query: str, edition: str = "both", history: list[list[str]] | None = Non
     return r.json()
 
 
-def stream_events(query: str, edition: str = "both") -> Iterator[dict]:
+def stream_events(query: str, edition: str = "both", campaign_id: int = 1) -> Iterator[dict]:
     from websockets.sync.client import connect
 
     ws_url = HUB_URL.replace("http://", "ws://") + "/stream"
     with connect(ws_url, close_timeout=3) as ws:
-        ws.send(json.dumps({"query": query, "edition": edition, "history": []}))
+        ws.send(json.dumps({"query": query, "edition": edition, "history": [],
+                            "campaign_id": campaign_id}))
         for raw in ws:
             yield json.loads(raw)

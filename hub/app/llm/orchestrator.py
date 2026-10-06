@@ -155,9 +155,10 @@ class LLMOrchestrator:
         edition: str,
         mode: str | None = None,
         history: list[list[str]] | None = None,
+        campaign_id: int = 1,
     ) -> LLMResult:
         # Build system prompt with available tools
-        system = self._build_system_prompt(mode, edition) + self._campaign_block()
+        system = self._build_system_prompt(mode, edition) + self._campaign_block(campaign_id)
         original_prompt = prompt  # Save original for fallback
 
         # Tier 1: Ollama with RAG + Agent Tools
@@ -312,6 +313,7 @@ class LLMOrchestrator:
         edition: str,
         mode: str | None = None,
         history: list[list[str]] | None = None,
+        campaign_id: int = 1,
     ) -> AsyncGenerator[tuple[str, str], None]:
         """Stream tokens, yielding (backend, chunk).
 
@@ -322,7 +324,7 @@ class LLMOrchestrator:
         all here, unlike on /ask, so /stream answered nothing useful with Ollama
         down. Now it yields the same raw-excerpts fallback generate() uses.
         """
-        system = self._build_system_prompt(mode, edition) + self._campaign_block()
+        system = self._build_system_prompt(mode, edition) + self._campaign_block(campaign_id)
 
         try:
             if self.settings.rag_enabled:
@@ -422,7 +424,7 @@ Citation Fidelity (MANDATORY):
             return ""
         return "Earlier in this conversation:\n" + "\n".join(lines) + "\n\n"
 
-    def _campaign_block(self) -> str:
+    def _campaign_block(self, campaign_id: int | None = None) -> str:
         """Inject the evergreen campaign chronicle so the live GM never forgets.
 
         Before this, continuity only surfaced through the /campaign/note and
@@ -432,13 +434,10 @@ Citation Fidelity (MANDATORY):
         searchable via the search_sessions tool instead of being dumped here.
         """
         try:
-            ctx = self.continuity_keeper.get_campaign_context(
-                self.repo.get_active_campaign_id()
-            )
+            cid = campaign_id if campaign_id is not None else self.repo.get_active_campaign_id()
+            ctx = self.continuity_keeper.get_campaign_context(cid)
             chronicle = ctx.get("chronicle") or ctx.get("summary", "")
-            combat = self.repo.get_combat_json(
-                self.repo.get_active_campaign_id()
-            ) or ""
+            combat = self.repo.get_combat_json(cid) or ""
             if not chronicle and not combat:
                 return ""
             parts = "\n\nCampaign chronicle (your grounding for what has happened):\n" + (chronicle or "(none)")
@@ -447,6 +446,11 @@ Citation Fidelity (MANDATORY):
                     "\n\nCurrent combat scene (use this for HP, turn order, conditions):\n"
                     + combat
                 )
+            parts += (
+                f"\n\nCurrent campaign_id is {cid} - pass it to process_session, "
+                "get_campaign_context, and search_sessions tool calls unless the "
+                "player explicitly says otherwise."
+            )
             return (
                 parts
                 + "\n\nUse this as ground truth. Do not quote it unprompted. If a "

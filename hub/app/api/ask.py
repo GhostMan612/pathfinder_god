@@ -29,6 +29,7 @@ class AskRequest(BaseModel):
         "character", "npc", "monster", "boss", "map", "campaign", "encounter"
     ] | None = None
     history: list[list[str]] = Field(default_factory=list, max_length=20)
+    campaign_id: int = 1
 
 
 class AskResponse(BaseModel):
@@ -55,6 +56,7 @@ async def ask_endpoint(
             edition=request.edition,
             mode=request.mode,
             history=request.history,
+            campaign_id=request.campaign_id,
         )
     finally:
         await orchestrator.close()
@@ -103,6 +105,7 @@ async def stream_endpoint(
             edition=request.edition,
             mode=request.mode,
             history=request.history,
+            campaign_id=request.campaign_id,
         ):
             await websocket.send_json(
                 StreamEvent(type="chunk", text=chunk, backend=backend).model_dump()
