@@ -9,6 +9,7 @@ import json
 import random
 import re
 import sys
+import queue
 import threading
 import wave
 from io import BytesIO
@@ -534,6 +535,11 @@ class GuideTab(QWidget):
         self._vsig = self._VoiceSignal()
         self._vsig.transcript.connect(self._on_voice_transcript)
         self._vsig.fail.connect(self._on_voice_fail)
+        # Streaming TTS: sentence-sized chunks of the streamed reply are spoken
+        # as they arrive, not after the entire answer finishes.
+        self._tts_queue: queue.Queue[str | None] = queue.Queue()
+        self._pending_speak = ""
+        threading.Thread(target=self._tts_loop, daemon=True).start()
 
     class _ChunkSignal(QObject):
         chunk = Signal(str)
@@ -586,45 +592,77 @@ class GuideTab(QWidget):
         cursor.movePosition(cursor.MoveOperation.End)
         cursor.insertText(text)
         self._chat.setTextCursor(cursor)
+        # Accumulate unspoken tail; flush complete sentences as they arrive.
+        self._pending_speak += text
+        while True:
+            idx = len(self._pending_speak)
+            # Prefer the earliest sentence/line break boundary.
+            cuts = [
+                self._pending_speak.find(". "),
+                self._pending_speak.find("! "),
+                self._pending_speak.find("? "),
+                self._pending_speak.find("\n"),
+            ]
+            cuts = [c for c in cuts if c != -1]
+            if not cuts:
+                break
+            boundary = min(cuts) + 1
+            sentence, self._pending_speak = (
+                self._pending_speak[:boundary],
+                self._pending_speak[boundary:],
+            )
+            sentence = sentence.strip()
+            if sentence:
+                self._tts_queue.put(sentence)
 
     def _on_done(self, answer_text):
         self._streaming = False
         self._chat.append("")
         sfx.tap()
-        self._speak_answer(answer_text)
+        tail = self._pending_speak.strip()
+        self._pending_speak = ""
+        if tail:
+            self._tts_queue.put(tail)
 
-    def _speak_answer(self, text):
-        """Speak the GM's reply aloud via the Hub TTS endpoint (offline pyttsx3)."""
+    def _tts_loop(self):
+        while True:
+            sentence = self._tts_queue.get()
+            if sentence is None:
+                return
+            self._speak_sentence(sentence)
+
+    def _speak_sentence(self, text):
+        """Speak a chunk via the Hub TTS endpoint (offline pyttsx3)."""
         if not text or not text.strip():
             return
-        def job():
+        try:
+            import tempfile
+            import winsound
+
+            # Strip markdown noise the TTS would otherwise read aloud.
+            clean = re.sub(r"[#*_`>|]", "", text)
+            r = requests.post(
+                hub_api.HUB_URL + "/voice/speak",
+                json={"text": clean},
+                timeout=60,
+            )
+            r.raise_for_status()
+            fd, path = tempfile.mkstemp(suffix=".wav")
             try:
-                import tempfile
-                import winsound
+                import os
 
-                r = requests.post(
-                    hub_api.HUB_URL + "/voice/speak",
-                    json={"text": text},
-                    timeout=60,
-                )
-                r.raise_for_status()
-                fd, path = tempfile.mkstemp(suffix=".wav")
+                with os.fdopen(fd, "wb") as fh:
+                    fh.write(r.content)
+                # Synchronous so the temp WAV is only deleted after it finishes.
+                winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_PURGE)
+            finally:
                 try:
-                    import os
-                    with os.fdopen(fd, "wb") as fh:
-                        fh.write(r.content)
-                    # Synchronous so the temp WAV is only deleted after it finishes.
-                    winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_PURGE)
-                finally:
-                    try:
-                        os.unlink(path)
-                    except OSError:
-                        pass
-            except Exception:
-                # TTS is best-effort: a missing package must never break the chat.
-                pass
-
-        threading.Thread(target=job, daemon=True).start()
+                    os.unlink(path)
+                except OSError:
+                    pass
+        except Exception:
+            # TTS is best-effort: a missing package must never break the chat.
+            pass
 
     def _on_fail(self, msg):
         self._streaming = False
