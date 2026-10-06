@@ -12,6 +12,7 @@ The GM Storyteller can call these agent tools:
 - Continuity Keeper: process_session, get_campaign_context
 """
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncGenerator
@@ -82,6 +83,34 @@ class LLMOrchestrator:
 
     async def __aexit__(self, *exc) -> None:
         await self.close()
+
+    _AUTO_FOLD_EVERY = 8
+    _AUTO_COUNTS: dict[int, int] = {}
+
+    def _record_live_note(self, prompt: str, answer: str, campaign_id: int) -> None:
+        """Append the turn to the open session log and, every few turns, run the
+        continuity fold so the evergreen chronicle refreshes automatically."""
+
+        try:
+            sn = max(1, self.repo.get_latest_session_num(campaign_id))
+            self.repo.add_session_note(campaign_id, sn, prompt, answer)
+            n = self._AUTO_COUNTS.get(campaign_id, 0) + 1
+            if n >= self._AUTO_FOLD_EVERY:
+                self._AUTO_COUNTS[campaign_id] = 0
+                session = self.repo.get_session(campaign_id, sn)
+                raw = session.raw_log if session is not None else prompt + "\n" + answer
+
+                async def _fold():
+                    try:
+                        await self.continuity_keeper.process_session(campaign_id, sn, raw)
+                    except Exception:
+                        logger.warning("auto-fold of live transcript failed", exc_info=True)
+
+                asyncio.create_task(_fold())
+            else:
+                self._AUTO_COUNTS[campaign_id] = n
+        except Exception:
+            logger.debug("live note/fold failed", exc_info=True)
 
     # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     # Main Generation Entry Point
@@ -232,6 +261,7 @@ class LLMOrchestrator:
             # Get sources from RAG using original prompt to avoid FTS5 syntax errors
             sources = await self.retriever.get_sources(original_prompt, edition=edition, k=5)
 
+            self._record_live_note(original_prompt, answer, campaign_id)
             return LLMResult(
                 answer=answer,
                 backend="ollama",
@@ -252,6 +282,7 @@ class LLMOrchestrator:
             for h in hits
         ]
 
+        self._record_live_note(original_prompt, answer, campaign_id)
         return LLMResult(
             answer=answer,
             backend="raw-excerpts",
@@ -325,6 +356,8 @@ class LLMOrchestrator:
         down. Now it yields the same raw-excerpts fallback generate() uses.
         """
         system = self._build_system_prompt(mode, edition) + self._campaign_block(campaign_id)
+        original_prompt = prompt
+        acc = []
 
         try:
             if self.settings.rag_enabled:
@@ -336,6 +369,7 @@ class LLMOrchestrator:
                 system=system,
                 model=self.settings.model_for("chat"),
             ):
+                acc.append(chunk)
                 yield ("ollama", chunk)
 
         except Exception as e:
@@ -343,10 +377,15 @@ class LLMOrchestrator:
             try:
                 from app.rag.raw_fallback import search_rules
                 hits = await search_rules(prompt, edition=edition, limit=5, repo=self.repo)
-                yield ("raw-excerpts", self._format_raw_excerpts(hits, prompt))
+                text = self._format_raw_excerpts(hits, prompt)
+                acc.append(text)
+                yield ("raw-excerpts", text)
             except Exception as inner:
                 logger.warning(f"raw fallback also failed: {inner}")
                 yield ("error", f"[Error: {e}]")
+
+        if acc:
+            self._record_live_note(original_prompt, "".join(acc), campaign_id)
 
     # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     # Prompt Builders

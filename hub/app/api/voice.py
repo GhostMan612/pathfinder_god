@@ -19,8 +19,10 @@ import tempfile
 import wave
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, Response, UploadFile
+from fastapi import APIRouter, File, HTTPException, Response, UploadFile, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
+
+import base64 as _b64
 
 try:  # optional ASR
     from faster_whisper import WhisperModel
@@ -85,6 +87,62 @@ class TranscribeResponse(BaseModel):
     text: str
     language: str
     duration_s: float
+
+
+def _transcribe_pcm(pcm: bytes) -> str:
+    """Run transcription on an int16 mono 16 kHz PCM block."""
+    if not _FASTER:
+        return ""
+    try:
+        import numpy as np
+
+        arr = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+        if len(arr) < 4000:
+            return ""
+        segments, _ = _get_model().transcribe(arr, beam_size=1)
+        return "".join(seg.text for seg in segments).strip()
+    except Exception:
+        return ""
+
+
+@router.websocket("/asr-stream")
+async def asr_stream(websocket: WebSocket) -> None:
+    """Buffered chunked ASR over a websocket.
+
+    The client streams raw PCM (int16 mono 16 kHz, s16le) as base64 chunks and
+    gets back partial transcripts as audio accumulates. This is intentionally
+    tempered: it streams partial hypotheses every ~1.5 s of audio, instead of
+    waiting for a complete clip like /voice/transcribe. A true overlapping
+    windowed decoder (Whisper-Streaming local-agreement) is a straight drop-in
+    over this buffer if we want it later.
+    """
+    await websocket.accept()
+    buf = bytearray()
+    step_bytes = 16000 * 2 * 3 // 2  # ~1.5 s of audio at 16 kHz 16-bit
+    next_emit = step_bytes
+    try:
+        while True:
+            msg = await websocket.receive_json()
+            kind = msg.get("type")
+            if kind == "pcm":
+                try:
+                    buf.extend(_b64.b64decode(msg.get("data", "")))
+                except Exception:
+                    continue
+                if len(buf) >= next_emit:
+                    await websocket.send_json({"type": "partial", "text": _transcribe_pcm(bytes(buf))})
+                    next_emit += step_bytes
+            elif kind == "done":
+                await websocket.send_json({"type": "final", "text": _transcribe_pcm(bytes(buf))})
+                break
+            elif kind == "ping":
+                await websocket.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        pass
+    try:
+        await websocket.close()
+    except Exception:
+        pass
 
 
 class SpeakRequest(BaseModel):
