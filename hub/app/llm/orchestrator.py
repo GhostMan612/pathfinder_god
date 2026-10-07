@@ -15,6 +15,7 @@ The GM Storyteller can call these agent tools:
 import asyncio
 import json
 import logging
+import re
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 
@@ -141,6 +142,30 @@ class LLMOrchestrator:
         m = model.lower()
         return "qwen" in m or "tool" in m or "mistral" in m
 
+    # Stage 5: intent routing. A rules/mechanics turn must reach the Rules
+    # Lawyer so it can cite a source; a plain table turn ("I open the door")
+    # should not pay for a 3-round-trip ReAct loop on a CPU-only laptop.
+    _RULES_INTENT = re.compile(
+        r"(\brule(s)?\b|\blegal\b|\ballowed\b|\bprohibited\b"
+        r"|\bhow (do|does|many|much|would)\b"
+        r"|\bdifficulty class\b|\bdc\b|\bdamage\b|\barmor class\b|\bAC\b"
+        r"|\bsaving throw\b|\binitiative\b|\bskill check\b|\bability check\b"
+        r"|\bperception\b|\bstealth\b|\battack roll\b|\bnatural (20|one|1)\b"
+        r"|\bcrit(ical)?\b|\bfumble\b|\bflat[- ]footed\b|\bflanking\b"
+        r"|\bspell slot\b|\bproficiency\b|\bmodifier\b|\bhit points\b|\btemporary hp\b"
+        r"|\bis (this|that) (legal|allowed)\b|\bcan i take\b|\bdoes .{0,30}(grant|give|apply)\b"
+        r"|\bwhat (is|are) the (dc|difficulty|damage|modifier)\b)",
+        re.IGNORECASE,
+    )
+
+    def _needs_tools(self, prompt: str) -> bool:
+        """Route a turn to the tool loop (rules) or the fast narrator pass."""
+        if not self._supports_tools(self.settings.model_for("chat")):
+            return False
+        if self.settings.force_rules_tools:
+            return True
+        return bool(self._RULES_INTENT.search(prompt or ""))
+
     async def _agentic_chat(
         self,
         prompt: str,
@@ -266,13 +291,20 @@ class LLMOrchestrator:
                 }
             ]
 
-            # Use agentic ReAct loop for qwen2.5:3b (5-7 tok/s â†’ 8-11 tok/s with Q4), keep single generate for phi4-mini
-            if self._supports_tools(self.settings.model_for("chat")):
+            # Stage 5 routing: rules-intent turns go through the ReAct tool loop
+            # so the Rules Lawyer can cite a source; table narration runs a
+            # single fast pass. Previously EVERY /ask turn paid for three
+            # round-trips regardless of what was asked.
+            if self._needs_tools(original_prompt):
                 answer = await self._agentic_chat(prompt, system, original_prompt, edition, tools)
             else:
                 answer = await self.ollama.generate(
                     prompt=prompt,
-                    system=system,
+                    system=system + (
+                        "\n\nThis turn is table narration: answer in fiction from the "
+                        "excerpts above, keep it to 2-4 sentences, and end by handing "
+                        "the next decision back to the players."
+                    ),
                     model=self.settings.model_for("chat"),
                     temperature=self.settings.ollama_temperature,
                     num_predict=self.settings.ollama_num_predict,
@@ -384,13 +416,31 @@ class LLMOrchestrator:
                 context = await self.retriever.query(prompt, edition=edition, k=self.settings.rag_limit)
                 prompt = self._build_rag_prompt(prompt, context, edition, mode, history)
 
-            async for chunk in self.ollama.stream(
-                prompt=prompt,
-                system=system,
-                model=self.settings.model_for("chat"),
-            ):
-                acc.append(chunk)
-                yield ("ollama", chunk)
+            # Stage 5: a rules-intent turn is resolved through the Rules Lawyer
+            # tool loop and then emitted in sentence-sized frames. Before this,
+            # /stream never had tool access at all, so a rules question asked in
+            # the live chat got no citation while the same question on /ask did.
+            if self._needs_tools(original_prompt):
+                tools = RULES_LAWYER_TOOLS + NPC_COMPILER_TOOLS
+                answer = await self._agentic_chat(
+                    prompt, system, original_prompt, edition, tools
+                )
+                for piece in re.split(r"(?<=[.!?])\s+", answer):
+                    if piece:
+                        acc.append(piece)
+                        yield ("ollama", piece)
+            else:
+                async for chunk in self.ollama.stream(
+                    prompt=prompt,
+                    system=system + (
+                        "\n\nThis turn is table narration: answer in fiction from the "
+                        "excerpts above, keep it to 2-4 sentences, and end by handing "
+                        "the next decision back to the players."
+                    ),
+                    model=self.settings.model_for("chat"),
+                ):
+                    acc.append(chunk)
+                    yield ("ollama", chunk)
 
         except Exception as e:
             logger.warning(f"Ollama stream failed: {e}")

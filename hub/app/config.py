@@ -63,6 +63,12 @@ class Settings(BaseSettings):
     model_builders: str = "qwen2.5:3b"   # character/npc/loot/map/encounter JSON
     model_continuity: str = "qwen2.5:3b" # session compression
 
+    # Stage 5 routing: set true to force every turn through the Rules Lawyer
+    # tool loop (slower, maximum citation fidelity). Default false lets the
+    # orchestrator route rules-intent turns to the tools and narration turns to
+    # a single fast pass.
+    force_rules_tools: bool = False
+
     def model_for(self, task: str) -> str:
         """Return the model assigned to a logical task, falling back to the
         single all-purpose model name for unknown tasks."""
