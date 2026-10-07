@@ -11,6 +11,14 @@
 $ErrorActionPreference = 'SilentlyContinue'
 Set-Location 'C:\pathfinder_god'
 
+# Snapshot campaign memory before the hub starts writing to it. The whole GM
+# continuity - chronicle, combat scene, sessions, entity ledger - lives in this
+# one file, and BP-07 Stage 4 made the hub write to it automatically.
+$py = 'C:\venv-hub\venv\Scripts\python.exe'
+if (Test-Path $py) {
+    & $py 'C:\pathfinder_god\hub\scripts\backup_campaign.py' --keep 20
+}
+
 # The hub's .env expects Ollama at 127.0.0.1:11450 (not the default 11434), so pin it.
 $env:OLLAMA_HOST = '127.0.0.1:11450'
 

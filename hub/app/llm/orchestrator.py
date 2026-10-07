@@ -1,4 +1,4 @@
-﻿# ============================================================
+# ============================================================
 # As Above, So Below. As Within, So Without.
 # The Future Dictates the Past and the Past is Always Present.
 # ============================================================
@@ -210,6 +210,67 @@ class LLMOrchestrator:
             return True
         return bool(self._RULES_INTENT.search(prompt or ""))
 
+    def _retrieval_confident(self, context: list[dict] | None, prompt: str) -> bool:
+        """Did retrieval actually find the rule the player asked about?
+
+        Strong signal: a retrieved rule's NAME occurs in the question (the same
+        test as retriever tier 0b). Without this the GM invents numbers - it
+        answered a swimming-DC question with "let's assume a DC of 20" while the
+        sources it was given had nothing to do with swimming.
+        """
+        if not context:
+            return False
+        text = (prompt or "").lower()
+        for c in context:
+            name = (c.get("name") or "").strip().lower()
+            if name and len(name) >= 4 and name in text:
+                return True
+        return False
+
+    _NUMERIC_QUESTION = re.compile(
+        r"\b(dc|difficulty class|damage|how much|how many|hit points|hp|"
+        r"average|per level|cost|price|reach|range)\b",
+        re.IGNORECASE,
+    )
+
+    def _should_abstain(self, context: list[dict] | None, prompt: str, needs_rules: bool) -> bool:
+        """Refuse-to-fabricate gate.
+
+        Two distinct ways this project's GM invented facts:
+        1. No rule matched at all -> it answered anyway ("let's assume a DC of
+           20" for a swimming-DC question).
+        2. A rule NAME matched but the excerpt does not contain the number being
+           asked for. It retrieved "Celestial Waffle Iron" and then invented a DC
+           for it, plus a bogus "error with the level parameter".
+
+        So a numeric question additionally requires numeric evidence somewhere
+        in the retrieved excerpts before the GM is allowed to state a figure.
+        """
+        if not needs_rules:
+            return False
+        if not self._retrieval_confident(context, prompt):
+            return True
+        if self._NUMERIC_QUESTION.search(prompt or ""):
+            has_number = any(
+                any(ch.isdigit() for ch in (c.get("content") or "")) for c in (context or [])
+            )
+            if not has_number:
+                return True
+        return False
+
+    @staticmethod
+    def _abstention_clause(confident: bool, needs_rules: bool) -> str:
+        """Instruction that makes the GM refuse to fabricate a ruling."""
+        if not needs_rules or confident:
+            return ""
+        return (
+            "\n\nCRITICAL - NO RULE FOUND FOR THIS. Your excerpts do not contain "
+            "the rule being asked about. Do NOT invent a number, DC, bonus, or "
+            "rule name, and do NOT guess from general knowledge. Say plainly: "
+            "\"I don't have that rule in my books.\" Then offer to adjudicate it "
+            "as a house rule and state that it is your ruling, not a citation."
+        )
+
     async def _agentic_chat(
         self,
         prompt: str,
@@ -281,6 +342,10 @@ class LLMOrchestrator:
 
         # Tier 1: Ollama with RAG + Agent Tools
         try:
+            # Bound before the RAG branch: the abstention gate below reads it,
+            # and an unbound name here would raise NameError and silently drop
+            # the turn into the raw-excerpts fallback whenever rag_enabled=0.
+            context: list[dict] = []
             if self.settings.rag_enabled:
                 context = await self.retriever.query(prompt, edition=edition, k=self.settings.rag_limit)
                 prompt = self._build_rag_prompt(prompt, context, edition, mode, history)
@@ -339,7 +404,10 @@ class LLMOrchestrator:
             # so the Rules Lawyer can cite a source; table narration runs a
             # single fast pass. Previously EVERY /ask turn paid for three
             # round-trips regardless of what was asked.
-            if self._needs_tools(original_prompt):
+            rules_turn = self._needs_tools(original_prompt)
+            if rules_turn and self._should_abstain(context, original_prompt, True):
+                system += self._abstention_clause(False, True)
+            if rules_turn:
                 answer = await self._agentic_chat(prompt, system, original_prompt, edition, tools)
             else:
                 answer = await self.ollama.generate(
@@ -456,6 +524,7 @@ class LLMOrchestrator:
         acc = []
 
         try:
+            context: list[dict] = []
             if self.settings.rag_enabled:
                 context = await self.retriever.query(prompt, edition=edition, k=self.settings.rag_limit)
                 prompt = self._build_rag_prompt(prompt, context, edition, mode, history)
@@ -464,7 +533,10 @@ class LLMOrchestrator:
             # tool loop and then emitted in sentence-sized frames. Before this,
             # /stream never had tool access at all, so a rules question asked in
             # the live chat got no citation while the same question on /ask did.
-            if self._needs_tools(original_prompt):
+            rules_turn = self._needs_tools(original_prompt)
+            if rules_turn and self._should_abstain(context, original_prompt, True):
+                system += self._abstention_clause(False, True)
+            if rules_turn:
                 tools = RULES_LAWYER_TOOLS + NPC_COMPILER_TOOLS
                 answer = await self._agentic_chat(
                     prompt, system, original_prompt, edition, tools
