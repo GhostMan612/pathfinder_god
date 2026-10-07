@@ -635,6 +635,10 @@ class GuideTab(QWidget):
         """Speak a chunk via the Hub TTS endpoint (offline pyttsx3)."""
         if not text or not text.strip():
             return
+        # Never read the Sources block aloud.
+        stripped = text.strip()
+        if stripped == "Sources:" or stripped.startswith("- [") or stripped.startswith("Sources:"):
+            return
         try:
             import tempfile
             import winsound

@@ -88,6 +88,50 @@ class LLMOrchestrator:
     _AUTO_FOLD_EVERY = 8
     _AUTO_COUNTS: dict[int, int] = {}
 
+    @staticmethod
+    def _citation_tag(source_book: str, name: str) -> str:
+        """Build the contract's exact `[Source Book - Rule Name]` string."""
+        book = (source_book or "").strip()
+        if not book or book.lower() in ("unknown", "unknown source"):
+            book = "Pathfinder"
+        return f"[{book} - {(name or 'Rule').strip()}]"
+
+    def _citation_tags(self, sources: list[dict] | None) -> list[str]:
+        tags: list[str] = []
+        for s in sources or []:
+            tag = self._citation_tag(s.get("source_book", ""), s.get("name", ""))
+            if tag not in tags:
+                tags.append(tag)
+        return tags
+
+    def _format_citations(self, sources: list[dict] | None) -> str:
+        """Render a deterministic Sources block from retrieved rule hits.
+
+        qwen2.5:3b does not reliably honour the mandated inline
+        `[Source Book - Rule Name]` format - it cites in prose ("In the
+        Pathfinder Player Core, it states..."). So the citation is assembled
+        here from the FTS5 row that actually matched, not from what the model
+        believes it read. A rule that was not retrieved cannot be cited.
+        """
+        tags = self._citation_tags(sources)
+        if not tags:
+            return ""
+        return "\n\nSources:\n" + "\n".join(f"- {t}" for t in tags)
+
+    def _attach_citations(self, answer: str, sources: list[dict] | None) -> str:
+        """Append the Sources block unless the answer already cites a known tag."""
+        tags = self._citation_tags(sources)
+        if not tags:
+            return answer or ""
+        text = answer or ""
+        # Append unless the answer already cites EVERY retrieved tag. Checking
+        # `any` instead meant a single inline citation - which this 3B model
+        # often picks wrongly, e.g. citing "Tack" and hiding the correct
+        # "Attack" entry - suppressed the whole authoritative list.
+        if all(t in text for t in tags):
+            return text
+        return text.rstrip() + "\n\nSources:\n" + "\n".join(f"- {t}" for t in tags)
+
     def _record_live_note(self, prompt: str, answer: str, campaign_id: int) -> None:
         """Append the turn to the open session log and, every few turns, run the
         continuity fold so the evergreen chronicle refreshes automatically.
@@ -315,7 +359,7 @@ class LLMOrchestrator:
 
             self._record_live_note(original_prompt, answer, campaign_id)
             return LLMResult(
-                answer=answer,
+                answer=self._attach_citations(answer, sources),
                 backend="ollama",
                 mode=mode or "auto",
                 edition=edition,
@@ -578,12 +622,14 @@ Citation Fidelity (MANDATORY):
         history: list[list[str]] | None = None,
     ) -> str:
         context_text = "\n\n---\n\n".join(
-            f"[{c.get('source_book', 'Unknown')}] {c.get('name', 'Rule')}: {c.get('content', '')[:500]}"
+            f"{self._citation_tag(c.get('source_book', ''), c.get('name', 'Rule'))}\n{c.get('content', '')[:500]}"
             for c in context
         )
         return f"""Context from rulebooks:
 {context_text}
 
+Every excerpt above is already labelled with its exact citation tag, e.g.
+[Core Rulebook - Stealth]. When you rely on one, repeat that tag verbatim inline.
 {self._history_block(history)}User request: {prompt}"""
 
     def _format_raw_excerpts(self, hits: list[dict], query: str) -> str:

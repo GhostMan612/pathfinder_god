@@ -36,8 +36,17 @@ def _hermetic_hub(tmp_path: Path, monkeypatch, rules_db_dir: Path):
         yield "Fake "
         yield "answer."
 
+    async def fake_chat(self, *, messages, model=None, tools=None, **kwargs):
+        # Needed because a rules-intent turn routes through the ReAct tool loop,
+        # which calls OllamaClient.chat. Without this the fixture leaked to the
+        # REAL ollama on those turns (the suite took 343s and the assertion saw a
+        # live model reply instead of "Fake answer."). Returning tool_calls=[] is
+        # the no-tools-needed branch, which is the tool path's own short-circuit.
+        return {"role": "assistant", "content": "Fake answer.", "tool_calls": []}
+
     monkeypatch.setattr(OllamaClient, "generate", fake_generate)
     monkeypatch.setattr(OllamaClient, "stream", fake_stream)
+    monkeypatch.setattr(OllamaClient, "chat", fake_chat)
     
     main.app.dependency_overrides[get_repo] = lambda: CampaignRepository(
         str(tmp_path / "campaign.db")

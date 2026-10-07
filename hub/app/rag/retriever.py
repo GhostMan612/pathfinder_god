@@ -94,6 +94,28 @@ class Retriever:
                     break
                 need = k - len(all_results)
 
+                # Tier 0b: the rule's NAME appears somewhere inside the
+                # question. The retriever is handed whole conversational
+                # sentences ("How does flanking work for melee attacks?"), so
+                # Tier 0's `name = <whole sentence>` never matched and FTS5 then
+                # OR-ed common words (how/does/work/for/melee) into unrelated
+                # feats - Flanking was returning Quick Reversal and Wolf Stance.
+                # Longest names win, so "Persistent Flame" beats "Fire" when
+                # both are mentioned.
+                take(conn.execute(
+                    "SELECT system, category, name, source_book, raw_content"
+                    " FROM rules WHERE system = ?"
+                    "  AND length(name) >= 4"
+                    "  AND instr(lower(?), lower(name)) > 0"
+                    "  AND source_book != 'Unknown Source'"
+                    " ORDER BY length(name) DESC LIMIT ?",
+                    (ed, query.strip(), need),
+                ).fetchall())
+                if len(all_results) >= k:
+                    conn.close()
+                    break
+                need = k - len(all_results)
+
                 # Tier 1: FTS5 rank over known-source rows.
                 take(conn.execute(
                     "SELECT system, category, name, source_book, raw_content"
