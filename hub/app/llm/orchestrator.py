@@ -89,26 +89,46 @@ class LLMOrchestrator:
 
     def _record_live_note(self, prompt: str, answer: str, campaign_id: int) -> None:
         """Append the turn to the open session log and, every few turns, run the
-        continuity fold so the evergreen chronicle refreshes automatically."""
+        continuity fold so the evergreen chronicle refreshes automatically.
 
+        The fold runs on a task that OWNS its own Ollama client. It cannot reuse
+        this orchestrator's client: every request builds its own orchestrator and
+        closes it in the endpoint's `finally`, so a fire-and-forget task holding a
+        reference to it was racing its own client's teardown - the in-flight
+        request raised, and the broad except swallowed it, leaving the chronicle
+        permanently empty.
+        """
         try:
             sn = max(1, self.repo.get_latest_session_num(campaign_id))
             self.repo.add_session_note(campaign_id, sn, prompt, answer)
             n = self._AUTO_COUNTS.get(campaign_id, 0) + 1
-            if n >= self._AUTO_FOLD_EVERY:
-                self._AUTO_COUNTS[campaign_id] = 0
-                session = self.repo.get_session(campaign_id, sn)
-                raw = session.raw_log if session is not None else prompt + "\n" + answer
-
-                async def _fold():
-                    try:
-                        await self.continuity_keeper.process_session(campaign_id, sn, raw)
-                    except Exception:
-                        logger.warning("auto-fold of live transcript failed", exc_info=True)
-
-                asyncio.create_task(_fold())
-            else:
+            if n < self._AUTO_FOLD_EVERY:
                 self._AUTO_COUNTS[campaign_id] = n
+                return
+            self._AUTO_COUNTS[campaign_id] = 0
+            session = self.repo.get_session(campaign_id, sn)
+            raw = session.raw_log if session is not None else prompt + "\n" + answer
+
+            async def _fold() -> None:
+                client = OllamaClient(self.settings.ollama_host)
+                try:
+                    from app.agents.continuity import ContinuityKeeper
+
+                    class _OrchestratorShim:
+                        ollama = client
+
+                    keeper = ContinuityKeeper(self.repo, _OrchestratorShim())
+                    await keeper.process_session(campaign_id, sn, raw)
+                    logger.info("auto-fold: chronicle refreshed for campaign %s", campaign_id)
+                except Exception:
+                    logger.warning("auto-fold of live transcript failed", exc_info=True)
+                finally:
+                    try:
+                        await client.close()
+                    except Exception:
+                        logger.debug("failed to close fold client", exc_info=True)
+
+            asyncio.create_task(_fold())
         except Exception:
             logger.debug("live note/fold failed", exc_info=True)
 
