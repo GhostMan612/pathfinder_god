@@ -6,7 +6,16 @@
 """Tests for CombatTrackerAgent deterministic PF2e combat math."""
 
 
+from app.agents import combat_tracker as combat_tracker_module
 from app.agents.combat_tracker import CombatTrackerAgent
+
+
+class _FixedRandom:
+    def __init__(self, value: int):
+        self._value = value
+
+    def randint(self, a: int, b: int) -> int:
+        return self._value
 
 
 class TestCombatTrackerAgent:
@@ -168,22 +177,26 @@ class TestPersistentDamage:
         # Should have notes about damage and flat check
         assert "Took" in notes or "Flat check" in notes
 
-    def test_persistent_damage_flat_check_success(self):
-        """Flat check >= 15 removes persistent damage."""
-        # We can't easily test random, but we can verify structure
+    def test_persistent_damage_flat_check_success(self, monkeypatch):
+        """Flat check >= 15 removes persistent damage (fixed DC 15)."""
+        monkeypatch.setattr(combat_tracker_module, "random", _FixedRandom(15))
         conditions = [{"name": "Persistent Fire 1d6", "value": 1}]
-        updated, notes, _ = CombatTrackerAgent.end_of_turn(conditions)
-        # Should have notes about damage and flat check
-        assert "Flat check" in notes
+        updated, notes, damage = CombatTrackerAgent.end_of_turn(conditions, current_hp=20)
+        assert updated == []
+        assert "Recovered" in notes
+        assert "DC 15" in notes
+        assert damage == 0
 
-    def test_persistent_damage_flat_check_failure(self):
-        """Flat check < 15 keeps persistent damage."""
+    def test_persistent_damage_flat_check_failure(self, monkeypatch):
+        """Flat check < 15 keeps the condition and applies the damage."""
+        monkeypatch.setattr(combat_tracker_module, "random", _FixedRandom(14))
         conditions = [{"name": "Persistent Fire 1d6", "value": 1}]
-        updated, notes, _ = CombatTrackerAgent.end_of_turn(conditions)
-        # If flat check fails, condition persists
-        if "persists" in notes:
-            assert len(updated) == 1
-            assert updated[0]["name"] == "Persistent Fire 1d6"
+        updated, notes, damage = CombatTrackerAgent.end_of_turn(conditions, current_hp=20)
+        assert len(updated) == 1
+        assert updated[0]["name"] == "Persistent Fire 1d6"
+        assert "failed" in notes
+        assert "DC 15" in notes
+        assert damage > 0
 
     def test_persistent_damage_no_dice_notation(self):
         """Persistent damage without dice notation still gets flat check."""
@@ -233,15 +246,6 @@ class TestDyingWounded:
 
 
 class TestPersistentDamageFlatCheck:
-    def test_flat_check_success_removes(self):
-        """Flat check >= 15 removes persistent damage condition."""
-        # We can't easily control randomness, but we can verify the logic
-        conditions = [{"name": "Persistent Fire 1d6", "value": 1}]
-        updated, notes, _ = CombatTrackerAgent.end_of_turn(conditions)
-        # The condition should be removed if flat check succeeds
-        # We can't deterministically test this, but we verify the logic path exists
-        assert "Flat check" in notes or "Took" in notes
-
     def test_persistent_damage_no_dice_notation(self):
         """Persistent damage without dice notation still gets flat check."""
         conditions = [{"name": "Persistent Fire", "value": 1}]
@@ -250,13 +254,10 @@ class TestPersistentDamageFlatCheck:
         assert "Flat check" in notes
 
     def test_persistent_damage_reports_taken_damage(self):
-        """Persistent damage notes report the rolled damage when the check fails.
+        """Damage is reported only when the DC 15 flat check fails.
 
-        The old assertion was `damage >= 1`, which encoded the bug: the old code
-        applied the damage BEFORE the flat check, so a creature that recovered
-        still bled. Under the corrected order a d20 flat check against a DC of
-        1-6 usually succeeds, so 0 damage is the expected outcome most of the
-        time - `damage >= 1` was only ever passing by luck.
+        The check happens before the damage, so a success reports 0 and
+        "Recovered", a failure (rolls 1-14, ~70%) reports the rolled damage.
         """
         conditions = [{"name": "Persistent Fire 1d6", "value": 1}]
         updated, notes, damage = CombatTrackerAgent.end_of_turn(
@@ -273,9 +274,8 @@ class TestPersistentDamageFlatCheck:
     def test_persistent_damage_drops_to_zero_adds_dying(self):
         """Damage dropping HP to 0 appends Dying 1.
 
-        Retried until the flat check actually fails, because a d20 check against
-        a DC of 1-6 succeeds most of the time and asserting a single roll is
-        inherently flaky.
+        Retried until the DC 15 flat check fails (rolls 1-14), which is the
+        common outcome, so the loop only guards against the unlucky 30%.
         """
         for _ in range(200):
             conditions = [{"name": "Persistent Fire 1d6", "value": 1}]

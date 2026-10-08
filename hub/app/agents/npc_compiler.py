@@ -150,6 +150,12 @@ class NPCCompilerAgent:
         # For now, return a template
         return self._build_from_concept(concept)
 
+    async def save_npc_to_db(self, npc_json: dict, campaign_id: int = 1) -> dict:
+        return await save_npc_to_db_tool(npc_json, self.repo, campaign_id)
+
+    async def level_up(self, character_id: int, campaign_id: int = 1) -> dict:
+        return await level_up_tool(character_id, self.repo, campaign_id)
+
     def _build_from_concept(self, concept: str) -> NPCStatBlock:
         """Parse concept and build legal ABC stat block."""
         # Parse level from concept
@@ -292,10 +298,10 @@ async def create_npc_tool(concept: str, repo: CampaignRepository) -> dict:
     return npc.__dict__
 
 
-async def save_npc_to_db_tool(npc_json: dict, repo: CampaignRepository) -> dict:
+async def save_npc_to_db_tool(npc_json: dict, repo: CampaignRepository, campaign_id: int = 1) -> dict:
     """Tool: save_npc_to_db(npc_json)"""
     npc_id = repo.upsert_npc(
-        campaign_id=1,
+        campaign_id=campaign_id,
         name=npc_json.get("name") or "Unknown",
         # NPCStatBlock declares class_, and create_npc_tool returns
         # npc.__dict__, so there is no "class" key - the documented
@@ -315,7 +321,21 @@ async def save_npc_to_db_tool(npc_json: dict, repo: CampaignRepository) -> dict:
     return {"id": npc_id, "saved": True}
 
 
-async def level_up_tool(character_id: int, repo: CampaignRepository) -> dict:
+async def level_up_tool(character_id: int, repo: CampaignRepository, campaign_id: int = 1) -> dict:
     """Tool: level_up(character_id)"""
-    # Implementation would fetch NPC, increment level, recalculate stats
-    return {"character_id": character_id, "leveled_up": True, "new_level": 0}
+    npc = repo.get_npc_by_id(campaign_id, character_id)
+    if npc is None:
+        return {"error": f"no NPC id {character_id} in campaign {campaign_id}"}
+    new_level = (npc.level or 1) + 1
+    repo.upsert_npc(
+        campaign_id=campaign_id,
+        name=npc.name,
+        alias=npc.alias,
+        role=npc.role,
+        level=new_level,
+        ancestry=npc.ancestry,
+        class_=npc.class_,
+        disposition=npc.disposition,
+        notes=npc.notes,
+    )
+    return {"character_id": character_id, "leveled_up": True, "new_level": new_level}

@@ -96,9 +96,11 @@ class CombatTrackerAgent:
     ) -> tuple[list[dict[str, Any]], str, int]:
         """Process end-of-turn condition updates per PF2e Remaster.
 
-        - Persistent Damage: roll dice, subtract from HP, DC 15 flat check to remove.
-        - Dying: increment if at 0 HP; appended at 1 if damage drops HP to 0.
-        - Wounded: tracked separately, adds to Dying value.
+        - Persistent Damage: roll the dice, then make the DC 15 flat check
+          BEFORE applying the damage; success ends the condition.
+        - Dying: increments by 1 each end-of-turn while at 0 HP. Recovery
+          checks and the Dying-4 death threshold are not implemented.
+        - Wounded: recorded as-is; it does not modify Dying (not implemented).
         - Frightened: value > 1 -> decrement by 1; value == 1 -> remove.
         - Duration-based conditions: decrement; remove if 0.
 
@@ -135,26 +137,26 @@ class CombatTrackerAgent:
                     except (TypeError, ValueError):
                         pending = 0
 
-                # PF2e: the creature makes a flat check on a DC equal to the
-                # damage BEFORE taking that damage, and success ends the
-                # condition. The old order applied the damage first and used a
-                # fixed DC 15, so a creature that escaped still lost HP and the
-                # Spoke was told "Recovered" and "Took 2 damage" at once.
+                # PF2e Remaster: at the end of the turn the creature makes a
+                # flat check against a FIXED DC 15, before taking the damage.
+                # Success ends the condition. Using the rolled damage as the
+                # DC made bigger dice harder to shake off - a 1d12 burn was
+                # three times stickier than 1d4 - which inverts the rule.
                 if pending <= 0:
                     notes_parts.append(f"No persistent {display} damage; condition ends.")
                     continue
 
                 flat_check = random.randint(1, 20)
-                if flat_check >= pending:
+                if flat_check >= 15:
                     notes_parts.append(
-                        f"Flat check {flat_check} vs DC {pending}: "
+                        f"Flat check {flat_check} vs DC 15: "
                         f"Recovered from {display}."
                     )
                     continue
 
                 hp = max(0, hp - pending)
                 notes_parts.append(
-                    f"Flat check {flat_check} vs DC {pending}: failed, "
+                    f"Flat check {flat_check} vs DC 15: failed, "
                     f"took {pending} {display} damage."
                 )
 

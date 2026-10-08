@@ -449,6 +449,14 @@ class CampaignRepository:
             ).fetchone()
             return self._npc_from_row(dict(row)) if row else None
 
+    def get_npc_by_id(self, campaign_id: int, npc_id: int) -> NPC | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM npcs WHERE campaign_id = ? AND id = ?",
+                (campaign_id, npc_id),
+            ).fetchone()
+            return self._npc_from_row(dict(row)) if row else None
+
     # ──────────────────────────────────────────────────────────────
     # Locations
     # ──────────────────────────────────────────────────────────────

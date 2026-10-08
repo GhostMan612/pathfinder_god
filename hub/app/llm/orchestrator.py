@@ -17,7 +17,7 @@ import json
 import logging
 import re
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 
 from app.agents.npc_compiler import NPC_COMPILER_TOOLS, NPCCompilerAgent
 from app.agents.rules_lawyer import RULES_LAWYER_TOOLS, RulesLawyerAgent
@@ -39,6 +39,23 @@ class LLMResult:
     mode: str
     edition: str
     sources: list[dict]
+
+
+def _tool_result_dict(result) -> dict:
+    """Convert a tool result to a JSON-serializable dict.
+
+    Agent methods return dataclasses (RuleLookupResult, DCResult,
+    NPCStatBlock, ...). json.dumps cannot serialize those, and the resulting
+    TypeError escaped _agentic_chat into generate()'s broad except, silently
+    degrading every successful tool turn to the raw-excerpts tier.
+    """
+    if isinstance(result, dict):
+        return result
+    if is_dataclass(result):
+        return asdict(result)
+    if hasattr(result, "__dict__"):
+        return dict(result.__dict__)
+    return {"value": str(result)}
 
 
 class LLMOrchestrator:
@@ -278,6 +295,7 @@ class LLMOrchestrator:
         original_prompt: str,
         edition: str,
         tools: list[dict],
+        campaign_id: int = 1,
     ) -> str:
         """3-turn ReAct loop for tool-capable models (qwen2.5:3b Q4_K_M).
 
@@ -315,9 +333,9 @@ class LLMOrchestrator:
                     args = json.loads(args)
                 except Exception:
                     args = {}
-            result = await self.handle_tool_call(name, args)
+            result = await self.handle_tool_call(name, args, campaign_id)
             # Tool result as 'tool' role (Ollama expects role=tool, content=json)
-            messages.append({"role": "tool", "content": json.dumps(result, ensure_ascii=False), "name": name})
+            messages.append({"role": "tool", "content": json.dumps(_tool_result_dict(result), ensure_ascii=False), "name": name})
 
         # Turn 3: final narrative
         msg3 = await self.ollama.chat(
@@ -408,7 +426,7 @@ class LLMOrchestrator:
             if rules_turn and self._should_abstain(context, original_prompt, True):
                 system += self._abstention_clause(False, True)
             if rules_turn:
-                answer = await self._agentic_chat(prompt, system, original_prompt, edition, tools)
+                answer = await self._agentic_chat(prompt, system, original_prompt, edition, tools, campaign_id)
             else:
                 answer = await self.ollama.generate(
                     prompt=prompt,
@@ -459,7 +477,7 @@ class LLMOrchestrator:
     # Tool Handlers (called when Ollama invokes a tool)
     # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-    async def handle_tool_call(self, tool_name: str, arguments: dict) -> dict:
+    async def handle_tool_call(self, tool_name: str, arguments: dict, campaign_id: int = 1) -> dict:
         """Execute a tool call and return result."""
         try:
             if tool_name == "lookup_rule":
@@ -479,9 +497,9 @@ class LLMOrchestrator:
             elif tool_name == "create_npc":
                 return await self.npc_compiler.create_npc(arguments["concept"])
             elif tool_name == "save_npc_to_db":
-                return await self.npc_compiler.save_npc_to_db(arguments["npc_json"])
+                return await self.npc_compiler.save_npc_to_db(arguments["npc_json"], campaign_id)
             elif tool_name == "level_up":
-                return await self.npc_compiler.level_up(arguments["character_id"])
+                return await self.npc_compiler.level_up(arguments["character_id"], campaign_id)
             elif tool_name == "process_session":
                 return await self.continuity_keeper.process_session(
                     arguments["campaign_id"],
@@ -539,7 +557,7 @@ class LLMOrchestrator:
             if rules_turn:
                 tools = RULES_LAWYER_TOOLS + NPC_COMPILER_TOOLS
                 answer = await self._agentic_chat(
-                    prompt, system, original_prompt, edition, tools
+                    prompt, system, original_prompt, edition, tools, campaign_id
                 )
                 for piece in re.split(r"(?<=[.!?])\s+", answer):
                     if piece:
