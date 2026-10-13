@@ -319,42 +319,45 @@ fun CombatantCard(
                 style = MaterialTheme.typography.titleMedium,
                 color = CritRed,
                 modifier = Modifier
+                    // testTag outermost: Modifier.layout (godTouchHeight) opens a
+                    // new LayoutNode, so a tag applied after it reports the inner
+                    // text bounds (42dp) instead of the rendered 48dp target.
+                    .testTag(GodTags.combatantDamage(combatant.id))
                     .clickable(
                         onClickLabel = stringResource(R.string.a11y_damage_five, combatant.name),
                         role = Role.Button,
                         onClick = { onDamage() },
                     )
                     .godTouchHeight()
-                    .padding(Spacing.sm)
-                    .testTag(GodTags.combatantDamage(combatant.id)),
+                    .padding(Spacing.sm),
             )
             Text(
                 text = stringResource(R.string.combat_heal_five),
                 style = MaterialTheme.typography.titleMedium,
                 color = GoldAccent,
                 modifier = Modifier
+                    .testTag(GodTags.combatantHeal(combatant.id))
                     .clickable(
                         onClickLabel = stringResource(R.string.a11y_heal_five, combatant.name),
                         role = Role.Button,
                         onClick = { onHeal() },
                     )
                     .godTouchHeight()
-                    .padding(Spacing.sm)
-                    .testTag(GodTags.combatantHeal(combatant.id)),
+                    .padding(Spacing.sm),
             )
             Text(
                 text = stringResource(R.string.combat_add_condition),
                 style = MaterialTheme.typography.titleMedium,
                 color = TextPrimary,
                 modifier = Modifier
+                    .testTag(GodTags.combatantConditions(combatant.id))
                     .clickable(
                         onClickLabel = stringResource(R.string.a11y_condition_add, combatant.name),
                         role = Role.Button,
                         onClick = { picking = !picking },
                     )
                     .godTouchHeight()
-                    .padding(Spacing.sm)
-                    .testTag(GodTags.combatantConditions(combatant.id)),
+                    .padding(Spacing.sm),
             )
         }
         if (picking) {

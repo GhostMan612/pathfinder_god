@@ -143,13 +143,17 @@ fun CombatTrackerScreen(
                     // left the control with a click action but no name. The
                     // visible "Summon" is the label; onClickLabel carries the
                     // disambiguating action hint.
+                    // testTag first, so it lands on the outermost LayoutNode -
+                    // godTouchHeight opens a new node and a tag applied after it
+                    // would report the inner text bounds (42dp), not the 48dp
+                    // touch target actually rendered.
+                    .testTag(GodTags.COMBAT_SUMMON)
                     .clickable(
                         onClickLabel = stringResource(R.string.a11y_combat_summon),
                         role = Role.Button,
                     ) { summoning = true }
                     .godTouchHeight()
-                    .padding(Spacing.sm)
-                    .testTag(GodTags.COMBAT_SUMMON),
+                    .padding(Spacing.sm),
             )
             Text(
                 text = activeName ?: stringResource(R.string.value_unknown),
@@ -321,13 +325,13 @@ fun CombatTrackerScreen(
                         style = MaterialTheme.typography.titleMedium,
                         color = GoldAccent,
                         modifier = Modifier
+                            .testTag(GodTags.COMBAT_DIALOG_CLOSE)
                             .clickable(
                                 onClickLabel = stringResource(R.string.a11y_dialog_close),
                                 role = Role.Button,
                             ) { summoning = false }
                             .godTouchHeight()
-                            .padding(horizontal = Spacing.md, vertical = Spacing.sm)
-                            .testTag(GodTags.COMBAT_DIALOG_CLOSE),
+                            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
                     )
                 },
                 containerColor = ParchmentSurface,

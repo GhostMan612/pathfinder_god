@@ -184,9 +184,9 @@ private fun MapCanvas(
                             map.prompt,
                         )
                     }
+                    .testTag(GodTags.MAP_SHARE)
                     .godTouchSize()
-                    .padding(Spacing.xs)
-                    .testTag(GodTags.MAP_SHARE),
+                    .padding(Spacing.xs),
             )
         }
         Text(

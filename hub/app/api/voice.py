@@ -14,15 +14,24 @@ voice simply comes online once the operator adds the packages.
 
 from __future__ import annotations
 
+import asyncio
+import base64 as _b64
 import os
 import tempfile
 import wave
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, Response, UploadFile, WebSocket, WebSocketDisconnect
+import anyio
+from fastapi import (
+    APIRouter,
+    File,
+    HTTPException,
+    Response,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from pydantic import BaseModel, Field
-
-import base64 as _b64
 
 try:  # optional ASR
     from faster_whisper import WhisperModel
@@ -75,6 +84,37 @@ router = APIRouter(prefix="/voice", tags=["voice"])
 _ASR_MODEL = None
 _ASR_SIZE = os.environ.get("PFGOD_ASR_MODEL", "tiny")
 
+# Ceilings for the ASR websocket. Without these a client could stream base64
+# forever (buf only ever grew) or send a multi-GB upload, and the hub binds
+# 0.0.0.0:8000, so any LAN peer could exhaust its RAM.
+_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+_MAX_PCM_BYTES = 16000 * 2 * 60  # 60 s of 16 kHz 16-bit mono
+_MAX_FRAME_BYTES = 512 * 1024  # one base64 PCM chunk on the wire
+_IDLE_TIMEOUT_S = 120
+
+
+def _ws_authorized(websocket: WebSocket) -> bool:
+    """Websocket auth, enforced only when a key is actually configured.
+
+    get_current_user is an HTTP Depends helper and cannot be reused here, and
+    the hub is a local-only app whose Command Center and Spoke clients send no
+    credentials at all. Gating unconditionally would break both of them on a
+    default install (api_key_sha256 is ""), so this enforces when configured
+    and stays open when the operator has deliberately chosen keyless LAN.
+    """
+    from app.config import get_settings
+
+    expected = (get_settings().api_key_sha256 or "").strip()
+    if not expected:
+        return True
+    from app.api.security import verify_api_key
+
+    key = websocket.headers.get("X-API-Key") or websocket.query_params.get("api_key") or ""
+    auth = websocket.headers.get("Authorization") or ""
+    if not key and auth.lower().startswith("bearer "):
+        key = auth[7:].strip()
+    return bool(key) and verify_api_key(key, expected)
+
 
 def _get_model():
     global _ASR_MODEL
@@ -116,51 +156,64 @@ async def asr_stream(websocket: WebSocket) -> None:
     windowed decoder (Whisper-Streaming local-agreement) is a straight drop-in
     over this buffer if we want it later.
     """
+    if not _ws_authorized(websocket):
+        await websocket.close(code=1008, reason="authentication required")
+        return
+
     await websocket.accept()
     buf = bytearray()
     step_bytes = 16000 * 2 * 3 // 2  # ~1.5 s of audio at 16 kHz 16-bit
     next_emit = step_bytes
     try:
         while True:
-            msg = await websocket.receive_json()
+            try:
+                msg = await asyncio.wait_for(websocket.receive_json(), timeout=_IDLE_TIMEOUT_S)
+            except (asyncio.TimeoutError, TimeoutError):
+                break
+            except WebSocketDisconnect:
+                break
             kind = msg.get("type")
             if kind == "pcm":
                 try:
-                    buf.extend(_b64.b64decode(msg.get("data", "")))
+                    chunk = _b64.b64decode(msg.get("data", ""), validate=True)
                 except Exception:
                     continue
+                if len(chunk) > _MAX_FRAME_BYTES:
+                    continue
+                buf.extend(chunk)
+                # Bound the buffer: a client streaming forever must not grow it.
+                if len(buf) > _MAX_PCM_BYTES:
+                    del buf[:-_MAX_PCM_BYTES]
                 if len(buf) >= next_emit:
-                    await websocket.send_json({"type": "partial", "text": _transcribe_pcm(bytes(buf))})
+                    # Whisper is seconds-scale on this CPU. Running it inline
+                    # froze /health, /ask and every other socket for the whole
+                    # decode, so it goes to the worker threadpool.
+                    text = await anyio.to_thread.run_sync(_transcribe_pcm, bytes(buf))
+                    await websocket.send_json({"type": "partial", "text": text})
+                    buf.clear()
                     next_emit += step_bytes
             elif kind == "done":
-                await websocket.send_json({"type": "final", "text": _transcribe_pcm(bytes(buf))})
+                text = await anyio.to_thread.run_sync(_transcribe_pcm, bytes(buf))
+                buf.clear()
+                await websocket.send_json({"type": "final", "text": text})
                 break
             elif kind == "ping":
                 await websocket.send_json({"type": "pong"})
-    except WebSocketDisconnect:
-        pass
-    try:
-        await websocket.close()
     except Exception:
+        # Not just WebSocketDisconnect: a non-JSON frame raises JSONDecodeError
+        # and any other RuntimeError used to skip the close below, leaking the
+        # connection and its buffer.
         pass
+    finally:
+        buf.clear()
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
-class SpeakRequest(BaseModel):
-    text: str = Field(..., min_length=1, max_length=4000)
-    voice: str = "default"
-
-
-@router.post("/transcribe", response_model=TranscribeResponse)
-async def transcribe(file: UploadFile = File(...)) -> TranscribeResponse:
-    if not _FASTER:
-        raise HTTPException(
-            status_code=501,
-            detail="faster-whisper is not installed. Run: pip install faster-whisper",
-        )
-    data = await file.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="empty audio upload")
-    suffix = Path(file.filename or "audio.wav").suffix or ".wav"
+def _transcribe_file(data: bytes, suffix: str) -> TranscribeResponse:
+    """Blocking: write the upload to a temp file and run Whisper on it."""
     fd, tmp_path = tempfile.mkstemp(suffix=suffix)
     try:
         with os.fdopen(fd, "wb") as tmp:
@@ -171,13 +224,61 @@ async def transcribe(file: UploadFile = File(...)) -> TranscribeResponse:
             segments, info = model.transcribe(arr, beam_size=1)
         else:
             segments, info = model.transcribe(tmp_path, beam_size=1)
-        text = "".join(seg.text for seg in segments).strip()
         return TranscribeResponse(
-            text=text, language=getattr(info, "language", "en"), duration_s=float(info.duration or 0.0)
+            text="".join(seg.text for seg in segments).strip(),
+            language=getattr(info, "language", "en"),
+            duration_s=float(info.duration or 0.0),
         )
     finally:
         try:
             os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+@router.post("/transcribe", response_model=TranscribeResponse)
+async def transcribe(file: UploadFile = File(...)) -> TranscribeResponse:
+    if not _FASTER:
+        raise HTTPException(
+            status_code=501,
+            detail="faster-whisper is not installed. Run: pip install faster-whisper",
+        )
+    # Cap before buffering the whole thing: await file.read() with no ceiling let
+    # a single request allocate whatever the client chose to send.
+    data = await file.read(_MAX_UPLOAD_BYTES + 1)
+    if not data:
+        raise HTTPException(status_code=400, detail="empty audio upload")
+    if len(data) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="audio upload too large")
+    suffix = Path(file.filename or "audio.wav").suffix or ".wav"
+    # Whisper plus the WAV decode are CPU-bound and block for seconds on this
+    # laptop; keep them off the event loop.
+    return await anyio.to_thread.run_sync(_transcribe_file, data, suffix)
+
+
+class SpeakRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=4000)
+    voice: str = Field("default", max_length=120)
+
+
+def _synthesize(text: str, voice: str) -> bytes:
+    """Blocking: drive pyttsx3/SAPI and read the WAV back."""
+    fd, wav_path = tempfile.mkstemp(suffix=".wav")
+    os.close(fd)
+    try:
+        engine = pyttsx3.init()
+        if voice != "default":
+            try:
+                engine.setProperty("voice", voice)
+            except Exception:
+                pass
+        engine.save_to_file(text, wav_path)
+        engine.runAndWait()
+        engine.stop()
+        return Path(wav_path).read_bytes()
+    finally:
+        try:
+            os.unlink(wav_path)
         except OSError:
             pass
 
@@ -189,21 +290,8 @@ async def speak(req: SpeakRequest) -> Response:
             status_code=501,
             detail="pyttsx3 is not installed. Run: pip install pyttsx3",
         )
-    fd, wav_path = tempfile.mkstemp(suffix=".wav")
-    os.close(fd)
-    try:
-        engine = pyttsx3.init()
-        if req.voice != "default":
-            try:
-                engine.setProperty("voice", req.voice)
-            except Exception:
-                pass
-        engine.save_to_file(req.text, wav_path)
-        engine.runAndWait()
-        engine.stop()
-        return Response(content=Path(wav_path).read_bytes(), media_type="audio/wav")
-    finally:
-        try:
-            os.unlink(wav_path)
-        except OSError:
-            pass
+    # runAndWait() blocks on the OS speech engine; the Command Center calls this
+    # once per sentence, so an inline call stalled the loop dozens of times per
+    # chat reply.
+    wav = await anyio.to_thread.run_sync(_synthesize, req.text, req.voice)
+    return Response(content=wav, media_type="audio/wav")

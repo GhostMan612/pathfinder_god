@@ -24,6 +24,8 @@ import sys
 from pathlib import Path
 from urllib.parse import quote, unquote
 
+import anyio
+
 logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
@@ -84,7 +86,9 @@ def _db_path() -> str | None:
 
 
 def _exact(db: str, term: str, edition: str) -> dict | None:
-    conn = sqlite3.connect(db)
+    # Read-only URI: this path only reads, and opening the shared 58 MB rules
+    # DB read-write let it take a write lock the retrievers then contend with.
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=10.0)
     conn.row_factory = sqlite3.Row
     try:
         row = conn.execute(
@@ -226,7 +230,9 @@ async def fetch_one(term: str, edition: str = "1e") -> dict | None:
     if db is None:
         return None
     ed = "1E" if edition.lower().startswith("1") else "2E"
-    hit = _exact(db, term, ed)
+    # _exact is a synchronous, unindexed scan of the 58 MB corpus called from an
+    # async route; run it off the event loop so a probe cannot stall every client.
+    hit = await anyio.to_thread.run_sync(_exact, db, term, ed)
     if hit:
         return hit
     if ed != "1E":

@@ -116,8 +116,12 @@ val GodTypography = Typography(
     labelSmall = TextStyle(
         fontFamily = Body,
         fontWeight = FontWeight.Medium,
-        fontSize = 11.sp,
-        lineHeight = 15.sp,
+        // 12.sp, was 11.sp: 11 was below the 12sp floor, and GodLiveRegion - the
+        // component every accessibility announcement renders through - inherited
+        // this style, so the smallest text in the app was the text whose only job
+        // is to be read aloud.
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
         letterSpacing = 0.5.sp,
     ),
 )

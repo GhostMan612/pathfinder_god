@@ -303,6 +303,10 @@ private fun VaultRow(
                 fontWeight = FontWeight.Bold,
                 color = CritRed,
                 modifier = Modifier
+                    // testTag before godTouchSize: Modifier.layout opens a new
+                    // LayoutNode, so a tag applied after it reports the inner
+                    // text bounds instead of the rendered 48dp target.
+                    .testTag(GodTags.encounterDelete(encounter.id))
                     .godTouchSize()
                     .clickable(
                         onClickLabel = stringResource(
@@ -311,8 +315,7 @@ private fun VaultRow(
                         ),
                         role = Role.Button,
                     ) { onDelete() }
-                    .padding(Spacing.sm)
-                    .testTag(GodTags.encounterDelete(encounter.id)),
+                    .padding(Spacing.sm),
             )
         }
     }

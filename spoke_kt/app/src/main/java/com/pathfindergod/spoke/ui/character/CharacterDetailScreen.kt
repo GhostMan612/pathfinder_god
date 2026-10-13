@@ -138,9 +138,9 @@ fun CharacterDetailScreen(
                             onClickLabel = stringResource(R.string.a11y_hero_share, entity.name),
                             role = Role.Button,
                         ) { ExportService.shareCharacter(context, entity) }
+                        .testTag(GodTags.heroShare(entity.id))
                         .godTouchSize()
-                        .padding(Spacing.sm)
-                        .testTag(GodTags.heroShare(entity.id)),
+                        .padding(Spacing.sm),
                 )
             }
         }

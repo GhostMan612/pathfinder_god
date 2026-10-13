@@ -14,6 +14,7 @@ import sys
 import time
 from datetime import UTC, datetime
 
+import anyio
 import psutil
 from fastapi import APIRouter, Depends
 from fastapi.responses import PlainTextResponse
@@ -115,9 +116,14 @@ def get_metrics() -> dict:
 
 async def check_database(repo: CampaignRepository) -> tuple[bool, str]:
     """Check database connectivity."""
-    try:
+
+    def _probe() -> None:
         with repo._conn() as conn:
             conn.execute("SELECT 1").fetchone()
+
+    try:
+        # Synchronous sqlite from an async probe function, called on a timer.
+        await anyio.to_thread.run_sync(_probe)
         return True, "ok"
     except Exception as e:
         return False, str(e)
@@ -145,7 +151,12 @@ async def check_rules_db(settings) -> tuple[bool, str]:
         # permanently unhealthy.
         from app.rag.search import Retriever
         retriever = Retriever(settings.db_paths, rag_limit=1)
-        hits = retriever.search("test", edition="2e", limit=1)
+        # Retriever.search is fully synchronous (sqlite on the 58 MB corpus).
+        # A readiness probe runs on a timer, so calling it inline put a
+        # recurring multi-hundred-ms stall into the event loop for every client.
+        hits = await anyio.to_thread.run_sync(
+            lambda: retriever.search("test", edition="2e", limit=1)
+        )
         return True, f"ok ({len(hits)} hits)"
     except Exception as e:
         return False, str(e)

@@ -95,7 +95,11 @@ fun GodCard(
             onClickLabel = onClickLabel,
             role = clickRole,
             onClick = onClick,
-        )
+            // godTouchHeight here as well as on the toggleable branch above:
+            // without it only toggleable cards were guaranteed a 48dp target,
+            // and every plain clickable card fell back to whatever its content
+            // happened to measure.
+        ).godTouchHeight()
         else -> Modifier
     }
     val described = if (stateDescription == null && contentDescription == null) {

@@ -432,7 +432,14 @@ private fun ModeRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = Spacing.xs),
+                .padding(top = Spacing.xs)
+                // Scrollable: the label plus the OFF chip and ten TARGET_STEPS
+                // chips is ~646dp of content in a 288dp-wide area at a 320dp
+                // viewport. Without this the row centres and overflows both ends,
+                // laying TN 20 and TN 25 off-screen and unreachable. Matches
+                // CountRow/ModifierRow/KeepRow above, which carry this for the
+                // same reason.
+                .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(Spacing.xs, Alignment.CenterHorizontally),
         ) {
             Text(

@@ -164,13 +164,13 @@ private fun CharacterCard(
                     // the child Text in the merged node, leaving the Delete
                     // control with a click action but no accessible name. The
                     // visible text is the label.
+                    .testTag(GodTags.heroDelete(character.id))
                     .clickable(
                         onClickLabel = stringResource(R.string.a11y_hero_delete, character.name),
                         role = Role.Button,
                     ) { onDelete() }
                     .godTouchSize()
-                    .padding(Spacing.sm)
-                    .testTag(GodTags.heroDelete(character.id)),
+                    .padding(Spacing.sm),
             )
         }
     }

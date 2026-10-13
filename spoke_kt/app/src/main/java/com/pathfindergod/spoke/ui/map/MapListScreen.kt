@@ -219,13 +219,13 @@ private fun MapCard(
             style = MaterialTheme.typography.labelLarge,
             color = CritRed,
             modifier = Modifier
+                .testTag(GodTags.mapBanish(map.id))
                 .clickable(
                     onClickLabel = stringResource(R.string.a11y_map_banish, map.prompt),
                     role = Role.Button,
                 ) { onDelete() }
                 .godTouchHeight()
-                .padding(top = Spacing.xxs)
-                .testTag(GodTags.mapBanish(map.id)),
+                .padding(top = Spacing.xxs),
         )
     }
 }

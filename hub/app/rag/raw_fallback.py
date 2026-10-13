@@ -12,6 +12,8 @@ import logging
 import sqlite3
 from typing import Any
 
+import anyio
+
 from app.config import get_settings
 from app.db.repository import CampaignRepository
 from app.rag._fts import build_match_query, editions_for
@@ -19,16 +21,11 @@ from app.rag._fts import build_match_query, editions_for
 logger = logging.getLogger(__name__)
 
 
-async def search_rules(
+def _search_rules_sync(
     query: str,
-    edition: str = "both",
-    limit: int = 5,
-    repo: CampaignRepository | None = None,
+    edition: str,
+    limit: int,
 ) -> list[dict[str, Any]]:
-    """
-    Direct FTS5 search — returns raw rule excerpts.
-    Used when Ollama is unavailable or as final fallback.
-    """
     settings = get_settings()
 
     # Find available DB
@@ -54,8 +51,12 @@ async def search_rules(
         if len(all_results) >= limit:
             break
 
+        # Read-only URI and an explicit close: this opened the 58 MB rules DB
+        # read-write on the loop thread, and a raise between connect and close
+        # leaked the handle.
+        conn: sqlite3.Connection | None = None
         try:
-            conn = sqlite3.connect(db_path)
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10.0)
             conn.row_factory = sqlite3.Row
 
             def take(rows: list) -> None:
@@ -98,13 +99,33 @@ async def search_rules(
                     " ORDER BY rank LIMIT ?",
                     (ed, escaped, need),
                 ).fetchall())
-            conn.close()
 
         except sqlite3.OperationalError as e:
             logger.warning(f"FTS5 fallback search failed for {ed}: {e}")
             continue
+        finally:
+            if conn is not None:
+                conn.close()
 
     return all_results[:limit]
+
+
+async def search_rules(
+    query: str,
+    edition: str = "both",
+    limit: int = 5,
+    repo: CampaignRepository | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Direct FTS5 search — returns raw rule excerpts.
+    Used when Ollama is unavailable or as final fallback.
+
+    This is the tier that runs precisely when Ollama is down, and it is reached
+    from async def orchestrator.generate/stream. Every sqlite call in it blocks,
+    so the body runs in the anyio worker threadpool; inline it froze the single
+    event loop for the whole FTS5 query (~hundreds of ms on the 58 MB DB).
+    """
+    return await anyio.to_thread.run_sync(_search_rules_sync, query, edition, limit)
 
 
 async def format_raw_excerpts(hits: list[dict], query: str) -> str:

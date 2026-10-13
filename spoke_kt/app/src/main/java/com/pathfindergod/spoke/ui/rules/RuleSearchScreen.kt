@@ -145,8 +145,8 @@ private fun OracleBody(
                                 text = ""
                                 viewModel.clear()
                             }
-                            .godTouchSize()
-                            .testTag(GodTags.RULES_CLEAR),
+                            .testTag(GodTags.RULES_CLEAR)
+                            .godTouchSize(),
                     )
                 }
             },

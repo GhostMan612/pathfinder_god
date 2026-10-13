@@ -89,7 +89,7 @@ fun GodLiveRegion(
     modifier: Modifier = Modifier,
     assertive: Boolean = false,
     tag: String? = null,
-    style: TextStyle = MaterialTheme.typography.labelSmall,
+    style: TextStyle = MaterialTheme.typography.labelMedium,
     color: Color = TextSecondary,
 ) {
     Box(
