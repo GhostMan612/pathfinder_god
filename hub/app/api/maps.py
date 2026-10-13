@@ -5,12 +5,16 @@
 
 """Map Generator API — LLM + dual-layer Pillow rendering."""
 
+import logging
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.agents.map_maker import MapMakerAgent
 from app.config import get_settings
 from app.llm.ollama_client import OllamaClient
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/map", tags=["map"])
 
@@ -56,8 +60,11 @@ async def generate_map(request: MapRequest) -> MapResponse:
 
     try:
         result = await agent.build(request.prompt, grid_enabled=request.grid_enabled)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Map generation failed: {e}")
+    except Exception:
+        # Never echo the exception text to the client: it carries filesystem
+        # paths, library versions and model output fragments.
+        logger.exception("map generation failed")
+        raise HTTPException(status_code=500, detail="An internal error occurred.")
     finally:
         await llm.close()
 
@@ -68,9 +75,14 @@ async def generate_map(request: MapRequest) -> MapResponse:
         # at fault. Only a genuinely invalid layout is a 400.
         error = result.error or "Invalid map layout"
         client_fault = "invalid json" in error.lower() or "out of bounds" in error.lower()
+        if not client_fault:
+            # Server-side detail stays server-side; log it and return a generic
+            # message so internal paths/errors do not reach the client.
+            logger.error("map generation produced an invalid layout: %s", error)
+            raise HTTPException(status_code=500, detail="An internal error occurred.")
         raise HTTPException(
-            status_code=400 if client_fault else 500,
-            detail=error,
+            status_code=400,
+            detail="Invalid map layout",
         )
 
     return MapResponse(

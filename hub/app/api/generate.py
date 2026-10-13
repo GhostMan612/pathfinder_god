@@ -24,7 +24,9 @@ router = APIRouter(prefix="/generate", tags=["gm"])
 
 
 class BuildCharacterRequest(BaseModel):
-    prompt: str
+    # Bounded: this was the only LLM-driving request model in the app with no
+    # length limit at all, unlike GenerateRequest just below.
+    prompt: str = Field(..., min_length=1, max_length=4000)
 
 
 class BuildCharacterResponse(BaseModel):

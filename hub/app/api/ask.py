@@ -8,6 +8,7 @@ Ask/Stream endpoints — GM Q&A with WebSocket streaming.
 """
 
 
+import logging
 from typing import Literal
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
@@ -16,6 +17,8 @@ from pydantic import BaseModel, Field
 from app.api.deps import get_repo
 from app.db.repository import CampaignRepository
 from app.llm.orchestrator import LLMOrchestrator
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ask", tags=["gm"])
 
@@ -29,7 +32,10 @@ class AskRequest(BaseModel):
         "character", "npc", "monster", "boss", "map", "campaign", "encounter"
     ] | None = None
     history: list[list[str]] = Field(default_factory=list, max_length=20)
-    campaign_id: int = 1
+    # Bounded: this is a raw int, so a client could mint unbounded auto-fold
+    # buckets in LLMOrchestrator._AUTO_COUNTS and cascade a negative or huge id
+    # through the repository DELETEs.
+    campaign_id: int = Field(1, ge=1, le=2147483647)
 
 
 class AskResponse(BaseModel):
@@ -126,9 +132,11 @@ async def stream_endpoint(
 
     except WebSocketDisconnect:
         pass
-    except Exception as e:
+    except Exception:
+        # Do not forward str(e) to the client: it leaks paths and internals.
+        logger.exception("stream endpoint failed")
         await websocket.send_json(
-            StreamEvent(type="error", message=str(e)).model_dump()
+            StreamEvent(type="error", message="An internal error occurred.").model_dump()
         )
     finally:
         # The orchestrator owns three httpx clients, each with its own socket

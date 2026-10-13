@@ -1,11 +1,11 @@
-# ============================================================
+﻿# ============================================================
 # As Above, So Below. As Within, So Without.
 # The Future Dictates the Past and the Past is Always Present.
 # ============================================================
 
-"""Combat API endpoints — Deterministic combat resolution endpoints."""
+"""Combat API endpoints â€” Deterministic combat resolution endpoints."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from app.agents.combat_tracker import CombatTrackerAgent, StrikeResult
@@ -82,7 +82,9 @@ async def end_turn(request: EndTurnRequest) -> EndTurnResponse:
 
 
 class CombatSceneIn(BaseModel):
-    campaign_id: int = 1
+    # Request body field, so Field (not Query). Bounded so a negative or huge id
+    # cannot cascade through the campaign-scene read/write.
+    campaign_id: int = Field(1, ge=1, le=2147483647)
     scene: str = Field(..., max_length=4000)
 
 
@@ -103,7 +105,7 @@ async def set_scene(
 
 @router.get("/scene", response_model=CombatSceneOut)
 async def get_scene(
-    campaign_id: int = 1,
+    campaign_id: int = Query(1, ge=1, le=2147483647),
     repo: CampaignRepository = Depends(get_repo),
 ) -> CombatSceneOut:
     return CombatSceneOut(campaign_id=campaign_id, scene=repo.get_combat_json(campaign_id))

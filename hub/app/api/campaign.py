@@ -1,10 +1,10 @@
-# ============================================================
+﻿# ============================================================
 # As Above, So Below. As Within, So Without.
 # The Future Dictates the Past and the Past is Always Present.
 # ============================================================
 
 """
-Campaign API — REST endpoints for campaign state, notes, and continuity.
+Campaign API â€” REST endpoints for campaign state, notes, and continuity.
 """
 import json
 import logging
@@ -16,6 +16,7 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     HTTPException,
+    Query,
     Request,
     Response,
 )
@@ -41,8 +42,11 @@ router = APIRouter(prefix="/campaign", tags=["campaign"])
 
 
 class CampaignNote(BaseModel):
-    prompt: str
-    response: str
+    # Bounded: both fields are appended verbatim into sessions.raw_log and then
+    # re-spliced into the GM system prompt, so an unbounded string grew the
+    # database and the prompt without limit.
+    prompt: str = Field(..., min_length=1, max_length=4000)
+    response: str = Field(..., min_length=1, max_length=4000)
 
 
 class CampaignStateResponse(BaseModel):
@@ -51,8 +55,8 @@ class CampaignStateResponse(BaseModel):
 
 
 class NoteRequest(BaseModel):
-    prompt: str
-    response: str
+    prompt: str = Field(..., min_length=1, max_length=4000)
+    response: str = Field(..., min_length=1, max_length=4000)
 
 
 class CampaignExport(BaseModel):
@@ -97,7 +101,7 @@ class SummarizeSessionResponse(BaseModel):
 
 @router.get("", response_model=CampaignStateResponse)
 async def get_campaign(
-    campaign_id: int = 1,
+    campaign_id: int = Query(1, ge=1, le=2147483647),
     repo: CampaignRepository = Depends(get_repo),
     user: dict = Depends(require_auth),
     request: Request = None,
@@ -117,7 +121,7 @@ async def get_campaign(
 async def add_campaign_note(
     note: CampaignNote,
     background_tasks: BackgroundTasks,
-    campaign_id: int = 1,
+    campaign_id: int = Query(1, ge=1, le=2147483647),
     repo: CampaignRepository = Depends(get_repo),
     user: dict = Depends(require_auth),
     request: Request = None,
@@ -152,7 +156,7 @@ async def add_campaign_note(
 
 @router.post("/reset", response_model=CampaignStateResponse)
 async def reset_campaign(
-    campaign_id: int = 1,
+    campaign_id: int = Query(1, ge=1, le=2147483647),
     repo: CampaignRepository = Depends(get_repo),
     user: dict = Depends(require_auth),
     request: Request = None,
@@ -185,8 +189,10 @@ async def summarize_session(
     agent = ContinuityAgent(llm)
     try:
         journal = await agent.summarize_session(clean, request.campaign_name)
-    except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+    except RuntimeError:
+        # Logged, not returned: the RuntimeError text can name model internals.
+        logger.exception("session summarization failed")
+        raise HTTPException(status_code=503, detail="An internal error occurred.")
     finally:
         await llm.close()
     return SummarizeSessionResponse(summary=journal.summary, event_count=journal.event_count)
@@ -194,7 +200,7 @@ async def summarize_session(
 
 @router.get("/export", response_model=CampaignExport, tags=["campaign", "export"])
 async def export_campaign(
-    campaign_id: int = 1,
+    campaign_id: int = Query(1, ge=1, le=2147483647),
     repo: CampaignRepository = Depends(get_repo),
     user: dict = Depends(require_auth),
     request: Request = None,
@@ -248,7 +254,7 @@ async def export_campaign(
 @router.post("/import", response_model=CampaignStateResponse, tags=["campaign", "import"])
 async def import_campaign(
     import_data: CampaignImport,
-    campaign_id: int = 1,
+    campaign_id: int = Query(1, ge=1, le=2147483647),
     repo: CampaignRepository = Depends(get_repo),
     user: dict = Depends(require_auth),
     request: Request = None,
@@ -436,7 +442,7 @@ async def import_campaign(
 
 @router.get("/backup", response_class=Response, tags=["campaign", "export"])
 async def download_backup(
-    campaign_id: int = 1,
+    campaign_id: int = Query(1, ge=1, le=2147483647),
     repo: CampaignRepository = Depends(get_repo),
     user: dict = Depends(require_auth),
     request: Request = None,
@@ -480,7 +486,7 @@ class NPCRequest(BaseModel):
 
 @router.get("/npcs")
 async def list_npcs(
-    campaign_id: int = 1,
+    campaign_id: int = Query(1, ge=1, le=2147483647),
     repo: CampaignRepository = Depends(get_repo),
     user: dict = Depends(require_auth),
 ) -> list[dict]:
@@ -491,7 +497,7 @@ async def list_npcs(
 @router.post("/npcs")
 async def create_npc(
     npc: NPCRequest,
-    campaign_id: int = 1,
+    campaign_id: int = Query(1, ge=1, le=2147483647),
     repo: CampaignRepository = Depends(get_repo),
     user: dict = Depends(require_auth),
 ) -> dict:
@@ -521,7 +527,7 @@ class PartyMemberRequest(BaseModel):
 
 @router.get("/party")
 async def list_party(
-    campaign_id: int = 1,
+    campaign_id: int = Query(1, ge=1, le=2147483647),
     repo: CampaignRepository = Depends(get_repo),
     user: dict = Depends(require_auth),
 ) -> list[dict]:
@@ -531,7 +537,7 @@ async def list_party(
 @router.post("/party")
 async def add_party_member(
     member: PartyMemberRequest,
-    campaign_id: int = 1,
+    campaign_id: int = Query(1, ge=1, le=2147483647),
     repo: CampaignRepository = Depends(get_repo),
     user: dict = Depends(require_auth),
 ) -> dict:
