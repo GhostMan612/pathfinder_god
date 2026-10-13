@@ -552,29 +552,51 @@ class LLMOrchestrator:
             # /stream never had tool access at all, so a rules question asked in
             # the live chat got no citation while the same question on /ask did.
             rules_turn = self._needs_tools(original_prompt)
-            if rules_turn and self._should_abstain(context, original_prompt, True):
-                system += self._abstention_clause(False, True)
+            abstain = rules_turn and self._should_abstain(context, original_prompt, True)
+
             if rules_turn:
-                tools = RULES_LAWYER_TOOLS + NPC_COMPILER_TOOLS
-                answer = await self._agentic_chat(
-                    prompt, system, original_prompt, edition, tools, campaign_id
+                # BP-08 Pillar B: forward the Rules Lawyer's answer verbatim.
+                # The previous shape called _agentic_chat, which ran a second
+                # model pass to re-narrate the specialist output; that pass
+                # dropped mechanical nuance and mutated citation tags. We now
+                # stream the lawyer's chunks straight through, append the
+                # deterministic Sources block, and return before the GM
+                # narrative path below can run at all.
+                lawyer_stream, citations = await self.rules_lawyer.stream_adjudication(
+                    query=original_prompt,
+                    edition=edition,
+                    context=context,
+                    abstain=abstain,
                 )
-                for piece in re.split(r"(?<=[.!?])\s+", answer):
-                    if piece:
-                        acc.append(piece)
-                        yield ("ollama", piece)
-            else:
-                async for chunk in self.ollama.stream(
-                    prompt=prompt,
-                    system=system + (
-                        "\n\nThis turn is table narration: answer in fiction from the "
-                        "excerpts above, keep it to 2-4 sentences, and end by handing "
-                        "the next decision back to the players."
-                    ),
-                    model=self.settings.model_for("chat"),
-                ):
-                    acc.append(chunk)
-                    yield ("ollama", chunk)
+                async for chunk in lawyer_stream:
+                    if chunk:
+                        acc.append(chunk)
+                        yield ("ollama", chunk)
+
+                sources = [
+                    {"source_book": c.source_book, "name": c.name, "category": c.category}
+                    for c in citations
+                ]
+                block = self._format_citations(sources)
+                if block:
+                    acc.append(block)
+                    yield ("ollama", block)
+
+                if acc:
+                    self._record_live_note(original_prompt, "".join(acc), campaign_id)
+                return
+
+            async for chunk in self.ollama.stream(
+                prompt=prompt,
+                system=system + (
+                    "\n\nThis turn is table narration: answer in fiction from the "
+                    "excerpts above, keep it to 2-4 sentences, and end by handing "
+                    "the next decision back to the players."
+                ),
+                model=self.settings.model_for("chat"),
+            ):
+                acc.append(chunk)
+                yield ("ollama", chunk)
 
         except Exception as e:
             logger.warning(f"Ollama stream failed: {e}")

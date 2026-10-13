@@ -5,6 +5,7 @@
 """Critical FastAPI route tests — hermetic: tmp DBs, faked Ollama."""
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -207,7 +208,115 @@ def test_stream_websocket(authenticated_client):
                 chunks.append(msg["text"])
             elif msg["type"] == "end":
                 break
-        assert "".join(chunks) == "Fake answer."
+
+        # BP-08 Pillar B: a rules turn is forwarded verbatim from the Rules
+        # Lawyer, then the deterministic Sources block is appended from the
+        # retrieval rows. The body must still be exactly what the model
+        # emitted - no GM re-narration pass - and the citation must be the
+        # real matched row rather than anything the model wrote.
+        answer = "".join(chunks)
+        assert answer.startswith("Fake answer.")
+        assert "\n\nSources:\n- [Core Rulebook - Flanking]" in answer
+
+
+def test_rules_turn_is_not_re_narrated(authenticated_client, monkeypatch):
+    """A rules turn must bypass the GM narrative model entirely.
+
+    The bug this pins: a rules question was answered by the Rules Lawyer and then
+    handed to a second model pass to re-narrate it, which stripped mechanical
+    nuance and rewrote citation tags.
+
+    `OllamaClient.stream` is called by BOTH the lawyer's verbatim forward and the
+    GM narration branch, so counting calls is what actually distinguishes them:
+    a correct rules turn calls it exactly once (the lawyer). If the short-circuit
+    `return` is removed, control falls through to the narration `async for` and
+    calls it a second time - which this asserts against. Counting `chat`/
+    `generate` alone is not enough: neither narration nor the lawyer uses them.
+    """
+    from app.llm.ollama_client import OllamaClient
+
+    calls = {"stream": 0, "chat": 0, "generate": 0}
+
+    async def spy_stream(self, **kwargs):
+        calls["stream"] += 1
+        yield "Fake "
+        yield "answer."
+
+    async def spy_chat(self, **kwargs):
+        calls["chat"] += 1
+        return {"role": "assistant", "content": "RE-NARRATED", "tool_calls": []}
+
+    async def spy_generate(self, *args, **kwargs):
+        calls["generate"] += 1
+        return "RE-NARRATED"
+
+    monkeypatch.setattr(OllamaClient, "stream", spy_stream)
+    monkeypatch.setattr(OllamaClient, "chat", spy_chat)
+    monkeypatch.setattr(OllamaClient, "generate", spy_generate)
+
+    with authenticated_client.websocket_connect("/stream") as ws:
+        ws.send_text('{"query": "explain flanking", "edition": "2e"}')
+        while True:
+            msg = ws.receive_json()
+            if msg["type"] == "end":
+                break
+
+    assert calls["chat"] == 0, "rules turn re-entered the GM/tool model"
+    assert calls["generate"] == 0, "rules turn called the buffered generate path"
+    assert calls["stream"] == 1, (
+        f"rules turn streamed {calls['stream']} times; expected exactly 1 "
+        "(the lawyer verbatim forward). More than one means it fell through to "
+        "the GM narration branch and the short-circuit return was lost."
+    )
+
+
+def test_stream_adjudication_yields_verbatim_and_citations(rules_db_dir: Path):
+    """The lawyer returns a lazy stream plus deterministic citations.
+
+    A concatenated string cannot satisfy the no-re-narration contract, so the
+    return type itself is part of what is being tested.
+    """
+    import inspect
+
+    from app.agents.rules_lawyer import Citation, RulesLawyerAgent
+    from app.config import Settings
+    from app.db.repository import CampaignRepository
+
+    monkey = pytest.MonkeyPatch()
+    try:
+        import app.config as _cfg
+
+        monkey.setattr(
+            _cfg,
+            "get_settings",
+            lambda: Settings(
+                data_dir=rules_db_dir,
+                campaign_state_path=rules_db_dir / "campaign_state.json",
+            ),
+        )
+        agent = RulesLawyerAgent(CampaignRepository(str(rules_db_dir / "campaign.db")))
+
+        async def collect():
+            gen, cites = await agent.stream_adjudication(
+                query="explain flanking",
+                edition="2e",
+                context=[
+                    {"source_book": "Core Rulebook", "name": "Flanking", "category": "Combat"}
+                ],
+                abstain=False,
+            )
+            # Must be an async generator, and citations must be available
+            # before the body is consumed.
+            assert inspect.isasyncgen(gen)
+            assert [c.tag() for c in cites] == ["[Core Rulebook - Flanking]"]
+            assert isinstance(cites[0], Citation)
+            return [c async for c in gen]
+
+        out = asyncio.run(collect())
+        # "Fake answer." from the class-level stream mock, chunk for chunk.
+        assert "".join(out) == "Fake answer."
+    finally:
+        monkey.undo()
 
 
 def test_ask_with_history(authenticated_client):

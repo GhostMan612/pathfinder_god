@@ -14,6 +14,7 @@ Tools (exact schemas from design chat):
 
 import json
 import logging
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Any
 
@@ -205,6 +206,21 @@ class ValidationResult:
     rule_citation: str
 
 
+@dataclass
+class Citation:
+    """One deterministic source tag for an adjudication.
+
+    Built from the retriever rows, never from the model's prose, so a citation
+    cannot drift into naming a rule the model never actually saw.
+    """
+    source_book: str
+    name: str
+    category: str = ""
+
+    def tag(self) -> str:
+        return f"[{self.source_book} - {self.name}]"
+
+
 class RulesLawyerAgent:
     def __init__(self, repo: CampaignRepository):
         self.repo = repo
@@ -331,6 +347,59 @@ class RulesLawyerAgent:
             model=self.settings.model_for("reasoning"),
         )
         return response
+
+    async def stream_adjudication(
+        self,
+        query: str,
+        edition: str = "2e",
+        context: list[dict] | None = None,
+        abstain: bool = False,
+    ) -> tuple[AsyncGenerator[str, None], list[Citation]]:
+        """Adjudicate a rules question and yield it verbatim.
+
+        BP-08 Pillar B. This exists so the GM never re-narrates a rules ruling:
+        the caller streams these chunks straight to the client and then appends
+        the deterministic Sources block. Re-narration by a second model was
+        stripping mechanical nuance and mutating exact citation tags.
+
+        Returns a tuple of (stream, citations) rather than a string so the
+        caller can emit the body first and the citations afterwards, and so the
+        stream has to be consumed lazily - a concatenated string cannot be
+        un-concatenated by the orchestrator.
+
+        Citations come from the retrieval rows (`context`), never from the
+        model's output, so they are exactly the rules that were in front of it.
+        """
+        citations = [
+            Citation(
+                source_book=str(hit.get("source_book") or ""),
+                name=str(hit.get("name") or ""),
+                category=str(hit.get("category") or ""),
+            )
+            for hit in (context or [])
+            if hit.get("name")
+        ]
+
+        async def _generate() -> AsyncGenerator[str, None]:
+            system = RULES_LAWYER_SYSTEM
+            if abstain:
+                system += (
+                    "\n\nCRITICAL - NO RULE FOUND FOR THIS. Your excerpts do not "
+                    "contain the rule being asked about. Do NOT invent a number, "
+                    "DC, bonus, or rule name, and do NOT guess from general "
+                    "knowledge. Say plainly: \"I don't have that rule in my "
+                    "books.\" Then offer to adjudicate it as a house rule and "
+                    "state that it is your ruling, not a citation."
+                )
+            async for chunk in self.ollama.stream(
+                prompt=query,
+                system=system,
+                model=self.settings.model_for("reasoning"),
+            ):
+                if chunk:
+                    yield chunk
+
+        return _generate(), citations
 
 
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
