@@ -15,6 +15,14 @@ from pathlib import Path
 
 from app.config import settings
 
+# Ceiling on sessions.raw_log, applied in SQL on every turn append. Without it
+# the transcript grows without bound, SQLite rewrites the whole TEXT value on
+# every append (so write cost is O(n^2) over a session), the auto-fold hands the
+# entire log to the LLM, and an unbounded string reaches the system prompt.
+# Only the most recent window is kept; durable history lives in the summaries
+# and the entity ledger, not in this debugging aid.
+_RAW_LOG_MAX_CHARS = 100_000
+
 
 @dataclass
 class Campaign:
@@ -278,8 +286,12 @@ class CampaignRepository:
                 INSERT INTO sessions (campaign_id, session_num, raw_log)
                 VALUES (?, ?, ?)
                 ON CONFLICT(campaign_id, session_num) DO UPDATE SET
-                    raw_log = COALESCE(sessions.raw_log, '')
-                               || '\n\nUSER: ' || ? || '\nGM: ' || ?
+                    raw_log = SUBSTR(
+                        COALESCE(sessions.raw_log, '')
+                        || char(10) || char(10) || 'USER: ' || ?
+                        || char(10) || 'GM: ' || ?,
+                        -?
+                    )
                 """,
                 (
                     campaign_id,
@@ -287,6 +299,7 @@ class CampaignRepository:
                     f"USER: {prompt}\nGM: {response}",
                     prompt,
                     response,
+                    _RAW_LOG_MAX_CHARS,
                 ),
             )
 
@@ -760,6 +773,5 @@ def get_repo(db_path: str | None = None) -> CampaignRepository:
     parameter and let a caller pass any writable path to create a database in.
     """
     if db_path is None:
-        from app.config import settings
         db_path = str(settings.data_dir / "campaign.db")
     return CampaignRepository(str(db_path))

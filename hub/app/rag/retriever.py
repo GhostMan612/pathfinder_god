@@ -146,16 +146,42 @@ class Retriever:
         return all_results[:k]
 
     async def get_sources(self, query: str, edition: str, k: int = 5) -> list[dict]:
-        """Get source citations for a query (for response attribution)."""
+        """Get source citations for a query (for response attribution).
+
+        Prefer `extract_sources_from_context` when the rows have already been
+        fetched - see the note there.
+        """
         results = await self._fts5_search(query, edition, k)
-        return [
-            {
-                "name": r["name"],
-                "source_book": r.get("source_book", ""),
-                "category": r.get("category", ""),
-            }
-            for r in results
-        ]
+        return self.extract_sources_from_context(results)
+
+    @staticmethod
+    def extract_sources_from_context(context: list[dict] | None) -> list[dict]:
+        """Project citation fields out of already-retrieved rows. No DB access.
+
+        `query()` and `get_sources()` used to run the *same* FTS5 search twice
+        per request - once to build the RAG prompt and again to attach
+        citations. retriever.py's own measurement puts a single FTS5 query on
+        this corpus at roughly 294 ms, so that duplicate was pure latency.
+        Citations are a projection of rows we already hold, so derive them here
+        instead of re-querying.
+        """
+        sources: list[dict] = []
+        seen: set[tuple[str, str]] = set()
+        for row in context or []:
+            name = (row.get("name") or "").strip()
+            book = (row.get("source_book") or "").strip()
+            key = (book.lower(), name.lower())
+            if not name or key in seen:
+                continue
+            seen.add(key)
+            sources.append(
+                {
+                    "name": name,
+                    "source_book": book,
+                    "category": row.get("category", ""),
+                }
+            )
+        return sources
 
     async def search(self, query: str, edition: str = "both", limit: int = 5) -> list[dict]:
         """Public search method for rules endpoint."""

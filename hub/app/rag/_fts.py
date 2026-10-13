@@ -17,12 +17,39 @@ import re
 _FTS_OPERATORS = "*-+():|@{}[]^~,;\\/"
 _KEYWORDS = {"and", "or", "not", "near"}
 
+# Words that carry no retrieval signal but appear in most tabletop questions.
+# Left in, they dominate the posting-list union: "attack" and "damage" match
+# thousands of the 44k rows each, so every extra disjunct makes FTS5 union
+# larger before it can rank anything.
+_STOPWORDS = frozenset(
+    {
+        "the", "and", "how", "what", "are", "rules", "for", "does", "can",
+        "you", "tell", "me", "about", "roll", "check", "with", "this", "that",
+        # plus the rest of the ordinary connective tissue of a question
+        "a", "an", "as", "at", "be", "been", "but", "by", "did", "do", "had",
+        "has", "have", "i", "if", "in", "into", "is", "it", "its", "of", "on",
+        "or", "our", "shall", "so", "than", "their", "them", "then", "there",
+        "these", "they", "was", "we", "were", "when", "where", "which",
+        "who", "why", "will", "would", "your",
+    }
+)
+
+# Upper bound on disjuncts in the OR-chain. Past this the tail terms add cost
+# far faster than they add recall.
+_MAX_TOKENS = 8
+
 
 def build_match_query(query: str) -> str:
     """Build a safe FTS5 MATCH expression from free-form user text.
 
     Returns an empty string when nothing searchable remains, so callers can
     short-circuit instead of issuing a MATCH that matches nothing.
+
+    At most _MAX_TOKENS (8) disjuncts are emitted, longest-token-first, so cost
+    stops scaling with question length. Sorting by length is deliberate: the
+    longest words are the distinctive rule names and mechanics ("grapple",
+    "flanking"), while the short ones are the high-frequency noise that the
+    cap would otherwise keep and the signal would be dropped.
     """
     cleaned = query or ""
     for ch in _FTS_OPERATORS:
@@ -31,11 +58,22 @@ def build_match_query(query: str) -> str:
     cleaned = " ".join(cleaned.split())
 
     tokens = [
-        t for t in cleaned.split()
-        if len(t) > 2 and t.lower() not in _KEYWORDS
+        t
+        for t in cleaned.lower().split()
+        if len(t) > 2 and t not in _KEYWORDS and t not in _STOPWORDS
     ]
     if not tokens:
+        # Everything was a stopword or too short. The fallback deliberately
+        # does NOT re-admit stopwords: a query made entirely of them ("what is
+        # this about tell me rules") would otherwise rebuild the exact
+        # high-frequency posting-list union the cap exists to avoid. Returning
+        # "" lets the caller short-circuit, which is cheaper and more honest
+        # than searching for "the"-shaped noise.
         return ""
+
+    # Longest first, then cap.
+    tokens.sort(key=len, reverse=True)
+    tokens = tokens[:_MAX_TOKENS]
 
     # Quote each token so it can never be parsed as FTS5 syntax. Doubling an
     # embedded double quote is the FTS5 escape for a literal quote.

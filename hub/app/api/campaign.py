@@ -76,22 +76,28 @@ class CampaignExport(BaseModel):
 
 
 class CampaignImport(BaseModel):
+    # Every list is capped. These were `list[dict] | None` with no bound, and
+    # the import handler iterates them one row at a time, each opening its own
+    # sqlite connection and INSERT, so a single request could drive hundreds of
+    # thousands of round-trips against the campaign DB.
     campaign: dict | None = None
-    party: list[dict] | None = None
-    npcs: list[dict] | None = None
-    locations: list[dict] | None = None
-    items: list[dict] | None = None
-    quests: list[dict] | None = None
-    party_members: list[dict] | None = None
-    sessions: list[dict] | None = None
-    notes: list[dict] | None = None
-    decisions: list[dict] | None = None
+    party: list[dict] | None = Field(default=None, max_length=500)
+    npcs: list[dict] | None = Field(default=None, max_length=500)
+    locations: list[dict] | None = Field(default=None, max_length=500)
+    items: list[dict] | None = Field(default=None, max_length=500)
+    quests: list[dict] | None = Field(default=None, max_length=500)
+    party_members: list[dict] | None = Field(default=None, max_length=500)
+    sessions: list[dict] | None = Field(default=None, max_length=500)
+    notes: list[dict] | None = Field(default=None, max_length=500)
+    decisions: list[dict] | None = Field(default=None, max_length=500)
     replace_existing: bool = True
 
 
 class SummarizeSessionRequest(BaseModel):
-    events: list[str] = Field(default_factory=list)
-    campaign_name: str = "Untitled Campaign"
+    # Bounded: unbounded `events` was sent straight to Ollama, so one request
+    # could occupy the CPU-only box with an arbitrarily large body.
+    events: list[str] = Field(default_factory=list, max_length=500)
+    campaign_name: str = Field(default="Untitled Campaign", max_length=200)
 
 
 class SummarizeSessionResponse(BaseModel):

@@ -117,8 +117,11 @@ async def stream_endpoint(
                 StreamEvent(type="chunk", text=chunk, backend=backend).model_dump()
             )
 
-        sources = await orchestrator.retriever.get_sources(
-            request.query, edition=request.edition, k=5,
+        # Citations come from the rows stream() already retrieved. This used to call
+        # get_sources(), re-running the identical FTS5 query a second time per
+        # stream connection.
+        sources = orchestrator.retriever.extract_sources_from_context(
+            orchestrator.last_context
         )
         await websocket.send_json(
             StreamEvent(

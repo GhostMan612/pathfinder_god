@@ -73,6 +73,9 @@ class LLMOrchestrator:
         # Lazy import to avoid circular dependency
         from app.agents.continuity import ContinuityKeeper
         self.continuity_keeper = ContinuityKeeper(repo, self)
+        # Rows retrieved by the most recent stream()/generate() call, so the
+        # caller can derive citations without a second identical FTS5 query.
+        self.last_context: list[dict] = []
 
     async def close(self) -> None:
         """Release the httpx clients this orchestrator owns.
@@ -452,8 +455,12 @@ class LLMOrchestrator:
                     num_predict=self.settings.ollama_num_predict,
                 )
 
-            # Get sources from RAG using original prompt to avoid FTS5 syntax errors
-            sources = await self.retriever.get_sources(original_prompt, edition=edition, k=5)
+            # Citations are a projection of the rows already fetched for the
+            # RAG prompt above. This used to call get_sources(), which re-ran
+            # the identical FTS5 query a second time per request (~294 ms on
+            # this corpus) purely to rebuild three fields we were already
+            # holding.
+            sources = self.retriever.extract_sources_from_context(context)
 
             self._record_live_note(original_prompt, answer, campaign_id)
             return LLMResult(
@@ -561,6 +568,9 @@ class LLMOrchestrator:
             if self.settings.rag_enabled:
                 context = await self.retriever.query(prompt, edition=edition, k=self.settings.rag_limit)
                 prompt = self._build_rag_prompt(prompt, context, edition, mode, history)
+            # Retain the retrieved rows so the caller can build citations without
+            # issuing the identical FTS5 query a second time after the stream ends.
+            self.last_context = context
 
             # Stage 5: a rules-intent turn is resolved through the Rules Lawyer
             # tool loop and then emitted in sentence-sized frames. Before this,
