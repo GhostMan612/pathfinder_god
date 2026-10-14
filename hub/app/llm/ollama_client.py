@@ -46,10 +46,17 @@ class OllamaClient:
         model: str = "phi4-mini",
         temperature: float = 0.6,
         num_predict: int = 700,
+        format: str | None = None,
     ) -> str:
-        """Single completion call."""
+        """Single completion call.
+
+        `format="json"` asks Ollama for grammar-constrained JSON, which is how
+        small models like qwen2.5:3b are made to emit parseable output. It is
+        optional so existing callers and the hermetic test fixture (which
+        patches this method with **kwargs) are unaffected.
+        """
         client = await self._get_client()
-        payload = {
+        payload: dict = {
             "model": model,
             "prompt": prompt,
             "system": system,
@@ -59,6 +66,8 @@ class OllamaClient:
                 "num_predict": num_predict,
             },
         }
+        if format:
+            payload["format"] = format
         try:
             resp = await client.post(f"{self.host}/api/generate", json=payload)
             resp.raise_for_status()

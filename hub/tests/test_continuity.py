@@ -82,8 +82,8 @@ class _KeeperLlm:
     def __init__(self, payloads: list[str]):
         self._payloads = list(payloads)
 
-    async def generate(self, prompt, system=""):
-        return self._payloads.pop(0)
+    async def generate(self, prompt, system="", **kwargs):
+            return self._payloads.pop(0)
 
 
 class _StubOrchestrator:

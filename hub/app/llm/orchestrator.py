@@ -19,7 +19,7 @@ import re
 from collections import OrderedDict
 from collections.abc import AsyncGenerator
 from dataclasses import asdict, dataclass, is_dataclass
-from typing import ClassVar
+from typing import ClassVar, Self
 
 from app.agents.npc_compiler import NPC_COMPILER_TOOLS, NPCCompilerAgent
 from app.agents.rules_lawyer import RULES_LAWYER_TOOLS, RulesLawyerAgent
@@ -101,7 +101,7 @@ class LLMOrchestrator:
                 except Exception:
                     logger.debug("failed to close an Ollama client", exc_info=True)
 
-    async def __aenter__(self) -> "LLMOrchestrator":
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, *exc) -> None:
@@ -234,13 +234,89 @@ class LLMOrchestrator:
         re.IGNORECASE,
     )
 
+    # ── BP-08 Pillar C: calibrated rules routing ───────────────────
+    # The old router was a single regex: it MISSED mechanical questions that
+    # never say "rule" ("what happens if I grapple a dragon") and OVER-matched
+    # pure narrative that happened to contain a combat word ("I attack the
+    # goblin"). The score below is deterministic - no extra LLM round-trip.
+
+    # Strong, unambiguous mechanics vocabulary.
+    _RULES_STRONG = re.compile(
+        r"\b(difficulty class|\bdc\b|damage type|damage roll|armor class|\bac\b"
+        r"|saving throw|initiative|attack roll|skill check|ability check|perception check"
+        r"|proficiency bonus|spell slot|level[- ]?up|feat|ancestry|class feature"
+        r"|hit dice|hit points|temporary hit points|\btemp hp\b|critical (hit|failure)"
+        r"|critical success|fumble|natural (20|1)|flat[- ]footed|flanking|grapple"
+        r"|persist(?:ent)?|climb|swim|trip|sunder|shove|disarm|hide|ranged attack"
+        r"|melee attack|opportunity attack|cover|concealment|light armor|shield bonus"
+        r"|multiclassing|archetype|class feature|action economy|free action"
+        r"|reaction|interpose|reach|threat range|adjacent|creature size|challenge rating"
+        r"|legendary action|resistance to|vulnerable to|condition)\b",
+        re.IGNORECASE,
+    )
+
+    # Weak signals: appear in rules questions but also in ordinary play.
+    _RULES_WEAK = re.compile(
+        r"\b(legal|allowed|permitted|prohibited|rules?\b|work(?:s|ing)?|apply"
+        r"|require[sd]?|modifier|bonus|penalty|check|roll|die|dice|attack|defen[cs]e"
+        r"|ability|skill|stat|character sheet|creature stat|how does|what happens"
+        r"|can (?:i|my|we)|am i allowed|is it possible)\b",
+        re.IGNORECASE,
+    )
+
+    # Narrative markers: first-person play, no request for a ruling.
+    _NARRATIVE = re.compile(
+        r"^\s*(?:as\s+)?(?:i|we|my|our|the\s+\w+)\b.*\b"
+        r"(?:attacks?|swing|strike|charge|grab|sneak|hide|creep|dart|leap|run|enter"
+        r"|open|push|climb|search|look|examine|speak|say|tell|ask|follow|move|go)\b",
+        re.IGNORECASE,
+    )
+
+    # Mechanical question that carries no explicit "rule" keyword, e.g.
+    # "what happens if I fall prone?" / "can I swim in chain mail?"
+    _MECHANICAL_QUESTION = re.compile(
+        r"^\s*(?:what|why|how|when|can|could|does|do|is|are|if)\b.*[?.]?\s*$",
+        re.IGNORECASE,
+    )
+
+    _RULES_THRESHOLD = 2
+
+    @classmethod
+    def _rules_score(cls, prompt: str) -> int:
+        """Deterministic rules-intent score. Higher means more rules-like."""
+        text = prompt or ""
+        if not text.strip():
+            return 0
+
+        score = 0
+        if cls._RULES_STRONG.search(text):
+            score += 3
+        # Each distinct weak indicator counts once.
+        weak_hits = {m.group(0).lower() for m in cls._RULES_WEAK.finditer(text)}
+        score += min(2, len(weak_hits))
+        if cls._RULES_INTENT.search(text):
+            score += 1
+
+        # An interrogative form with a weak signal is almost always a ruling
+        # request ("can I take two attacks?"), not play narration.
+        if cls._MECHANICAL_QUESTION.match(text) and score >= 1:
+            score += 1
+
+        # Narrative suppression: a first-person action that is NOT phrased as a
+        # question is play, even when it mentions combat words. We only damp a
+        # weak-only score; a strong mechanics term still routes to the lawyer.
+        if cls._NARRATIVE.match(text) and not text.rstrip().endswith("?"):
+            if score < 3:
+                score = 0
+        return score
+
     def _needs_tools(self, prompt: str) -> bool:
         """Route a turn to the tool loop (rules) or the fast narrator pass."""
         if not self._supports_tools(self.settings.model_for("chat")):
             return False
         if self.settings.force_rules_tools:
             return True
-        return bool(self._RULES_INTENT.search(prompt or ""))
+        return self._rules_score(prompt) >= self._RULES_THRESHOLD
 
     def _retrieval_confident(self, context: list[dict] | None, prompt: str) -> bool:
         """Did retrieval actually find the rule the player asked about?

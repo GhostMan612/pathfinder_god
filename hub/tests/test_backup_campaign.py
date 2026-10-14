@@ -8,7 +8,7 @@ from __future__ import annotations
 import importlib.util
 import sqlite3
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -67,7 +67,7 @@ def test_backup_once_same_second_never_overwrites(tmp_path: Path, monkeypatch) -
     class FixedClock:
         @staticmethod
         def now() -> datetime:
-            return datetime(2026, 1, 1, 12, 0, 0)
+            return datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 
     monkeypatch.setattr(backup_campaign, "datetime", FixedClock)
     first = backup_campaign.backup_once(source, out)

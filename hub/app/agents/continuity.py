@@ -16,6 +16,7 @@ Tool interface (for GM Storyteller):
 
 import json
 import logging
+import re
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -119,6 +120,122 @@ Return ONLY the JSON array."""
 # Continuity Keeper
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+def repair_json_text(text: str) -> str:
+    """Best-effort salvage of JSON out of small-model output.
+
+    qwen2.5:3b routinely wraps JSON in prose, emits ```json fences, leaks a
+    <think> block, and leaves trailing commas. json.loads() rejects all of those,
+    and the caller used to fall back to *no entities at all* rather than
+    recovering the payload.
+    """
+    if not text:
+        return ""
+    out = text.strip()
+
+    # Drop a reasoning block if the model leaked one.
+    if "<think>" in out and "</think>" in out:
+        out = out.split("</think>", 1)[1].strip()
+
+    # Strip Markdown fences, keeping the fenced body.
+    if out.startswith("```"):
+        out = re.sub(r"^```[a-zA-Z]*\s*", "", out)
+        out = re.sub(r"\s*```$", "", out).strip()
+
+    # Pull the outermost {...} or [...] out of surrounding prose. Try the
+    # opener that appears FIRST in the text, so a bare array keeps its brackets
+    # instead of being collapsed into the object nested inside it.
+    candidates: list[str] = []
+    obj_start, obj_end = out.find("{"), out.rfind("}")
+    arr_start, arr_end = out.find("["), out.rfind("]")
+    if obj_start != -1 and obj_end > obj_start:
+        candidates.append((obj_start, "{", "}", out[obj_start : obj_end + 1]))
+    if arr_start != -1 and arr_end > arr_start:
+        candidates.append((arr_start, "[", "]", out[arr_start : arr_end + 1]))
+    candidates.sort(key=lambda c: c[0])
+
+    for _, _, _, candidate in candidates:
+        try:
+            json.loads(candidate)
+            return candidate
+        except json.JSONDecodeError:
+            repaired = re.sub(r",\s*([}\]])", r"\1", candidate)
+            try:
+                json.loads(repaired)
+                return repaired
+            except json.JSONDecodeError:
+                continue
+
+    # Nothing parsed; return the trailing-comma-repaired original for logging.
+    return re.sub(r",\s*([}\]])", r"\1", out)
+
+
+def parse_json_loose(text: str) -> object | None:
+    """json.loads with repair. Returns None when nothing salvageable is found."""
+    candidate = repair_json_text(text)
+    if not candidate:
+        return None
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        logger.debug("Loose JSON parse failed after repair")
+        return None
+
+
+# Top-level key aliases the 3B model reaches for instead of the contract names.
+_KEY_ALIASES = {
+    "npcs": ("npcs", "npc", "characters", "people", "persons", "actors", "creatures"),
+    "locations": ("locations", "location", "places", "rooms", "areas", "sites"),
+    "items": ("items", "item", "loot", "objects", "treasures", "equipment"),
+    "quests": ("quests", "quest", "tasks", "hooks", "objectives"),
+    "decisions": ("decisions", "decision", "choices", "actions"),
+}
+
+
+def _coerce_entries(raw: object) -> list[dict]:
+    """Normalise a model's entity list into dicts.
+
+    A bare-string list ("npcs": ["Garrick"]) is the common 3B failure: the old
+    `[e for e in raw if isinstance(e, dict)]` silently DROPPED every one of them,
+    so a perfectly good extraction produced no NPCs at all.
+    """
+    if not isinstance(raw, list):
+        return []
+    out: list[dict] = []
+    for entry in raw:
+        if isinstance(entry, dict):
+            out.append(entry)
+        elif isinstance(entry, str) and entry.strip():
+            out.append({"name": entry.strip()})
+    return out
+
+
+def normalize_entity_payload(data: object) -> dict[str, list[dict]]:
+    """Map aliased top-level keys onto the contract and coerce entries."""
+    if not isinstance(data, dict):
+        return {}
+    normalized: dict[str, list[dict]] = {}
+    lower_map = {str(k).lower(): k for k in data}
+    for canonical, aliases in _KEY_ALIASES.items():
+        # Accumulate across EVERY alias rather than stopping at the first: a
+        # model that emits both "characters" and "people" means both.
+        collected: list[dict] = []
+        seen_names: set[str] = set()
+        for alias in aliases:
+            actual = lower_map.get(alias)
+            if actual is None:
+                continue
+            for entry in _coerce_entries(data.get(actual)):
+                key = str(entry.get("name", "")).strip().lower()
+                if key and key in seen_names:
+                    continue
+                if key:
+                    seen_names.add(key)
+                collected.append(entry)
+        if collected:
+            normalized[canonical] = collected
+    return normalized
+
+
 class ContinuityKeeper:
     def __init__(self, repo: CampaignRepository, orchestrator: "LLMOrchestrator"):
         self.repo = repo
@@ -187,36 +304,45 @@ class ContinuityKeeper:
 
     async def _extract_entities(self, log: str) -> ExtractedEntities:
         prompt = f"{ENTITY_EXTRACTION_SYSTEM}\n\nLog:\n{log}\n\nReturn ONLY valid JSON."
-        response = await self.llm.generate(prompt, system="")
-        try:
-            data = json.loads(response)
-        except json.JSONDecodeError:
-            logger.warning("Entity extraction returned non-JSON; returning empty entities")
+        # format="json" + temperature 0 makes Ollama grammar-constrain the
+        # reply, which is the only reliable way to get parseable JSON out of
+        # qwen2.5:3b. repair below still runs, because grammar mode is not
+        # guaranteed and the model can still emit prose around it.
+        response = await self.llm.generate(
+            prompt, system="", temperature=0.0, format="json"
+        )
+        data = parse_json_loose(response)
+
+        if data is None:
+            logger.warning("Entity extraction returned unparseable JSON; returning empty entities")
             return ExtractedEntities()
 
+        if isinstance(data, list):
+            # A bare top-level array: treat it as a list of entities.
+            data = {"npcs": data}
+
         if not isinstance(data, dict):
-            # phi4-mini sometimes returns a bare array or an object-shaped array.
-            # data.get() then raised AttributeError, and because the caller
-            # swallows exceptions into a warning, /campaign/note returned 200
-            # having written no entities, no summary and no session row.
+            # phi4-mini sometimes returns an object-shaped array. data.get()
+            # then raised AttributeError, and because the caller swallows
+            # exceptions into a warning, /campaign/note returned 200 having
+            # written no entities, no summary and no session row.
             logger.warning(
                 "Entity extraction returned %s, not an object; returning empty entities",
                 type(data).__name__,
             )
             return ExtractedEntities()
 
-        def _entries(key: str) -> list[dict]:
-            raw = data.get(key) or []
-            if not isinstance(raw, list):
-                return []
-            return [e for e in raw if isinstance(e, dict)]
+        payload = normalize_entity_payload(data)
+        if not payload:
+            logger.warning("Entity extraction produced no recognised entity keys")
+            return ExtractedEntities()
 
         return ExtractedEntities(
-            npcs=[self._entity("npc", e) for e in _entries("npcs")],
-            locations=[self._entity("location", e) for e in _entries("locations")],
-            items=[self._entity("item", e) for e in _entries("items")],
-            quests=[self._entity("quest", e) for e in _entries("quests")],
-            decisions=[self._entity("decision", e) for e in _entries("decisions")],
+            npcs=[self._entity("npc", e) for e in payload.get("npcs", [])],
+            locations=[self._entity("location", e) for e in payload.get("locations", [])],
+            items=[self._entity("item", e) for e in payload.get("items", [])],
+            quests=[self._entity("quest", e) for e in payload.get("quests", [])],
+            decisions=[self._entity("decision", e) for e in payload.get("decisions", [])],
         )
 
     @staticmethod
@@ -322,12 +448,19 @@ class ContinuityKeeper:
 
     async def _extract_facts(self, log: str, entities: ExtractedEntities) -> list[Fact]:
         prompt = f"{FACT_EXTRACTION_SYSTEM}\n\nLog:\n{log}\n\nReturn ONLY valid JSON."
-        response = await self.llm.generate(prompt, system="")
-        try:
-            fact_data = json.loads(response)
-        except json.JSONDecodeError:
-            logger.warning("Fact extraction returned non-JSON; returning empty facts")
+        response = await self.llm.generate(
+            prompt, system="", temperature=0.0, format="json"
+        )
+        fact_data = parse_json_loose(response)
+        if fact_data is None:
+            logger.warning("Fact extraction returned unparseable JSON; returning empty facts")
             return []
+        if isinstance(fact_data, dict):
+            # Some models wrap the array in {"facts": [...]}.
+            for key in ("facts", "results", "items"):
+                if isinstance(fact_data.get(key), list):
+                    fact_data = fact_data[key]
+                    break
         if not isinstance(fact_data, list):
             logger.warning(
                 "Fact extraction returned %s, not an array; returning empty facts",

@@ -20,6 +20,7 @@ import os
 import tempfile
 import wave
 from pathlib import Path
+from typing import Annotated
 
 import anyio
 from fastapi import (
@@ -237,7 +238,7 @@ def _transcribe_file(data: bytes, suffix: str) -> TranscribeResponse:
 
 
 @router.post("/transcribe", response_model=TranscribeResponse)
-async def transcribe(file: UploadFile = File(...)) -> TranscribeResponse:
+async def transcribe(file: Annotated[UploadFile, File()]) -> TranscribeResponse:
     if not _FASTER:
         raise HTTPException(
             status_code=501,
