@@ -14,6 +14,7 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 
 from app.config import settings
+from app.rag._fts import build_match_query
 
 # Ceiling on sessions.raw_log, applied in SQL on every turn append. Without it
 # the transcript grows without bound, SQLite rewrites the whole TEXT value on
@@ -134,25 +135,6 @@ class CampaignRepository:
             raise
         finally:
             conn.close()
-
-    @contextmanager
-    def _shared_conn(self, conn=None):
-        """Yield a caller-supplied connection, or open a private one.
-
-        Batch callers (campaign import, continuity upserts) open ONE connection
-        and pass it in, so N rows cost 1 connect/PRAGMA/commit/close cycle
-        instead of N. When `conn` is None this behaves exactly like _conn(),
-        so every existing single-row caller is unaffected.
-
-        NOTE: sharing a connection means the caller's block owns the commit, so
-        a batch is atomic. _ensure_campaign is NOT called on a shared
-        connection - the batch owner does it once.
-        """
-        if conn is not None:
-            yield conn
-            return
-        with self._conn() as own:
-            yield own
 
     @staticmethod
     def _ensure_campaign(conn, campaign_id: int) -> None:
@@ -375,31 +357,44 @@ class CampaignRepository:
         historical turn into the LLM prompt, the GM retrieves the few sessions
         that match its current question. The FTS5 table mirrors `sessions` and
         is kept in sync by triggers declared in schema.sql.
+
+        The query is sanitised with build_match_query before it reaches MATCH.
+        It used to be interpolated raw, so an unbalanced quote, a bare
+        AND/OR/NOT, or a stray operator in the GM's own search phrasing raised
+        sqlite3.OperationalError, which propagated out of the tool handler.
         """
         if not query or not query.strip():
             return []
-        with self._conn() as conn:
-            rows = conn.execute(
-                """
-                SELECT s.campaign_id, s.session_num, s.summary, s.facts_json,
-                       substr(s.raw_log, 1, 1200) AS excerpt
-                FROM sessions s
-                JOIN sessions_fts ON sessions_fts.rowid = s.id
-                WHERE sessions_fts MATCH ? AND s.campaign_id = ?
-                ORDER BY bm25(sessions_fts)
-                LIMIT ?
-                """,
-                (query, campaign_id, limit),
-            ).fetchall()
-            out = []
-            for r in rows:
-                d = dict(r)
-                try:
-                    d["facts_json"] = json.loads(d.get("facts_json") or "[]")
-                except Exception:
-                    d["facts_json"] = []
-                out.append(d)
-            return out
+        match = build_match_query(query)
+        if not match:
+            return []
+        try:
+            with self._conn() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT s.campaign_id, s.session_num, s.summary, s.facts_json,
+                           substr(s.raw_log, 1, 1200) AS excerpt
+                    FROM sessions s
+                    JOIN sessions_fts ON sessions_fts.rowid = s.id
+                    WHERE sessions_fts MATCH ? AND s.campaign_id = ?
+                    ORDER BY bm25(sessions_fts)
+                    LIMIT ?
+                    """,
+                    (match, campaign_id, limit),
+                ).fetchall()
+        except sqlite3.OperationalError:
+            # Defence in depth: build_match_query should make this unreachable,
+            # but a MATCH failure must never escape into the GM's tool handler.
+            return []
+        out = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["facts_json"] = json.loads(d.get("facts_json") or "[]")
+            except Exception:
+                d["facts_json"] = []
+            out.append(d)
+        return out
 
     # ──────────────────────────────────────────────────────────────
     # NPCs
@@ -769,6 +764,114 @@ class CampaignRepository:
         return {"party": party, "notes": notes}
 
     # ──────────────────────────────────────────────────────────────
+    # Hot-path single-connection snapshot (O1)
+    # ──────────────────────────────────────────────────────────────
+
+    def get_campaign_snapshot(
+        self,
+        campaign_id: int | None = None,
+        *,
+        party_limit: int = 12,
+        npc_limit: int = 12,
+        location_limit: int = 12,
+        item_limit: int = 12,
+        quest_limit: int = 8,
+    ) -> dict:
+        """Assemble the GM's campaign context over a SINGLE connection.
+
+        The live GM's injected context block used to call get_active_campaign_id,
+        get_campaign_context, get_combat_json and several list getters in a row,
+        and every one of those opened its own sqlite connection (connect, PRAGMA,
+        commit, close). That was 7-8 connection cycles on the hot path of every
+        /ask and /stream turn.
+
+        This does the same reads in one pass with LIMIT pushed into SQL, so a
+        long campaign does not materialise every NPC/quest row just to show the
+        GM the first handful. The individual getters are untouched and still
+        used elsewhere.
+        """
+        with self._conn() as conn:
+            if campaign_id is None:
+                row = conn.execute(
+                    "SELECT id FROM campaigns ORDER BY updated_at DESC, id DESC LIMIT 1"
+                ).fetchone()
+                cid = row[0] if row else 1
+            else:
+                cid = campaign_id
+
+            campaign = conn.execute(
+                "SELECT id, name, summary, combat_json FROM campaigns WHERE id = ?",
+                (cid,),
+            ).fetchone()
+
+            party = [
+                dict(r)
+                for r in conn.execute(
+                    "SELECT * FROM party_members WHERE campaign_id = ?"
+                    " ORDER BY name LIMIT ?",
+                    (cid, party_limit),
+                ).fetchall()
+            ]
+
+            npcs = [
+                dict(r)
+                for r in conn.execute(
+                    "SELECT * FROM npcs WHERE campaign_id = ? ORDER BY name LIMIT ?",
+                    (cid, npc_limit),
+                ).fetchall()
+            ]
+
+            locations = []
+            for r in conn.execute(
+                "SELECT * FROM locations WHERE campaign_id = ? ORDER BY name LIMIT ?",
+                (cid, location_limit),
+            ).fetchall():
+                values = dict(r)
+                try:
+                    values["facts"] = json.loads(values.pop("facts_json") or "[]")
+                except Exception:
+                    values["facts"] = []
+                locations.append(values)
+
+            items = [
+                dict(r)
+                for r in conn.execute(
+                    "SELECT * FROM items WHERE campaign_id = ? ORDER BY name LIMIT ?",
+                    (cid, item_limit),
+                ).fetchall()
+            ]
+
+            quests = []
+            for r in conn.execute(
+                "SELECT * FROM quests WHERE campaign_id = ? AND status = 'active'"
+                " ORDER BY name LIMIT ?",
+                (cid, quest_limit),
+            ).fetchall():
+                values = dict(r)
+                try:
+                    values["objectives"] = json.loads(values.pop("objectives_json") or "[]")
+                    values["rewards"] = json.loads(values.pop("rewards_json") or "[]")
+                except Exception:
+                    values.setdefault("objectives", [])
+                    values.setdefault("rewards", [])
+                quests.append(values)
+
+        return {
+            "campaign_id": cid,
+            "name": (campaign["name"] if campaign else "") or "",
+            "chronicle": (campaign["summary"] if campaign and campaign["summary"] else "") or "",
+            "combat_json": (
+                campaign["combat_json"] if campaign and campaign["combat_json"] else ""
+            )
+            or "",
+            "party": party,
+            "npcs": npcs,
+            "locations": locations,
+            "items": items,
+            "quests": quests,
+        }
+
+    # ──────────────────────────────────────────────────────────────
     # Batch writers (O2): one connection for many rows
     # ──────────────────────────────────────────────────────────────
 
@@ -790,6 +893,87 @@ class CampaignRepository:
                 [(campaign_id, sn, nt, content) for sn, nt, content in notes],
             )
         return len(notes)
+
+    def upsert_party_batch(self, campaign_id: int, members: list[dict]) -> int:
+        """Upsert party members over ONE connection.
+
+        `members` is a list of dicts with the same keys upsert_party_member
+        accepts. That method returns `RETURNING id`, which executemany cannot
+        surface, so this keeps the per-row statement and only shares the
+        connection - the conflict semantics are byte-identical.
+        """
+        if not members:
+            return 0
+        written = 0
+        with self._conn() as conn:
+            self._ensure_campaign(conn, campaign_id)
+            for member in members:
+                name = str(member.get("name") or "").strip()
+                if not name:
+                    continue
+                conn.execute(
+                    """
+                    INSERT INTO party_members (campaign_id, name, player_name, class,
+                                               level, ancestry, background, stats_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(campaign_id, name) DO UPDATE SET
+                        player_name = excluded.player_name,
+                        class = excluded.class,
+                        level = excluded.level,
+                        ancestry = excluded.ancestry,
+                        background = excluded.background,
+                        stats_json = excluded.stats_json,
+                        updated_at = datetime('now')
+                    """,
+                    (
+                        campaign_id,
+                        name,
+                        member.get("player_name"),
+                        member.get("class_"),
+                        member.get("level", 1),
+                        member.get("ancestry"),
+                        member.get("background"),
+                        json.dumps(member["stats"]) if member.get("stats") else None,
+                    ),
+                )
+                written += 1
+        return written
+
+    def insert_sessions_batch(self, campaign_id: int, sessions: list[dict]) -> int:
+        """Upsert sessions over ONE connection, keeping the FTS index in sync.
+
+        `sessions` is a list of dicts with keys session_num, summary, facts,
+        raw_log. The statement is the same INSERT...ON CONFLICT DO UPDATE as
+        save_session, so the schema's sessions_fts AFTER INSERT and AFTER UPDATE
+        triggers fire exactly as before - that is what keeps imported sessions
+        immediately searchable through search_sessions.
+        """
+        if not sessions:
+            return 0
+        written = 0
+        with self._conn() as conn:
+            self._ensure_campaign(conn, campaign_id)
+            for session in sessions:
+                conn.execute(
+                    """
+                    INSERT INTO sessions (campaign_id, session_num, summary, facts_json, raw_log)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(campaign_id, session_num) DO UPDATE SET
+                        summary = excluded.summary,
+                        facts_json = excluded.facts_json,
+                        raw_log = excluded.raw_log,
+                        ended_at = datetime('now')
+                    """,
+                    (
+                        campaign_id,
+                        session["session_num"],
+                        session.get("summary", ""),
+                        json.dumps(session.get("facts") or []),
+                        session.get("raw_log", ""),
+                    ),
+                )
+                written += 1
+        return written
 
     def upsert_entities_batch(
         self,

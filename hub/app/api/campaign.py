@@ -325,17 +325,22 @@ async def import_campaign(
         if import_data.replace_existing:
             with repo._conn() as conn:
                 conn.execute("DELETE FROM party_members WHERE campaign_id = ?", (campaign_id,))
-        for member in import_data.party:
-            repo.upsert_party_member(
-                campaign_id=campaign_id,
-                name=str(member.get("name") or "Unnamed")[:200],
-                player_name=member.get("player_name"),
-                class_=member.get("class_", member.get("class")),
-                level=_safe_int(member.get("level"), 1, field="party.level"),
-                ancestry=member.get("ancestry"),
-                background=member.get("background"),
-                stats=_json_list(member.get("stats", member.get("stats_json"))) or None,
-            )
+        # One connection for the whole party (was one per member).
+        repo.upsert_party_batch(
+            campaign_id,
+            [
+                {
+                    "name": member.get("name"),
+                    "player_name": member.get("player_name"),
+                    "class_": member.get("class_", member.get("class")),
+                    "level": _safe_int(member.get("level"), 1, field="party.level"),
+                    "ancestry": member.get("ancestry"),
+                    "background": member.get("background"),
+                    "stats": _json_list(member.get("stats", member.get("stats_json"))) or None,
+                }
+                for member in import_data.party
+            ],
+        )
 
     if import_data.npcs and import_data.replace_existing:
         with repo._conn() as conn:
@@ -417,22 +422,23 @@ async def import_campaign(
         if import_data.replace_existing:
             with repo._conn() as conn:
                 conn.execute("DELETE FROM sessions WHERE campaign_id = ?", (campaign_id,))
-        for session in import_data.sessions:
-            raw_facts = session.get("facts", session.get("facts_json", []))
-            if isinstance(raw_facts, str):
-                try:
-                    raw_facts = json.loads(raw_facts)
-                except ValueError:
-                    raw_facts = []
-            repo.save_session(
-                campaign_id=campaign_id,
-                session_num=_safe_int(
-                    session.get("session_num"), 1, field="sessions.session_num"
-                ),
-                summary=session.get("summary", ""),
-                facts=raw_facts if isinstance(raw_facts, list) else [],
-                raw_log=session.get("raw_log", ""),
-            )
+        # One connection for the whole history. The sessions_fts triggers fire
+        # per row inside the shared transaction, so imported sessions are
+        # searchable immediately via search_sessions.
+        repo.insert_sessions_batch(
+            campaign_id,
+            [
+                {
+                    "session_num": _safe_int(
+                        session.get("session_num"), 1, field="sessions.session_num"
+                    ),
+                    "summary": session.get("summary", ""),
+                    "facts": _json_list(session.get("facts", session.get("facts_json", []))),
+                    "raw_log": session.get("raw_log", ""),
+                }
+                for session in import_data.sessions
+            ],
+        )
 
     if import_data.notes:
         if import_data.replace_existing:

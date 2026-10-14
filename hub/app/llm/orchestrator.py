@@ -745,10 +745,14 @@ Citation Fidelity (MANDATORY):
         directive on every later turn.
         """
         try:
-            cid = campaign_id if campaign_id is not None else self.repo.get_active_campaign_id()
-            ctx = self.continuity_keeper.get_campaign_context(cid)
-            chronicle = ctx.get("chronicle") or ctx.get("summary", "")
-            combat = self.repo.get_combat_json(cid) or ""
+            # One connection for the whole context block (O1). This previously
+            # called get_active_campaign_id, get_campaign_context,
+            # get_combat_json and the list getters in sequence, which is 7-8
+            # sqlite connect/PRAGMA/commit/close cycles on every turn.
+            snap = self.repo.get_campaign_snapshot(campaign_id)
+            cid = snap["campaign_id"]
+            chronicle = snap.get("chronicle") or ""
+            combat = snap.get("combat_json") or ""
             if not chronicle and not combat:
                 return ""
             parts = self._UNTRUSTED_DATA_PREAMBLE
