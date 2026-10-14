@@ -241,55 +241,70 @@ class ContinuityKeeper:
         session_num: int,
         entities: ExtractedEntities,
     ) -> None:
-        for npc in entities.npcs:
-            self.repo.upsert_npc(
-                campaign_id=campaign_id,
-                name=npc.name,
-                alias=npc.attributes.get("alias"),
-                role=npc.attributes.get("role", "unknown"),
-                level=npc.attributes.get("level"),
-                ancestry=npc.attributes.get("ancestry"),
-                class_=npc.attributes.get("class"),
-                disposition=npc.attributes.get("disposition", "unknown"),
-                notes=npc.attributes.get("notes"),
-                session_num=session_num,
-            )
+        """Persist an extracted entity set over a single DB connection (O2).
 
-        for loc in entities.locations:
-            self.repo.upsert_location(
-                campaign_id=campaign_id,
-                name=loc.name,
-                type_=loc.attributes.get("type", "other"),
-                parent_name=loc.attributes.get("parent"),
-                description=loc.attributes.get("description"),
-                session_num=session_num,
-            )
+        This used to call upsert_npc/location/item/quest per entity, and each
+        of those opened its own sqlite connection and ran its own
+        _ensure_campaign INSERT. A typical extraction produced ~50 connections
+        for what is logically one transaction. upsert_entities_batch keeps the
+        same per-row SQL (FK resolution still reads rows written earlier in the
+        batch) but shares one connection and one commit.
+        """
+        self.repo.upsert_entities_batch(
+            campaign_id,
+            npcs=[
+                {
+                    "name": npc.name,
+                    "alias": npc.attributes.get("alias"),
+                    "role": npc.attributes.get("role", "unknown"),
+                    "level": npc.attributes.get("level"),
+                    "ancestry": npc.attributes.get("ancestry"),
+                    "class_": npc.attributes.get("class"),
+                    "disposition": npc.attributes.get("disposition", "unknown"),
+                    "notes": npc.attributes.get("notes"),
+                    "session_num": session_num,
+                }
+                for npc in entities.npcs
+            ],
+            locations=[
+                {
+                    "name": loc.name,
+                    "type": loc.attributes.get("type", "other"),
+                    "parent_name": loc.attributes.get("parent"),
+                    "description": loc.attributes.get("description"),
+                    "session_num": session_num,
+                }
+                for loc in entities.locations
+            ],
+            items=[
+                {
+                    "name": item.name,
+                    "type": item.attributes.get("type", "other"),
+                    "level": item.attributes.get("level"),
+                    "traits": item.attributes.get("traits", []),
+                    "holder_name": item.attributes.get("holder"),
+                    "location_name": item.attributes.get("location"),
+                    "notes": item.attributes.get("notes"),
+                    "session_num": session_num,
+                }
+                for item in entities.items
+            ],
+            quests=[
+                {
+                    "name": quest.name,
+                    "status": quest.attributes.get("status", "active"),
+                    "giver_name": quest.attributes.get("giver"),
+                    "description": quest.attributes.get("description"),
+                    "objectives": quest.attributes.get("objectives", []),
+                    "rewards": quest.attributes.get("rewards", []),
+                    "session_num": session_num,
+                }
+                for quest in entities.quests
+            ],
+        )
 
-        for item in entities.items:
-            self.repo.upsert_item(
-                campaign_id=campaign_id,
-                name=item.name,
-                type_=item.attributes.get("type", "other"),
-                level=item.attributes.get("level"),
-                traits=item.attributes.get("traits", []),
-                holder_name=item.attributes.get("holder"),
-                location_name=item.attributes.get("location"),
-                notes=item.attributes.get("notes"),
-                session_num=session_num,
-            )
-
-        for quest in entities.quests:
-            self.repo.upsert_quest(
-                campaign_id=campaign_id,
-                name=quest.name,
-                status=quest.attributes.get("status", "active"),
-                giver_name=quest.attributes.get("giver"),
-                description=quest.attributes.get("description"),
-                objectives=quest.attributes.get("objectives", []),
-                rewards=quest.attributes.get("rewards", []),
-                session_num=session_num,
-            )
-
+        # Decisions have no upsert/uniqueness semantics (they are an append-only
+        # log), so they keep their own writer.
         for decision in entities.decisions:
             self.repo.add_decision(
                 campaign_id=campaign_id,

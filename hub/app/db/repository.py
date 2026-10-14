@@ -135,6 +135,25 @@ class CampaignRepository:
         finally:
             conn.close()
 
+    @contextmanager
+    def _shared_conn(self, conn=None):
+        """Yield a caller-supplied connection, or open a private one.
+
+        Batch callers (campaign import, continuity upserts) open ONE connection
+        and pass it in, so N rows cost 1 connect/PRAGMA/commit/close cycle
+        instead of N. When `conn` is None this behaves exactly like _conn(),
+        so every existing single-row caller is unaffected.
+
+        NOTE: sharing a connection means the caller's block owns the commit, so
+        a batch is atomic. _ensure_campaign is NOT called on a shared
+        connection - the batch owner does it once.
+        """
+        if conn is not None:
+            yield conn
+            return
+        with self._conn() as own:
+            yield own
+
     @staticmethod
     def _ensure_campaign(conn, campaign_id: int) -> None:
         """Make sure the parent campaign row exists.
@@ -748,6 +767,197 @@ class CampaignRepository:
         party = self.get_party(campaign_id)
         notes = self.get_session_notes(campaign_id)
         return {"party": party, "notes": notes}
+
+    # ──────────────────────────────────────────────────────────────
+    # Batch writers (O2): one connection for many rows
+    # ──────────────────────────────────────────────────────────────
+
+    def insert_session_notes(self, campaign_id: int, notes: list[tuple]) -> int:
+        """Bulk-insert session notes in a single transaction.
+
+        `notes` is a list of (session_num, note_type, content) tuples, already
+        int/str-validated by the caller. This replaces a loop that opened one
+        sqlite connection per row, so restoring a 500-note campaign went from
+        500 connect/commit/close cycles to 1.
+        """
+        if not notes:
+            return 0
+        with self._conn() as conn:
+            self._ensure_campaign(conn, campaign_id)
+            conn.executemany(
+                "INSERT INTO session_notes (campaign_id, session_num, note_type, content)"
+                " VALUES (?, ?, ?, ?)",
+                [(campaign_id, sn, nt, content) for sn, nt, content in notes],
+            )
+        return len(notes)
+
+    def upsert_entities_batch(
+        self,
+        campaign_id: int,
+        npcs: list[dict] | None = None,
+        locations: list[dict] | None = None,
+        items: list[dict] | None = None,
+        quests: list[dict] | None = None,
+    ) -> dict[str, int]:
+        """Upsert a whole extracted entity set over ONE connection.
+
+        Each entity type is written with its own INSERT...ON CONFLICT
+        statement, but the whole batch shares a single connection and a single
+        commit. Ordering matters and is preserved: locations before items so a
+        item can resolve location_name, and npcs before both so an item can
+        resolve holder_name. That is why this is not executemany - each row's
+        SQL depends on rows written earlier in the same batch.
+        """
+        counts = {"npcs": 0, "locations": 0, "items": 0, "quests": 0}
+        with self._conn() as conn:
+            self._ensure_campaign(conn, campaign_id)
+
+            for loc in locations or []:
+                name = str(loc.get("name") or "").strip()
+                if not name:
+                    continue
+                parent_id = None
+                parent_name = loc.get("parent_name")
+                if parent_name:
+                    prow = conn.execute(
+                        "SELECT id FROM locations WHERE campaign_id = ? AND name = ?",
+                        (campaign_id, parent_name),
+                    ).fetchone()
+                    parent_id = prow[0] if prow else None
+                conn.execute(
+                    """
+                    INSERT INTO locations (campaign_id, name, type, parent_id, description, facts_json)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(campaign_id, name) DO UPDATE SET
+                        type = excluded.type,
+                        parent_id = excluded.parent_id,
+                        description = excluded.description,
+                        updated_at = datetime('now')
+                    """,
+                    (
+                        campaign_id,
+                        name,
+                        loc.get("type") or "other",
+                        parent_id,
+                        loc.get("description"),
+                        json.dumps({}),
+                    ),
+                )
+                counts["locations"] += 1
+
+            for npc in npcs or []:
+                name = str(npc.get("name") or "").strip()
+                if not name:
+                    continue
+                conn.execute(
+                    """
+                    INSERT INTO npcs (campaign_id, name, alias, role, level, ancestry, class,
+                                      disposition, notes, first_seen_session, last_seen_session)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(campaign_id, name) DO UPDATE SET
+                        alias = excluded.alias, role = excluded.role,
+                        level = excluded.level, ancestry = excluded.ancestry,
+                        class = excluded.class, disposition = excluded.disposition,
+                        notes = excluded.notes,
+                        last_seen_session = excluded.last_seen_session,
+                        updated_at = datetime('now')
+                    """,
+                    (
+                        campaign_id,
+                        name,
+                        npc.get("alias"),
+                        npc.get("role") or "unknown",
+                        npc.get("level"),
+                        npc.get("ancestry"),
+                        npc.get("class_") or npc.get("class"),
+                        npc.get("disposition") or "unknown",
+                        npc.get("notes"),
+                        npc.get("session_num"),
+                        npc.get("session_num"),
+                    ),
+                )
+                counts["npcs"] += 1
+
+            for item in items or []:
+                name = str(item.get("name") or "").strip()
+                if not name:
+                    continue
+                holder_id = None
+                if item.get("holder_name"):
+                    row = conn.execute(
+                        "SELECT id FROM npcs WHERE campaign_id = ? AND name = ?",
+                        (campaign_id, item["holder_name"]),
+                    ).fetchone()
+                    holder_id = row[0] if row else None
+                location_id = None
+                if item.get("location_name"):
+                    row = conn.execute(
+                        "SELECT id FROM locations WHERE campaign_id = ? AND name = ?",
+                        (campaign_id, item["location_name"]),
+                    ).fetchone()
+                    location_id = row[0] if row else None
+                conn.execute(
+                    """
+                    INSERT INTO items (campaign_id, name, type, level, traits_json,
+                                       holder_id, location_id, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(campaign_id, name) DO UPDATE SET
+                        type = excluded.type, level = excluded.level,
+                        traits_json = excluded.traits_json,
+                        holder_id = excluded.holder_id,
+                        location_id = excluded.location_id,
+                        notes = excluded.notes,
+                        updated_at = datetime('now')
+                    """,
+                    (
+                        campaign_id,
+                        name,
+                        item.get("type") or "other",
+                        item.get("level"),
+                        json.dumps(item.get("traits") or []),
+                        holder_id,
+                        location_id,
+                        item.get("notes"),
+                    ),
+                )
+                counts["items"] += 1
+
+            for quest in quests or []:
+                name = str(quest.get("name") or "").strip()
+                if not name:
+                    continue
+                giver_id = None
+                if quest.get("giver_name"):
+                    row = conn.execute(
+                        "SELECT id FROM npcs WHERE campaign_id = ? AND name = ?",
+                        (campaign_id, quest["giver_name"]),
+                    ).fetchone()
+                    giver_id = row[0] if row else None
+                conn.execute(
+                    """
+                    INSERT INTO quests (campaign_id, name, status, giver_id, description,
+                                        objectives_json, rewards_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(campaign_id, name) DO UPDATE SET
+                        status = excluded.status, giver_id = excluded.giver_id,
+                        description = excluded.description,
+                        objectives_json = excluded.objectives_json,
+                        rewards_json = excluded.rewards_json,
+                        updated_at = datetime('now')
+                    """,
+                    (
+                        campaign_id,
+                        name,
+                        quest.get("status") or "active",
+                        giver_id,
+                        quest.get("description"),
+                        json.dumps(quest.get("objectives") or []),
+                        json.dumps(quest.get("rewards") or []),
+                    ),
+                )
+                counts["quests"] += 1
+
+        return counts
 
     def get_session_notes(self, campaign_id: int) -> list[dict]:
         with self._conn() as conn:

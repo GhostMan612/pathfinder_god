@@ -304,6 +304,23 @@ async def import_campaign(
                 return []
         return value or []
 
+    def _safe_int(value, default, *, field: str = "value"):
+        """int() that reports a 400 instead of raising an unhandled 500.
+
+        Imported payloads are arbitrary nested JSON, so `int(x)` on a string
+        like "high" or a dict used to raise ValueError/TypeError straight out
+        of the handler and surface as a 500 with a traceback.
+        """
+        if value is None or value == "":
+            return default
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid integer for {field}: {value!r}",
+            ) from None
+
     if import_data.party:
         if import_data.replace_existing:
             with repo._conn() as conn:
@@ -311,75 +328,85 @@ async def import_campaign(
         for member in import_data.party:
             repo.upsert_party_member(
                 campaign_id=campaign_id,
-                name=str(member.get("name") or "Unnamed"),
+                name=str(member.get("name") or "Unnamed")[:200],
                 player_name=member.get("player_name"),
                 class_=member.get("class_", member.get("class")),
-                level=int(member.get("level") or 1),
+                level=_safe_int(member.get("level"), 1, field="party.level"),
                 ancestry=member.get("ancestry"),
                 background=member.get("background"),
                 stats=_json_list(member.get("stats", member.get("stats_json"))) or None,
             )
 
-    if import_data.npcs:
-        if import_data.replace_existing:
-            with repo._conn() as conn:
-                conn.execute("DELETE FROM npcs WHERE campaign_id = ?", (campaign_id,))
-        for npc in import_data.npcs:
-            repo.upsert_npc(
-                campaign_id=campaign_id,
-                name=str(npc.get("name") or "Unnamed"),
-                alias=npc.get("alias"),
-                role=npc.get("role") or "unknown",
-                level=npc.get("level"),
-                ancestry=npc.get("ancestry"),
-                class_=npc.get("class_", npc.get("class")),
-                disposition=npc.get("disposition") or "unknown",
-                notes=npc.get("notes"),
-            )
+    if import_data.npcs and import_data.replace_existing:
+        with repo._conn() as conn:
+            conn.execute("DELETE FROM npcs WHERE campaign_id = ?", (campaign_id,))
 
-    if import_data.locations:
-        if import_data.replace_existing:
-            with repo._conn() as conn:
-                conn.execute("DELETE FROM locations WHERE campaign_id = ?", (campaign_id,))
-        for loc in import_data.locations:
-            repo.upsert_location(
-                campaign_id=campaign_id,
-                name=str(loc.get("name") or "Unnamed"),
-                type_=loc.get("type") or loc.get("type_") or "other",
-                parent_name=loc.get("parent_name"),
-                description=loc.get("description"),
-            )
+    if import_data.locations and import_data.replace_existing:
+        with repo._conn() as conn:
+            conn.execute("DELETE FROM locations WHERE campaign_id = ?", (campaign_id,))
 
-    if import_data.items:
-        if import_data.replace_existing:
-            with repo._conn() as conn:
-                conn.execute("DELETE FROM items WHERE campaign_id = ?", (campaign_id,))
-        for item in import_data.items:
-            repo.upsert_item(
-                campaign_id=campaign_id,
-                name=str(item.get("name") or "Unnamed"),
-                type_=item.get("type") or item.get("type_") or "other",
-                level=item.get("level"),
-                traits=_json_list(item.get("traits", item.get("traits_json"))),
-                holder_name=item.get("holder_name"),
-                location_name=item.get("location_name"),
-                notes=item.get("notes"),
-            )
+    if import_data.items and import_data.replace_existing:
+        with repo._conn() as conn:
+            conn.execute("DELETE FROM items WHERE campaign_id = ?", (campaign_id,))
 
-    if import_data.quests:
-        if import_data.replace_existing:
-            with repo._conn() as conn:
-                conn.execute("DELETE FROM quests WHERE campaign_id = ?", (campaign_id,))
-        for quest in import_data.quests:
-            repo.upsert_quest(
-                campaign_id=campaign_id,
-                name=str(quest.get("name") or "Unnamed"),
-                status=quest.get("status") or "active",
-                giver_name=quest.get("giver_name"),
-                description=quest.get("description"),
-                objectives=_json_list(quest.get("objectives", quest.get("objectives_json"))),
-                rewards=_json_list(quest.get("rewards", quest.get("rewards_json"))),
-            )
+    if import_data.quests and import_data.replace_existing:
+        with repo._conn() as conn:
+            conn.execute("DELETE FROM quests WHERE campaign_id = ?", (campaign_id,))
+
+    # One connection, one commit for the whole entity set (O2). Previously each
+    # entity opened its own sqlite connection - roughly 50 for a typical
+    # extraction - and each also ran its own _ensure_campaign INSERT.
+    if import_data.npcs or import_data.locations or import_data.items or import_data.quests:
+        repo.upsert_entities_batch(
+            campaign_id,
+            npcs=[
+                {
+                    "name": npc.get("name"),
+                    "alias": npc.get("alias"),
+                    "role": npc.get("role"),
+                    "level": _safe_int(npc.get("level"), None, field="npcs.level"),
+                    "ancestry": npc.get("ancestry"),
+                    "class_": npc.get("class_", npc.get("class")),
+                    "disposition": npc.get("disposition"),
+                    "notes": npc.get("notes"),
+                }
+                for npc in (import_data.npcs or [])
+            ],
+            locations=[
+                {
+                    "name": loc.get("name"),
+                    "type": loc.get("type") or loc.get("type_"),
+                    "parent_name": loc.get("parent_name"),
+                    "description": loc.get("description"),
+                }
+                for loc in (import_data.locations or [])
+            ],
+            items=[
+                {
+                    "name": item.get("name"),
+                    "type": item.get("type") or item.get("type_"),
+                    "level": _safe_int(item.get("level"), None, field="items.level"),
+                    "traits": _json_list(item.get("traits", item.get("traits_json"))),
+                    "holder_name": item.get("holder_name"),
+                    "location_name": item.get("location_name"),
+                    "notes": item.get("notes"),
+                }
+                for item in (import_data.items or [])
+            ],
+            quests=[
+                {
+                    "name": quest.get("name"),
+                    "status": quest.get("status"),
+                    "giver_name": quest.get("giver_name"),
+                    "description": quest.get("description"),
+                    "objectives": _json_list(
+                        quest.get("objectives", quest.get("objectives_json"))
+                    ),
+                    "rewards": _json_list(quest.get("rewards", quest.get("rewards_json"))),
+                }
+                for quest in (import_data.quests or [])
+            ],
+        )
 
     # party_members is deliberately NOT handled here: it targets the same table as
     # `party` (get_party() and SELECT * FROM party_members are the same rows).
@@ -399,7 +426,9 @@ async def import_campaign(
                     raw_facts = []
             repo.save_session(
                 campaign_id=campaign_id,
-                session_num=int(session.get("session_num", 1)),
+                session_num=_safe_int(
+                    session.get("session_num"), 1, field="sessions.session_num"
+                ),
                 summary=session.get("summary", ""),
                 facts=raw_facts if isinstance(raw_facts, list) else [],
                 raw_log=session.get("raw_log", ""),
@@ -409,17 +438,18 @@ async def import_campaign(
         if import_data.replace_existing:
             with repo._conn() as conn:
                 conn.execute("DELETE FROM session_notes WHERE campaign_id = ?", (campaign_id,))
-        for note in import_data.notes:
-            with repo._conn() as conn:
-                conn.execute(
-                    "INSERT INTO session_notes (campaign_id, session_num, note_type, content) VALUES (?, ?, ?, ?)",
-                    (
-                        campaign_id,
-                        int(note.get("session_num", 1)),
-                        note.get("note_type", "gm"),
-                        note.get("content", ""),
-                    ),
-                )
+        # Bulk insert in one transaction. This loop previously opened a whole
+        # sqlite connection - connect, PRAGMA, insert, commit, close - for every
+        # single note, so restoring a large campaign cost one connection per row.
+        note_rows = [
+            (
+                _safe_int(note.get("session_num"), 1, field="notes.session_num"),
+                str(note.get("note_type") or "gm"),
+                str(note.get("content") or ""),
+            )
+            for note in import_data.notes
+        ]
+        repo.insert_session_notes(campaign_id, note_rows)
 
     if import_data.decisions:
         if import_data.replace_existing:
@@ -487,7 +517,7 @@ class NPCRequest(BaseModel):
     ancestry: str | None = Field(None, max_length=60)
     class_: str | None = Field(None, alias="class", max_length=60)
     disposition: Literal["friendly", "hostile", "wary", "unknown"] = "unknown"
-    notes: str | None = None
+    notes: str | None = Field(None, max_length=4000)
 
 
 @router.get("/npcs")
@@ -522,12 +552,14 @@ async def create_npc(
 
 
 class PartyMemberRequest(BaseModel):
-    name: str
-    player_name: str | None = None
-    class_: str | None = Field(None, alias="class")
-    level: int = 1
-    ancestry: str | None = None
-    background: str | None = None
+    # Mirrors NPCRequest. Previously every field here was a bare str/int, so a
+    # 10MB "name" or a negative "level" went straight into party_members.
+    name: str = Field(..., min_length=1, max_length=120)
+    player_name: str | None = Field(None, max_length=120)
+    class_: str | None = Field(None, alias="class", max_length=60)
+    level: int = Field(1, ge=0, le=30)
+    ancestry: str | None = Field(None, max_length=60)
+    background: str | None = Field(None, max_length=120)
     stats: dict | None = None
 
 
