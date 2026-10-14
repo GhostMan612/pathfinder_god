@@ -23,18 +23,28 @@ object GodTexture {
     const val TILE = 96
     const val GRID = 24
 
+    /**
+     * BP-08 O8: [TILE] is a PIXEL size, so the procedural grain was ~3x smaller
+     * in physical terms on a xxxhdpi screen than on an mdpi one, changing the
+     * whole visual weight of the parchment/felt surfaces.
+     *
+     * These variants take an explicit pixel size so callers can derive one from
+     * a dp token. The grain itself stays deterministic for a given size: same
+     * seed + same pixel size always produces the same tile, which is what the
+     * unit tests pin.
+     */
     @Composable
-    fun parchmentBrush(): ShaderBrush {
-        val tile = remember {
-            grainTile(TILE, GRID, 0x50C4, 0x2B2118, 0xF6EED8, 0.05f)
+    fun parchmentBrush(tilePx: Int = TILE): ShaderBrush {
+        val tile = remember(tilePx) {
+            grainTile(tilePx, GRID, 0x50C4, 0x2B2118, 0xF6EED8, 0.05f)
         }
         return remember(tile) { tile.toBrush() }
     }
 
     @Composable
-    fun feltBrush(): ShaderBrush {
-        val tile = remember {
-            grainTile(TILE, GRID, 0x9E37, 0x0E1116, 0x4A5560, 0.09f)
+    fun feltBrush(tilePx: Int = TILE): ShaderBrush {
+        val tile = remember(tilePx) {
+            grainTile(tilePx, GRID, 0x9E37, 0x0E1116, 0x4A5560, 0.09f)
         }
         return remember(tile) { tile.toBrush() }
     }

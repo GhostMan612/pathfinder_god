@@ -22,7 +22,11 @@ from dataclasses import asdict, dataclass, is_dataclass
 from typing import ClassVar, Self
 
 from app.agents.npc_compiler import NPC_COMPILER_TOOLS, NPCCompilerAgent
-from app.agents.rules_lawyer import RULES_LAWYER_TOOLS, RulesLawyerAgent
+from app.agents.rules_lawyer import (
+    ABSTENTION_TEXT,
+    RULES_LAWYER_TOOLS,
+    RulesLawyerAgent,
+)
 from app.config import get_settings
 from app.db.repository import CampaignRepository
 from app.llm.ollama_client import OllamaClient
@@ -366,19 +370,6 @@ class LLMOrchestrator:
                 return True
         return False
 
-    @staticmethod
-    def _abstention_clause(confident: bool, needs_rules: bool) -> str:
-        """Instruction that makes the GM refuse to fabricate a ruling."""
-        if not needs_rules or confident:
-            return ""
-        return (
-            "\n\nCRITICAL - NO RULE FOUND FOR THIS. Your excerpts do not contain "
-            "the rule being asked about. Do NOT invent a number, DC, bonus, or "
-            "rule name, and do NOT guess from general knowledge. Say plainly: "
-            "\"I don't have that rule in my books.\" Then offer to adjudicate it "
-            "as a house rule and state that it is your ruling, not a citation."
-        )
-
     async def _agentic_chat(
         self,
         prompt: str,
@@ -515,7 +506,19 @@ class LLMOrchestrator:
             # round-trips regardless of what was asked.
             rules_turn = self._needs_tools(original_prompt)
             if rules_turn and self._should_abstain(context, original_prompt, True):
-                system += self._abstention_clause(False, True)
+                # BP-08: deterministic abstention. Previously this only appended
+                # an instruction clause and then called _agentic_chat anyway, so
+                # the model was still consulted for exactly the turns where we
+                # had already decided the rules corpus cannot answer. The
+                # streaming path already short-circuits via stream_adjudication;
+                # this mirrors it so /ask and /stream agree. No Ollama call.
+                return LLMResult(
+                    answer=ABSTENTION_TEXT,
+                    backend="abstention",
+                    mode="rules",
+                    edition=edition,
+                    sources=[],
+                )
             if rules_turn:
                 answer = await self._agentic_chat(prompt, system, original_prompt, edition, tools, campaign_id)
             else:

@@ -20,6 +20,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.dp
+import com.pathfindergod.spoke.ui.designsystem.Dimens
 import com.pathfindergod.spoke.ui.theme.CritRed
 import com.pathfindergod.spoke.ui.theme.GoldAccent
 import com.pathfindergod.spoke.ui.theme.ParchmentSurface
@@ -30,7 +33,10 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
-private const val DROP_START = -260f
+// BP-08 O8: a raw pixel constant meant the throw was ~3x longer on a
+// xxxhdpi device than on an mdpi one. Declared in dp and converted at the
+// call site via LocalDensity.
+private val DROP_START_DP = -260.dp
 private const val SQUEEZE_START = 1.35f
 private const val SPARK_COUNT = 14
 private const val GLYPH_MIN_SCALE = 0.4f
@@ -71,10 +77,13 @@ fun DiceCanvas(
     }
     val dramatic = impact != Impact.NORMAL
     val settle = if (dramatic) DRAMA_STIFFNESS else SETTLE_STIFFNESS
-    LaunchedEffect(rollToken) {
+    // BP-08 O8: was the raw pixel constant -260f, so the throw was ~3x longer
+    // on a xxxhdpi device than on an mdpi one. Convert a dp token to pixels.
+    val dropStartPx = with(LocalDensity.current) { Dimens.diceDropTravel.toPx() }
+    LaunchedEffect(rollToken, dropStartPx) {
         if (rollToken == 0) return@LaunchedEffect
         launch {
-            drop.snapTo(DROP_START)
+            drop.snapTo(dropStartPx)
             drop.animateTo(0f, spring(dampingRatio = DAMPING, stiffness = settle))
             onImpact()
         }

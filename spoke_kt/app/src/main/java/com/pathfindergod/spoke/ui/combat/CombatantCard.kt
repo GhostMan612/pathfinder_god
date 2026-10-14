@@ -34,6 +34,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalDensity
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -93,14 +94,21 @@ fun CombatantCard(
         0f
     }
     val barColor = if (fraction < 0.5f) CritRed else GoldAccent
-    val ghost by animateFloatAsState(
+    // BP-08 O7: these are held as State, NOT read with `by`. `by` reads .value in
+    // composition, so each animation frame re-ran composition for this whole
+    // card. They are now sampled in the draw phase (graphicsLayer / drawBehind).
+    val ghost = animateFloatAsState(
         targetValue = fraction,
         animationSpec = tween(durationMillis = 700, delayMillis = 350),
     )
-    val border by animateColorAsState(
+    val border = animateColorAsState(
         targetValue = if (isActive) GoldAccent else GoldAccent.copy(alpha = 0.35f),
         animationSpec = tween(400),
     )
+    // BP-08 O8: density-scaled animation travel (was raw -12f / -44f pixels).
+    val density = LocalDensity.current
+    val shakeTravelPx = with(density) { Dimens.combatShakeTravel.toPx() }
+    val floaterTravelPx = with(density) { Dimens.damageFloaterTravel.toPx() }
     var lastHp by remember { mutableStateOf(combatant.currentHp) }
     var floater by remember { mutableStateOf<Int?>(null) }
     var hpDelta by remember(combatant.id) { mutableStateOf<Int?>(null) }
@@ -124,7 +132,7 @@ fun CombatantCard(
             }
             if (delta < 0) {
                 launch {
-                    shake.snapTo(-12f)
+                    shake.snapTo(-shakeTravelPx)
                     shake.animateTo(
                         0f,
                         spring(Spring.DampingRatioHighBouncy, Spring.StiffnessMedium),
@@ -157,7 +165,7 @@ fun CombatantCard(
             .fillMaxWidth(),
         testTag = GodTags.combatant(combatant.id),
         containerColor = if (isActive) ParchmentSurface else VoidBackground,
-        borderColor = border,
+        borderColorState = border,
         stateDescription = if (isActive) {
             stringResource(R.string.a11y_combatant_active)
         } else {
@@ -291,7 +299,9 @@ fun CombatantCard(
                         fontWeight = FontWeight.Bold,
                         color = if (amount > 0) GoldAccent else CritRed,
                         modifier = Modifier.graphicsLayer {
-                            translationY = -rise.value * 44f
+                            // rise.value read in the DRAW phase; travel is
+                            // density-scaled px (was a raw 44f pixel constant).
+                            translationY = -rise.value * floaterTravelPx
                             alpha = 1f - rise.value
                         },
                     )
@@ -300,7 +310,7 @@ fun CombatantCard(
         }
         GodProgressBar(
             fraction = fraction,
-            ghostFraction = ghost,
+            ghostFractionState = ghost,
             barColor = barColor,
             label = stringResource(
                 R.string.a11y_hp_bar,

@@ -139,9 +139,27 @@ data class LootResponse(
     val errors: List<String> = emptyList(),
 )
 
+@Serializable
+data class CombatSceneRequest(
+    @SerialName("campaign_id") val campaignId: Int = 1,
+    val scene: String,
+)
+
+@Serializable
+data class CombatSceneResponse(
+    @SerialName("campaign_id") val campaignId: Int,
+    val scene: String,
+)
+
 interface HubApi {
     @POST("combat/resolve-strike")
     suspend fun resolveStrike(@Body request: StrikeRequest): StrikeResponse
+
+    // BP-08: the Spoke combat tracker is the PRODUCER for this endpoint. Until
+    // now only the Hub-side write existed, so the GM's combat context always
+    // described the last session rather than the live table.
+    @POST("combat/scene")
+    suspend fun setCombatScene(@Body request: CombatSceneRequest): CombatSceneResponse
 
     @POST("combat/end-turn")
     suspend fun endTurn(@Body request: EndTurnRequest): EndTurnResponse

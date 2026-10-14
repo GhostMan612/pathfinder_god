@@ -17,6 +17,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
@@ -39,6 +42,29 @@ fun Modifier.godCard(
     cornerRadius: Dp = Dimens.panelCorner,
     fill: Color = ParchmentSurface,
     border: Color = GoldAccent,
+): Modifier = godCardState(
+    cornerRadius = cornerRadius,
+    fill = fill,
+    // Plain holder, not remember{}: this is a Modifier extension, not a
+    // @Composable, so it cannot call remember. The draw lambda only ever
+    // reads this value, so a constant holder is correct here.
+    border = object : State<Color> {
+        override val value: Color = border
+    },
+)
+
+/**
+ * Border-color-aware variant for animated borders (BP-08 O7).
+ *
+ * The border is read inside `onDrawBehind`, i.e. at DRAW time, so an animated
+ * [State] passed here updates the stroke without recomposing the card subtree on
+ * every animation frame. Reading it in composition instead meant a border
+ * animation re-ran composition for the whole card ~60x/second.
+ */
+fun Modifier.godCardState(
+    cornerRadius: Dp = Dimens.panelCorner,
+    fill: Color = ParchmentSurface,
+    border: State<Color>,
 ): Modifier = this.drawWithCache {
     val radiusPx = cornerRadius.toPx()
     val outer = CornerRadius(radiusPx, radiusPx)
@@ -48,10 +74,11 @@ fun Modifier.godCard(
     val notch = Dimens.notchLength.toPx()
     val notchStroke = Dimens.notchStroke.toPx()
     onDrawBehind {
+        val borderColor = border.value
         drawRoundRect(color = fill, cornerRadius = outer)
-        drawRoundRect(color = border, cornerRadius = outer, style = outerStroke)
+        drawRoundRect(color = borderColor, cornerRadius = outer, style = outerStroke)
         drawRoundRect(
-            color = border.copy(alpha = 0.55f),
+            color = borderColor.copy(alpha = 0.55f),
             topLeft = Offset(inset, inset),
             size = Size(size.width - inset * 2f, size.height - inset * 2f),
             cornerRadius = CornerRadius((radiusPx - inset).coerceAtLeast(0f)),
@@ -59,10 +86,10 @@ fun Modifier.godCard(
         )
         val w = size.width
         val h = size.height
-        drawLine(border, Offset(0f, notch), Offset(notch, 0f), notchStroke)
-        drawLine(border, Offset(w - notch, 0f), Offset(w, notch), notchStroke)
-        drawLine(border, Offset(w, h - notch), Offset(w - notch, h), notchStroke)
-        drawLine(border, Offset(notch, h), Offset(0f, h - notch), notchStroke)
+        drawLine(borderColor, Offset(0f, notch), Offset(notch, 0f), notchStroke)
+        drawLine(borderColor, Offset(w - notch, 0f), Offset(w, notch), notchStroke)
+        drawLine(borderColor, Offset(w, h - notch), Offset(w - notch, h), notchStroke)
+        drawLine(borderColor, Offset(notch, h), Offset(0f, h - notch), notchStroke)
     }
 }
 
@@ -74,6 +101,9 @@ fun GodCard(
     trailing: (@Composable () -> Unit)? = null,
     containerColor: Color = ParchmentSurface,
     borderColor: Color = GoldAccent,
+    // BP-08 O7: pass an animated border here and it is sampled in the draw
+    // phase instead of recomposing this card on every animation frame.
+    borderColorState: State<Color>? = null,
     contentPadding: PaddingValues = PaddingValues(Dimens.cardPadding),
     onClick: (() -> Unit)? = null,
     onClickLabel: String? = null,
@@ -84,7 +114,11 @@ fun GodCard(
     contentDescription: String? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val base = modifier.godCard(fill = containerColor, border = borderColor)
+    val base = if (borderColorState != null) {
+        modifier.godCardState(fill = containerColor, border = borderColorState)
+    } else {
+        modifier.godCard(fill = containerColor, border = borderColor)
+    }
     val interaction = when {
         onToggle != null -> Modifier.toggleable(
             value = toggleValue,

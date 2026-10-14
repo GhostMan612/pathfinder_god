@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // As Above, So Below. As Within, So Without.
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
@@ -7,6 +7,7 @@ package com.pathfindergod.spoke.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.pathfindergod.spoke.data.combat.CombatSceneProducer
 import com.pathfindergod.spoke.data.local.EncounterEntity
 import com.pathfindergod.spoke.data.network.EncounterMonster
 import com.pathfindergod.spoke.data.repository.EncounterRepository
@@ -46,6 +47,9 @@ data class CombatUiState(
 
 class CombatViewModel(
     private val encounters: EncounterRepository,
+    // BP-08: publishes the live scene to the Hub. Nullable so existing
+    // construction sites and unit tests keep working unchanged.
+    private val sceneProducer: CombatSceneProducer? = null,
 ) : ViewModel() {
     private val json = Json { ignoreUnknownKeys = true }
     private val _state = MutableStateFlow(CombatUiState())
@@ -53,6 +57,16 @@ class CombatViewModel(
 
     private val _vault = MutableStateFlow(emptyList<EncounterEntity>())
     val vault: StateFlow<List<EncounterEntity>> = _vault.asStateFlow()
+
+    /**
+     * Single funnel for every combat mutation. Pushing here instead of at each
+     * of the ~10 `_state.value = ...` call sites means the producer cannot
+     * drift out of sync when a new mutation is added later.
+     */
+    private fun publish(next: CombatUiState) {
+        _state.value = next
+        sceneProducer?.onStateChanged(next)
+    }
 
     init {
         viewModelScope.launch {
@@ -74,7 +88,7 @@ class CombatViewModel(
         val index = activeId?.let { id -> sorted.indexOfFirst { it.id == id } }
             ?.takeIf { it >= 0 }
             ?: current.activeIndex.coerceIn(0, (sorted.size - 1).coerceAtLeast(0))
-        _state.value = current.copy(combatants = sorted, activeIndex = index)
+        publish(current.copy(combatants = sorted, activeIndex = index))
     }
 
     fun removeCombatant(id: String) {
@@ -89,11 +103,11 @@ class CombatViewModel(
             remaining.indexOfFirst { it.id == activeId }.takeIf { it >= 0 }
                 ?: current.activeIndex.coerceIn(0, (remaining.size - 1).coerceAtLeast(0))
         }
-        _state.value = current.copy(combatants = remaining, activeIndex = index)
+        publish(current.copy(combatants = remaining, activeIndex = index))
     }
 
     fun updateHp(id: String, delta: Int) {
-        _state.value = _state.value.copy(
+        publish(_state.value.copy(
             combatants = _state.value.combatants.map {
                 if (it.id == id) {
                     it.copy(currentHp = (it.currentHp + delta).coerceIn(0, it.maxHp))
@@ -101,11 +115,11 @@ class CombatViewModel(
                     it
                 }
             },
-        )
+        ))
     }
 
     fun addCondition(id: String, condition: CombatCondition) {
-        _state.value = _state.value.copy(
+        publish(_state.value.copy(
             combatants = _state.value.combatants.map {
                 if (it.id == id) {
                     it.copy(conditions = it.conditions + condition)
@@ -113,11 +127,11 @@ class CombatViewModel(
                     it
                 }
             },
-        )
+        ))
     }
 
     fun removeCondition(id: String, name: String) {
-        _state.value = _state.value.copy(
+        publish(_state.value.copy(
             combatants = _state.value.combatants.map {
                 if (it.id == id) {
                     it.copy(conditions = it.conditions.filterNot { c -> c.name == name })
@@ -125,7 +139,7 @@ class CombatViewModel(
                     it
                 }
             },
-        )
+        ))
     }
 
     fun nextTurn(): String {
@@ -141,12 +155,12 @@ class CombatViewModel(
         }
         val nextIndex = current.activeIndex + 1
         val wrapped = nextIndex >= ticked.size
-        _state.value = current.copy(
+        publish(current.copy(
             combatants = ticked,
             activeIndex = if (wrapped) 0 else nextIndex,
             currentRound = if (wrapped) current.currentRound + 1 else current.currentRound,
             lastNotes = notes.toString().trim(),
-        )
+        ))
         return _state.value.lastNotes
     }
 
@@ -185,7 +199,7 @@ class CombatViewModel(
     }
 
     fun clearEncounter() {
-        _state.value = CombatUiState()
+        publish(CombatUiState())
     }
 
     fun loadEncounter(id: String) {
@@ -219,12 +233,12 @@ class CombatViewModel(
                     )
                 }
             }.sortedByDescending { it.initiative }
-            _state.value = CombatUiState(
+            publish(CombatUiState(
                 combatants = ladder,
                 activeIndex = 0,
                 currentRound = 1,
                 lastNotes = "",
-            )
+            ))
         }
     }
 }

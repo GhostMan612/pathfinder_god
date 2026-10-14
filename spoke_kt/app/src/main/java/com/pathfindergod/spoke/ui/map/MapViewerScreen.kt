@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // As Above, So Below. As Within, So Without.
 // The Future Dictates the Past and the Past is Always Present.
 // ============================================================
@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Icon
@@ -42,15 +43,17 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Velocity
 import com.pathfindergod.spoke.R
 import com.pathfindergod.spoke.service.ExportService
@@ -110,7 +113,6 @@ private fun MapCanvas(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
-    val view = LocalView.current
     val scope = rememberCoroutineScope()
     var gmLayer by rememberSaveable { mutableStateOf(true) }
     var scale by remember { mutableFloatStateOf(1f) }
@@ -119,21 +121,29 @@ private fun MapCanvas(
     val zoomOutLabel = stringResource(R.string.a11y_map_zoom_out)
     val zoomResetLabel = stringResource(R.string.a11y_map_zoom_reset)
     val zoomLabel = stringResource(R.string.a11y_map_zoom, (scale * 100f).toInt())
+    // BP-08: view.announceForAccessibility() is deprecated (and a no-op under
+    // several TalkBack versions). Announcements now go through a live region:
+    // changing `announcement` marks it LiveRegionMode.Polite, which makes
+    // accessibility services read the new text without needing the View API.
+    var announcement by remember { mutableStateOf("") }
+    val announce: (Float) -> Unit = { newScale ->
+        announcement = zoomPercentAnnouncement(context, newScale)
+    }
     val zoomActions = listOf(
         CustomAccessibilityAction(zoomInLabel) {
             scale = (scale * 1.5f).coerceIn(MIN_ZOOM, MAX_ZOOM)
-            view.announceForAccessibility(zoomPercentAnnouncement(context, scale))
+            announce(scale)
             true
         },
         CustomAccessibilityAction(zoomOutLabel) {
             scale = (scale / 1.5f).coerceIn(MIN_ZOOM, MAX_ZOOM)
-            view.announceForAccessibility(zoomPercentAnnouncement(context, scale))
+            announce(scale)
             true
         },
         CustomAccessibilityAction(zoomResetLabel) {
             scale = 1f
             offset = Offset.Zero
-            view.announceForAccessibility(zoomPercentAnnouncement(context, scale))
+            announce(scale)
             true
         },
     )
@@ -261,6 +271,17 @@ private fun MapCanvas(
                     GodStatusText(text = stringResource(R.string.map_unresolved))
                 }
             }
+        }
+        // Replaces view.announceForAccessibility(). The zero height keeps it out
+        // of the layout visually; the live region is what makes TalkBack speak
+        // the new text when `announcement` changes.
+        if (announcement.isNotEmpty()) {
+            Text(
+                text = announcement,
+                modifier = Modifier
+                    .size(0.dp)
+                    .semantics { liveRegion = LiveRegionMode.Polite },
+            )
         }
     }
 }

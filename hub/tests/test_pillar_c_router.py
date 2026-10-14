@@ -126,33 +126,39 @@ def test_never_abstains_on_a_narrative_turn(gate):
     assert not gate._should_abstain([], "I attack the goblin.", False)
 
 
-def test_abstention_clause_is_explicit(gate):
-    """The clause must name the behaviour and forbid invented numbers."""
-    clause = LLMOrchestrator._abstention_clause(False, True)
-    assert "I don't have that rule in my books" in clause
-    assert "Do NOT invent" in clause
-    # And it must NOT be attached when we are confident.
-    assert LLMOrchestrator._abstention_clause(True, True) == ""
-    assert LLMOrchestrator._abstention_clause(False, False) == ""
+def test_refusal_text_forbids_invented_numbers():
+    """The refusal is the entire contract - no clause is injected anywhere.
+
+    The prompt-based backstop is gone by design: BP-08 replaced "ask the model
+    nicely" with a deterministic refusal, so there is nothing left to attach.
+    """
+    from app.agents.rules_lawyer import ABSTENTION_TEXT
+
+    assert "I don't have that rule in my books" in ABSTENTION_TEXT
+    assert not hasattr(LLMOrchestrator, "_abstention_clause")
 
 
 def test_abstention_clause_reaches_the_streaming_lawyer(monkeypatch):
-    """Pillar A must hold on the streaming path, not just buffered."""
+    """Pillar A on the streaming path: deterministic refusal, no LLM call.
+
+    Since the zero-LLM short-circuit, abstain=True never reaches Ollama at all,
+    so there is nothing to capture in a system prompt - the refusal IS the
+    output. test_abstention_zero_llm.py pins the call-count guarantee; this
+    test pins the streaming *surface* the orchestrator consumes.
+    """
     import asyncio
 
-    from app.agents.rules_lawyer import RulesLawyerAgent
+    from app.agents.rules_lawyer import ABSTENTION_TEXT, RulesLawyerAgent
     from app.llm.ollama_client import OllamaClient
 
-    captured: dict = {}
+    def explode(*a, **k):
+        raise AssertionError("abstain=True must not call the model")
 
-    async def fake_stream(self, **kwargs):
-        captured["system"] = kwargs.get("system", "")
-        yield "I don't have that rule in my books."
-
-    monkeypatch.setattr(OllamaClient, "stream", fake_stream)
+    monkeypatch.setattr(OllamaClient, "stream", explode)
+    monkeypatch.setattr(OllamaClient, "generate", explode)
 
     agent = RulesLawyerAgent.__new__(RulesLawyerAgent)  # no __init__ side effects
-    agent.ollama = OllamaClient("http://127.0.0.1:1")  # never contacted; stream patched
+    agent.ollama = OllamaClient("http://127.0.0.1:1")  # never contacted
     agent.settings = type("S", (), {"model_for": staticmethod(lambda _k: "stub")})()
 
     async def run():
@@ -162,11 +168,41 @@ def test_abstention_clause_reaches_the_streaming_lawyer(monkeypatch):
             context=[],
             abstain=True,
         )
-        out = [c async for c in gen]
-        return out, cites
+        return [c async for c in gen], cites
 
     chunks, citations = asyncio.run(run())
-    assert chunks == ["I don't have that rule in my books."]
+    assert chunks == [ABSTENTION_TEXT]
     assert citations == []  # zero fabricated citations
-    assert "NO RULE FOUND" in captured["system"]
-    assert "Do NOT invent" in captured["system"]
+
+
+def test_thin_context_is_refused_without_reaching_the_model(monkeypatch):
+    """Thin context must short-circuit, not prompt the model to cooperate.
+
+    BP-08 tightened this from "carry an instruction and hope": empty retrieval
+    now returns the deterministic refusal and never calls Ollama, so the model
+    cannot paraphrase, embellish, or ignore the instruction.
+    """
+    import asyncio
+
+    from app.agents.rules_lawyer import ABSTENTION_TEXT, RulesLawyerAgent
+    from app.llm.ollama_client import OllamaClient
+
+    async def explode(*a, **k):
+        raise AssertionError("thin context must not reach the model")
+        yield ""  # pragma: no cover - makes this an async generator
+
+    monkeypatch.setattr(OllamaClient, "stream", explode)
+
+    agent = RulesLawyerAgent.__new__(RulesLawyerAgent)
+    agent.ollama = OllamaClient("http://127.0.0.1:1")
+    agent.settings = type("S", (), {"model_for": staticmethod(lambda _k: "stub")})()
+
+    async def run():
+        gen, cites = await agent.stream_adjudication(
+            query="something borderline", context=[], abstain=False
+        )
+        return [c async for c in gen], cites
+
+    chunks, citations = asyncio.run(run())
+    assert chunks == [ABSTENTION_TEXT]
+    assert citations == []

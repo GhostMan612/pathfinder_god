@@ -206,6 +206,17 @@ class ValidationResult:
     rule_citation: str
 
 
+ABSTENTION_TEXT = "I don't have that rule in my books."
+
+_ABSTENTION_INSTRUCTION = (
+    "\n\nCRITICAL - NO RULE FOUND FOR THIS. Your excerpts do not contain "
+    "the rule being asked about. Do NOT invent a number, DC, bonus, or "
+    "rule name, and do NOT guess from general knowledge. Say plainly: "
+    "\"I don't have that rule in my books.\" Then offer to adjudicate it "
+    "as a house rule and state that it is your ruling, not a citation."
+)
+
+
 @dataclass
 class Citation:
     """One deterministic source tag for an adjudication.
@@ -380,17 +391,28 @@ class RulesLawyerAgent:
             if hit.get("name")
         ]
 
+        # Pillar A hard stop. When there is nothing to ground an answer we do
+        # NOT call the model at all: relying on a 3B model to obey a "don't
+        # invent a number" instruction is precisely how the "DC of 20" and the
+        # fabricated Waffle Iron DC got into the game in the first place.
+        #
+        # Both conditions trigger it: an explicit `abstain` from the caller's
+        # calibrated gate, OR retrieval that produced no citable row. The second
+        # matters because it makes the guarantee hold for every caller instead
+        # of depending on each one having run the gate first.
+        if abstain or not citations:
+            async def _refuse() -> AsyncGenerator[str, None]:
+                yield ABSTENTION_TEXT
+
+            return _refuse(), []
+
         async def _generate() -> AsyncGenerator[str, None]:
+            # Reached only when `citations` is non-empty, i.e. there is at least
+            # one citable row. The previous shape also appended
+            # _ABSTENTION_INSTRUCTION when `not context`, but that branch became
+            # unreachable once empty context short-circuited above: reaching here
+            # requires a citable row, which requires a non-empty context.
             system = RULES_LAWYER_SYSTEM
-            if abstain:
-                system += (
-                    "\n\nCRITICAL - NO RULE FOUND FOR THIS. Your excerpts do not "
-                    "contain the rule being asked about. Do NOT invent a number, "
-                    "DC, bonus, or rule name, and do NOT guess from general "
-                    "knowledge. Say plainly: \"I don't have that rule in my "
-                    "books.\" Then offer to adjudicate it as a house rule and "
-                    "state that it is your ruling, not a citation."
-                )
             async for chunk in self.ollama.stream(
                 prompt=query,
                 system=system,
@@ -400,6 +422,27 @@ class RulesLawyerAgent:
                     yield chunk
 
         return _generate(), citations
+
+    async def adjudicate(
+        self,
+        query: str,
+        edition: str = "2e",
+        context: list[dict] | None = None,
+        abstain: bool = False,
+    ) -> tuple[str, list[Citation]]:
+        """Buffered counterpart of stream_adjudication.
+
+        Returns (answer, citations). Same zero-LLM guarantee: with abstain=True
+        (or with no usable context) this returns the deterministic refusal
+        without touching Ollama.
+        """
+        stream, citations = await self.stream_adjudication(
+            query=query, edition=edition, context=context, abstain=abstain
+        )
+        parts: list[str] = []
+        async for chunk in stream:
+            parts.append(chunk)
+        return "".join(parts), citations
 
 
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

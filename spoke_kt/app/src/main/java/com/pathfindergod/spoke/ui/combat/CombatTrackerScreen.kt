@@ -49,6 +49,7 @@ import com.pathfindergod.spoke.R
 import com.pathfindergod.spoke.data.local.AppDatabase
 import com.pathfindergod.spoke.data.local.AppPreferences
 import com.pathfindergod.spoke.service.AudioService
+import com.pathfindergod.spoke.data.combat.CombatSceneProducer
 import com.pathfindergod.spoke.data.network.HubApiFactory
 import com.pathfindergod.spoke.data.repository.EncounterRepository
 import com.pathfindergod.spoke.ui.designsystem.Dimens
@@ -77,10 +78,11 @@ import java.util.UUID
 
 private class CombatVmFactory(
     private val repository: EncounterRepository,
+    private val sceneProducer: CombatSceneProducer,
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T =
-        CombatViewModel(repository) as T
+        CombatViewModel(repository, sceneProducer) as T
 }
 
 @Composable
@@ -93,7 +95,13 @@ internal fun rememberCombatViewModel(): CombatViewModel {
             HubApiFactory.get(prefs.restUrl()),
         )
     }
-    return viewModel(factory = remember { CombatVmFactory(repository) })
+    // BP-08: the tracker is the PRODUCER for POST /combat/scene. The lambda reads
+    // prefs on every dispatch so changing the Hub address takes effect without
+    // recreating the ViewModel.
+    val sceneProducer = remember {
+        CombatSceneProducer(baseUrlProvider = { prefs.restUrl() })
+    }
+    return viewModel(factory = remember(repository, sceneProducer) { CombatVmFactory(repository, sceneProducer) })
 }
 
 @Composable

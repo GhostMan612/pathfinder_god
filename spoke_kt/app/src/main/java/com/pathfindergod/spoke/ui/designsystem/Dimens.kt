@@ -41,4 +41,11 @@ object Dimens {
     val glassStroke = 1.dp
     val glassScrim = 0.10f
     val glassSheen = 0.06f
+
+    // BP-08 O8: animation travel distances were raw pixels (-12f, -44f, -260f),
+    // so the same shake/floater/throw was ~3x larger on a xxxhdpi device than
+    // on an mdpi one. Tokens are converted with dp.toPx() at the call site.
+    val combatShakeTravel = 12.dp
+    val damageFloaterTravel = 44.dp
+    val diceDropTravel = 260.dp
 }

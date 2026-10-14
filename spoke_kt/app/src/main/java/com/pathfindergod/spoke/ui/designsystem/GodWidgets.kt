@@ -16,12 +16,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -94,9 +96,13 @@ fun GodProgressBar(
     height: Dp = Dimens.progressHeight,
     label: String? = null,
     testTag: String? = null,
+    ghostFractionState: State<Float>? = null,
 ) {
     val clamped = fraction.coerceIn(0f, 1f)
-    val ghost = ghostFraction.coerceIn(0f, 1f)
+    // BP-08 O7: when the ghost bar is animated, its value is read inside
+    // drawBehind (draw phase) instead of here. Reading an animated State in
+    // composition recomposes this subtree on every animation frame.
+    val staticGhost = ghostFraction.coerceIn(0f, 1f)
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -111,17 +117,20 @@ fun GodProgressBar(
             modifier = Modifier
                 .fillMaxSize()
                 .clip(CircleShape)
-                .drawBehind { drawRect(trackColor) },
+                .drawBehind {
+                    drawRect(trackColor)
+                    // Drawn as a rect rather than a fillMaxWidth(ghost) child:
+                    // a width-driven child is a LAYOUT input, so it forced the
+                    // animated value to be read in composition every frame.
+                    val g = (ghostFractionState?.value ?: staticGhost).coerceIn(0f, 1f)
+                    if (g > clamped) {
+                        drawRect(
+                            color = barColor.copy(alpha = 0.45f),
+                            size = Size(size.width * g, size.height),
+                        )
+                    }
+                },
         )
-        if (ghost > clamped) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(ghost)
-                    .fillMaxHeight()
-                    .clip(CircleShape)
-                    .drawBehind { drawRect(barColor.copy(alpha = 0.45f)) },
-            )
-        }
         Box(
             modifier = Modifier
                 .fillMaxWidth(clamped)
