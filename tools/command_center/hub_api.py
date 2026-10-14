@@ -93,3 +93,29 @@ def stream_events(query: str, edition: str = "both", campaign_id: int = 1) -> It
                             "campaign_id": campaign_id}))
         for raw in ws:
             yield json.loads(raw)
+
+
+def asr_stream_url() -> str:
+    """WebSocket URL for the streaming ASR endpoint."""
+    url = HUB_URL
+    if url.startswith("https://"):
+        return url.replace("https://", "wss://", 1) + "/voice/asr-stream"
+    return url.replace("http://", "ws://", 1) + "/voice/asr-stream"
+
+
+def asr_headers() -> dict:
+    """Auth header for the ASR socket, when the Hub has a key configured."""
+    key = os.environ.get("PFGOD_API_KEY", "").strip()
+    return {"X-API-Key": key} if key else {}
+
+
+def open_asr_stream():
+    """Open /voice/asr-stream. Raises if the Hub is unreachable.
+
+    Separated from the send loop so the caller can fall back to the
+    non-streaming /voice/transcribe endpoint when this fails, which is the
+    normal case if the Hub predates the streaming endpoint or the port is busy.
+    """
+    from websockets.sync.client import connect
+
+    return connect(asr_stream_url(), additional_headers=asr_headers(), close_timeout=3)

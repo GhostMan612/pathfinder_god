@@ -33,7 +33,21 @@ def _repo_root() -> Path:
 
 REPO_ROOT = _repo_root()
 HUB_DIR = REPO_ROOT / "hub"
-VENV_PYTHON = Path(r"C:\venv-hub\venv\Scripts\python.exe")
+# Hardcoding the interpreter path made this unusable on any machine that is not
+# the original laptop. Override with PFGOD_VENV_PYTHON; otherwise prefer a venv
+# inside the repo, and only fall back to the historical absolute path.
+_VENV_ENV = os.environ.get("PFGOD_VENV_PYTHON", "").strip()
+if _VENV_ENV:
+    VENV_PYTHON = Path(_VENV_ENV)
+else:
+    _local_venv = REPO_ROOT / "venv" / "Scripts" / "python.exe"
+    _hub_venv = REPO_ROOT / ".venv" / "Scripts" / "python.exe"
+    if _local_venv.exists():
+        VENV_PYTHON = _local_venv
+    elif _hub_venv.exists():
+        VENV_PYTHON = _hub_venv
+    else:
+        VENV_PYTHON = Path(r"C:\venv-hub\venv\Scripts\python.exe")
 CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 

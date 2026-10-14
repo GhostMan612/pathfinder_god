@@ -3,21 +3,24 @@
 # The Future Dictates the Past and the Past is Always Present.
 # ============================================================
 
+import os
 import sys
 from pathlib import Path
 
-SPEC_DIR = Path.cwd()
+# PyInstaller injects SPECPATH; Path.cwd() only happens to be right and breaks
+# if the spec is ever invoked from elsewhere.
+SPEC_DIR = Path(globals().get("SPECPATH", Path.cwd()))
 REPO_ROOT = SPEC_DIR.parents[2]
 HUB_DIR = REPO_ROOT / "hub"
-VENV_PYTHON = Path(r"C:\venv-hub\venv\Scripts\python.exe")
+VENV_PYTHON = Path(os.environ.get("PFGOD_VENV_PYTHON", r"C:\venv-hub\venv\Scripts\python.exe"))
 
 block_cipher = None
 
 # Prepare datas list (filter None)
+# NOTE: chat_history.json is deliberately NOT bundled. main.py reads it from
+# services.REPO_ROOT so history survives a restart; a copy inside _MEIPASS is a
+# temp dir that would never be read and only goes stale.
 datas_list = []
-chat_hist = SPEC_DIR / "chat_history.json"
-if chat_hist.exists():
-    datas_list.append((str(chat_hist), "."))
 sounds_dir = SPEC_DIR / "sounds"
 if sounds_dir.exists():
     datas_list.append((str(sounds_dir), "sounds"))
@@ -35,6 +38,10 @@ a = Analysis(
         'requests',
         'websockets',
         'websockets.sync.client',
+        # Optional at import time (main.py guards it), but without it the
+        # bundled exe's Mic button is permanently dead.
+        'sounddevice',
+        '_sounddevice_data',
         'urllib3',
         'certifi',
         'charset_normalizer',

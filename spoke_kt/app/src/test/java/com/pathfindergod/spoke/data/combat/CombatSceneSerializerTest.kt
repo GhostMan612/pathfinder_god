@@ -164,4 +164,130 @@ class CombatSceneSerializerTest {
 
         assertEquals(2, CombatSceneSerializer.combatants(scene).size)
     }
+
+    // --- overflow behaviour -------------------------------------------------
+    // The Hub bounds `scene` at 4000 chars. An earlier version satisfied that
+    // with `serialized.take(3500)`, which sliced the document mid-bracket and
+    // handed the GM unparseable JSON on a large encounter. These tests pin
+    // structure-preserving overflow instead.
+
+    private fun crowd(count: Int, activeIndex: Int): CombatUiState {
+        val combatants = (0 until count).map { i ->
+            Combatant(
+                id = "npc-$i",
+                name = "Generic Adversary $i",
+                isPc = i == 0,
+                // Descending initiative, so index order == initiative order.
+                initiative = count - i,
+                currentHp = 100,
+                maxHp = 100,
+                ac = 15,
+                conditions = listOf(CombatCondition("prone")),
+            )
+        }
+        return CombatUiState(
+            combatants = combatants,
+            activeIndex = activeIndex,
+            currentRound = 12,
+        )
+    }
+
+    @Test
+    fun `sixty combatants stay within budget and stay valid json`() {
+        val scene = CombatSceneSerializer.toSceneJson(crowd(60, activeIndex = 0), campaignId = 1)
+
+        assertTrue(
+            "scene must fit the Hub bound",
+            scene.length <= CombatSceneSerializer.MAX_SCENE_CHARS,
+        )
+
+        // The real regression: a sliced document throws here rather than
+        // producing a shorter string.
+        val root = CombatSceneSerializer.parse(scene)
+        assertEquals(12, root["round"]!!.jsonPrimitive.int)
+        assertEquals(60, CombatSceneSerializer.totalCount(scene))
+    }
+
+    @Test
+    fun `sixty combatants reports the accurate omitted count`() {
+        val scene = CombatSceneSerializer.toSceneJson(crowd(60, activeIndex = 0), campaignId = 1)
+
+        val kept = CombatSceneSerializer.combatants(scene).size
+        val omitted = CombatSceneSerializer.omittedCount(scene)
+
+        assertTrue("must have trimmed something", omitted > 0)
+        assertEquals(60, kept + omitted)
+    }
+
+    @Test
+    fun `active combatant survives even at the end of a sixty combatant list`() {
+        // Active index 59 is the *lowest* initiative combatant, so it sits at the
+        // very tail of priority order. It must still be present, because the GM
+        // needs the turn order to make sense.
+        val big = crowd(60, activeIndex = 59)
+        val scene = CombatSceneSerializer.toSceneJson(big, campaignId = 1)
+
+        val root = CombatSceneSerializer.parse(scene)
+        assertEquals("npc-59", root["active_combatant"]!!.jsonPrimitive.content)
+
+        val ids = CombatSceneSerializer.combatants(scene).map {
+            (it as JsonObject)["id"]!!.jsonPrimitive.content
+        }
+        assertTrue(
+            "the active combatant must never be trimmed away",
+            ids.contains("npc-59"),
+        )
+    }
+
+    @Test
+    fun `trimming drops from the tail and keeps the highest initiative`() {
+        val scene = CombatSceneSerializer.toSceneJson(crowd(60, activeIndex = 0), campaignId = 1)
+
+        val ids = CombatSceneSerializer.combatants(scene).map {
+            (it as JsonObject)["id"]!!.jsonPrimitive.content
+        }
+        // npc-0 is active and npc-1 has the next highest initiative.
+        assertTrue(ids.contains("npc-0"))
+        assertTrue(ids.contains("npc-1"))
+        // npc-59 is the lowest initiative, so it is the first casualty.
+        assertFalse(ids.contains("npc-59"))
+    }
+
+    @Test
+    fun `an enormous single combatant is bounded by field caps not by slicing`() {
+        val absurd = CombatUiState(
+            combatants = listOf(
+                Combatant(
+                    id = "boss",
+                    name = "N".repeat(5_000),
+                    currentHp = 999_999,
+                    maxHp = 999_999,
+                    ac = 30,
+                    conditions = (1..200).map { CombatCondition("condition-number-$it") },
+                ),
+            ),
+            activeIndex = 0,
+        )
+
+        val scene = CombatSceneSerializer.toSceneJson(absurd, campaignId = 1)
+
+        assertTrue(scene.length <= CombatSceneSerializer.MAX_SCENE_CHARS)
+        // Still parses, and the fields were capped rather than cut mid-token.
+        val root = CombatSceneSerializer.parse(scene)
+        val kept = root["combatants"] as JsonArray
+        assertEquals(1, kept.size)
+        val name = (kept[0] as JsonObject)["name"]!!.jsonPrimitive.content
+        assertEquals(CombatSceneSerializer.MAX_NAME_CHARS, name.length)
+        val conditions = (kept[0] as JsonObject)["conditions"] as JsonArray
+        assertEquals(CombatSceneSerializer.MAX_CONDITIONS, conditions.size)
+    }
+
+    @Test
+    fun `a scene that fits is not trimmed at all`() {
+        val scene = CombatSceneSerializer.toSceneJson(state, campaignId = 1)
+
+        assertEquals(0, CombatSceneSerializer.omittedCount(scene))
+        assertEquals(2, CombatSceneSerializer.totalCount(scene))
+        assertEquals(2, CombatSceneSerializer.combatants(scene).size)
+    }
 }

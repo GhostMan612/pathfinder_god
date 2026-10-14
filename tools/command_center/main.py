@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import random
 import re
@@ -69,7 +70,10 @@ QTextBrowser {{ background: {PALETTE['panel']}; border: 1px solid {PALETTE['gold
 QStatusBar {{ background: {PALETTE['panel']}; color: {PALETTE['muted']}; }}
 """
 
-CHAT_HISTORY_FILE = Path(__file__).parent / "chat_history.json"
+# Path(__file__).parent is PyInstaller's temp _MEIPASS dir when frozen, so the
+# chat history vanished on every restart of the exe. services already resolves
+# the real repo root (and honours PFGOD_REPO_ROOT); reuse it.
+CHAT_HISTORY_FILE = services.REPO_ROOT / "tools" / "command_center" / "chat_history.json"
 
 
 class CallSignal(QObject):
@@ -535,6 +539,7 @@ class GuideTab(QWidget):
         self._vsig = self._VoiceSignal()
         self._vsig.transcript.connect(self._on_voice_transcript)
         self._vsig.fail.connect(self._on_voice_fail)
+        self._vsig.partial.connect(self._on_voice_partial)
         # Streaming TTS: sentence-sized chunks of the streamed reply are spoken
         # as they arrive, not after the entire answer finishes.
         self._tts_queue: queue.Queue[str | None] = queue.Queue()
@@ -549,6 +554,7 @@ class GuideTab(QWidget):
     class _VoiceSignal(QObject):
         transcript = Signal(str)
         fail = Signal(str)
+        partial = Signal(str)
 
     def _send(self):
         if self._streaming:
@@ -688,19 +694,15 @@ class GuideTab(QWidget):
             try:
                 sr = 16000
                 dur = 4
-                rec = _sd.rec(int(sr * dur), samplerate=sr, channels=1, dtype="int16")
-                _sd.wait()
-                buf = BytesIO()
-                with wave.open(buf, "wb") as w:
-                    w.setnchannels(1)
-                    w.setsampwidth(2)
-                    w.setframerate(sr)
-                    w.writeframes(rec.tobytes())
-                files = {"file": ("mic.wav", buf.getvalue(), "audio/wav")}
-                r = requests.post(
-                    hub_api.HUB_URL + "/voice/transcribe", files=files, timeout=120)
-                r.raise_for_status()
-                text = (r.json().get("text") or "").strip()
+                # Try the streaming endpoint first: partials land in the input
+                # field while the player is still talking, and the Hub's
+                # LocalAgreement-2 stabiliser stops mid-sentence rewrites.
+                try:
+                    text = self._record_streaming(sr, dur)
+                except Exception:
+                    # No socket, or the Hub is older than /voice/asr-stream.
+                    # Fall back to the single-shot endpoint.
+                    text = self._record_oneshot(sr, dur)
                 if text:
                     self._vsig.transcript.emit(text)
                 else:
@@ -709,6 +711,90 @@ class GuideTab(QWidget):
                 self._vsig.fail.emit(str(e))
 
         threading.Thread(target=job, daemon=True).start()
+
+    def _record_streaming(self, sr: int, dur: int) -> str:
+        """Stream PCM over /voice/asr-stream, emitting partials live.
+
+        Returns the final transcript. Raises if the socket cannot be used, so
+        the caller can fall back to /voice/transcribe.
+        """
+        blocks: "queue.Queue[bytes]" = queue.Queue()
+        finished = threading.Event()
+        tail: list[str] = []
+
+        def callback(indata, frames, time_info, status):  # noqa: ARG001
+            blocks.put(bytes(indata))
+
+        ws = hub_api.open_asr_stream()
+        try:
+            # Blocks capture runs on its own thread so the socket read loop
+            # below can keep draining partials while audio is still arriving.
+            def capture():
+                try:
+                    with _sd.InputStream(
+                        samplerate=sr, channels=1, dtype="int16",
+                        blocksize=1600, callback=callback,
+                    ):
+                        finished.wait(dur)
+                finally:
+                    finished.set()
+
+            cap = threading.Thread(target=capture, daemon=True)
+            cap.start()
+
+            while True:
+                try:
+                    block = blocks.get(timeout=0.05)
+                except queue.Empty:
+                    if finished.is_set():
+                        break
+                    continue
+                ws.send(json.dumps({
+                    "type": "pcm",
+                    "data": base64.b64encode(block).decode("ascii"),
+                }))
+
+            ws.send(json.dumps({"type": "stop"}))
+            while True:
+                raw = ws.recv(timeout=30)
+                if raw is None:
+                    break
+                msg = json.loads(raw)
+                kind = msg.get("type")
+                if kind == "partial":
+                    live = (msg.get("text") or "").strip()
+                    if live:
+                        self._vsig.partial.emit(live)
+                elif kind == "final":
+                    tail = [(msg.get("text") or "").strip()]
+                    break
+            return tail[0] if tail else ""
+        finally:
+            try:
+                ws.close()
+            except Exception:
+                pass
+
+    def _record_oneshot(self, sr: int, dur: int) -> str:
+        """Original path: record then POST /voice/transcribe in one shot."""
+        rec = _sd.rec(int(sr * dur), samplerate=sr, channels=1, dtype="int16")
+        _sd.wait()
+        buf = BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(sr)
+            w.writeframes(rec.tobytes())
+        files = {"file": ("mic.wav", buf.getvalue(), "audio/wav")}
+        r = requests.post(
+            hub_api.HUB_URL + "/voice/transcribe", files=files, timeout=120)
+        r.raise_for_status()
+        return (r.json().get("text") or "").strip()
+
+    def _on_voice_partial(self, text):
+        """Show the live hypothesis without committing it to a send."""
+        self._input.setText(text)
+        self._input.setCursorPosition(len(text))
 
     def _on_voice_transcript(self, text):
         self._input.setText(text)

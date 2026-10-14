@@ -93,6 +93,91 @@ _MAX_PCM_BYTES = 16000 * 2 * 60  # 60 s of 16 kHz 16-bit mono
 _MAX_FRAME_BYTES = 512 * 1024  # one base64 PCM chunk on the wire
 _IDLE_TIMEOUT_S = 120
 
+# Rolling decode window for /voice/asr-stream. The buffer used to be cleared
+# after every partial emit, so each Whisper pass only ever saw the newest ~1.5 s
+# and words straddling a boundary were cut in half. Retaining a sliding window
+# means consecutive passes overlap and agree on the same words, which is what
+# makes LocalAgreement-2 meaningful. Deliberately far below _MAX_PCM_BYTES so
+# the hard ceiling stays a backstop rather than the working size.
+_ROLLING_WINDOW_BYTES = 16000 * 2 * 12  # 12 s of 16 kHz 16-bit mono
+
+
+def _normalize_word(word: str) -> str:
+    """Case/punctuation-insensitive key for comparing hypotheses.
+
+    Whisper re-punctuates and re-cases the same words between passes ("okay" vs
+    "Okay", "goblin." vs "goblin"). Comparing raw strings would make agreement
+    almost never fire and leave every word permanently unconfirmed.
+    """
+    stripped = "".join(ch for ch in word.lower() if ch.isalnum())
+    return stripped
+
+
+def common_prefix_len(left: list[str], right: list[str]) -> int:
+    """Length of the longest common prefix under normalized comparison."""
+    n = min(len(left), len(right))
+    i = 0
+    while i < n and _normalize_word(left[i]) == _normalize_word(right[i]):
+        i += 1
+    return i
+
+
+class LocalAgreementState:
+    """LocalAgreement-2 hypothesis stabiliser.
+
+    Whisper re-transcribes the whole window on every pass, and its tail is
+    unstable until it has seen enough future audio to be sure ("the waffle" ->
+    "the waffle iron"). LocalAgreement-2 commits only the prefix on which two
+    *consecutive* passes agree, leaving the tail free to keep changing. That
+    keeps already-spoken words from being revised mid-sentence while still
+    letting the final words settle.
+
+    Pure and synchronous by design so it can be unit tested with no model,
+    no audio and no socket.
+    """
+
+    def __init__(self) -> None:
+        self._confirmed: list[str] = []
+        self._previous: list[str] | None = None
+
+    @property
+    def confirmed(self) -> list[str]:
+        return list(self._confirmed)
+
+    @property
+    def confirmed_count(self) -> int:
+        return len(self._confirmed)
+
+    def reset(self) -> None:
+        self._confirmed = []
+        self._previous = None
+
+    def update(self, transcript: str) -> tuple[str, str, str]:
+        """Fold one Whisper pass in.
+
+        Returns (text, confirmed_text, unstable_text) where `text` is the full
+        transcript so far - committed words plus the still-unstable tail.
+        """
+        tokens = transcript.split()
+        prev = self._previous
+        self._previous = list(tokens)
+
+        # Two consecutive passes agree on a non-empty prefix: commit it. This is
+        # the "2" in LocalAgreement-2.
+        if prev is not None:
+            agreed = common_prefix_len(prev, tokens)
+            if agreed > len(self._confirmed):
+                # Keep the CURRENT pass's spelling: it is the freshest one.
+                self._confirmed = tokens[:agreed]
+
+        confirmed_text = " ".join(self._confirmed)
+        tail = tokens[len(self._confirmed) :]
+        unstable_text = " ".join(tail)
+        # Join confirmed + tail rather than concatenating, so a first pass with
+        # nothing committed yet does not emit a leading space.
+        text = " ".join([*self._confirmed, *tail])
+        return text, confirmed_text, unstable_text
+
 
 def _ws_authorized(websocket: WebSocket) -> bool:
     """Websocket auth, enforced only when a key is actually configured.
@@ -148,14 +233,23 @@ def _transcribe_pcm(pcm: bytes) -> str:
 
 @router.websocket("/asr-stream")
 async def asr_stream(websocket: WebSocket) -> None:
-    """Buffered chunked ASR over a websocket.
+    """Streaming ASR over a websocket with LocalAgreement-2 stabilisation.
 
     The client streams raw PCM (int16 mono 16 kHz, s16le) as base64 chunks and
-    gets back partial transcripts as audio accumulates. This is intentionally
-    tempered: it streams partial hypotheses every ~1.5 s of audio, instead of
-    waiting for a complete clip like /voice/transcribe. A true overlapping
-    windowed decoder (Whisper-Streaming local-agreement) is a straight drop-in
-    over this buffer if we want it later.
+    gets back partial transcripts as audio accumulates.
+
+    Two properties matter here:
+
+    1. The decode window SLIDES. The buffer used to be cleared after every emit,
+       so each pass only saw the newest ~1.5 s and a word straddling a boundary
+       was split across two hypotheses. Now a rolling window is retained and
+       trimmed from the front, so consecutive passes overlap.
+    2. Output is stabilised by LocalAgreement-2 (see LocalAgreementState): only
+       the prefix two consecutive passes agree on is committed, so spoken words
+       stop being rewritten mid-sentence while the tail can still settle.
+
+    `type` and `text` keep their original shape; `confirmed`/`unstable` are
+    additive so older clients are unaffected.
     """
     if not _ws_authorized(websocket):
         await websocket.close(code=1008, reason="authentication required")
@@ -165,6 +259,17 @@ async def asr_stream(websocket: WebSocket) -> None:
     buf = bytearray()
     step_bytes = 16000 * 2 * 3 // 2  # ~1.5 s of audio at 16 kHz 16-bit
     next_emit = step_bytes
+    agreement = LocalAgreementState()
+
+    def _append(chunk: bytes) -> None:
+        buf.extend(chunk)
+        # Trim the FRONT, never clear: overlap is what makes agreement possible.
+        # _MAX_PCM_BYTES stays as the hard backstop below the rolling window.
+        if len(buf) > _ROLLING_WINDOW_BYTES:
+            del buf[: len(buf) - _ROLLING_WINDOW_BYTES]
+        if len(buf) > _MAX_PCM_BYTES:
+            del buf[: len(buf) - _MAX_PCM_BYTES]
+
     try:
         while True:
             try:
@@ -181,22 +286,31 @@ async def asr_stream(websocket: WebSocket) -> None:
                     continue
                 if len(chunk) > _MAX_FRAME_BYTES:
                     continue
-                buf.extend(chunk)
-                # Bound the buffer: a client streaming forever must not grow it.
-                if len(buf) > _MAX_PCM_BYTES:
-                    del buf[:-_MAX_PCM_BYTES]
+                _append(chunk)
                 if len(buf) >= next_emit:
                     # Whisper is seconds-scale on this CPU. Running it inline
                     # froze /health, /ask and every other socket for the whole
                     # decode, so it goes to the worker threadpool.
-                    text = await anyio.to_thread.run_sync(_transcribe_pcm, bytes(buf))
-                    await websocket.send_json({"type": "partial", "text": text})
-                    buf.clear()
+                    raw = await anyio.to_thread.run_sync(_transcribe_pcm, bytes(buf))
+                    text, confirmed, unstable = agreement.update(raw)
+                    await websocket.send_json(
+                        {
+                            "type": "partial",
+                            "text": text.strip(),
+                            "confirmed": confirmed,
+                            "unstable": unstable,
+                        }
+                    )
                     next_emit += step_bytes
-            elif kind == "done":
-                text = await anyio.to_thread.run_sync(_transcribe_pcm, bytes(buf))
+            elif kind in ("done", "flush", "end", "stop"):
+                # Final pass over whatever audio is still buffered, folded
+                # through the same agreement state so the committed prefix is
+                # not lost just because the tail moved.
+                raw = await anyio.to_thread.run_sync(_transcribe_pcm, bytes(buf))
+                text, _confirmed, _unstable = agreement.update(raw)
+                await websocket.send_json({"type": "final", "text": text.strip()})
                 buf.clear()
-                await websocket.send_json({"type": "final", "text": text})
+                agreement.reset()
                 break
             elif kind == "ping":
                 await websocket.send_json({"type": "pong"})
@@ -207,6 +321,12 @@ async def asr_stream(websocket: WebSocket) -> None:
         pass
     finally:
         buf.clear()
+        # Close only if the socket is still open: on the normal path FastAPI has
+        # already torn it down and a second close raises.
+        try:
+            await websocket.close()
+        except Exception:
+            pass
         try:
             await websocket.close()
         except Exception:
