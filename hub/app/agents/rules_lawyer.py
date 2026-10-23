@@ -4,7 +4,7 @@
 # ============================================================
 
 """
-Rules Lawyer Agent â€” Phase 5: Fact-checker with Ollama function calling.
+Rules Lawyer Agent — Phase 5: Fact-checker with Ollama function calling.
 
 Tools (exact schemas from design chat):
 - lookup_rule(query) -> searches vector DB of Archives of Nethys / SRD
@@ -14,6 +14,7 @@ Tools (exact schemas from design chat):
 
 import json
 import logging
+import re
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Any
@@ -24,12 +25,13 @@ from app.config import get_settings
 from app.db.repository import CampaignRepository
 from app.llm.ollama_client import OllamaClient
 from app.rag.retriever import Retriever
+from app.telemetry import log_miss
 
 logger = logging.getLogger(__name__)
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# Deterministic PF2e Remaster tables (Gemini Â§15.4 â€” never LLM)
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ══════════════════════════════════════════════════════════════
+# Deterministic PF2e Remaster tables (Gemini §15.4 — never LLM)
+# ══════════════════════════════════════════════════════════════
 
 # Table 10-5: Level-Based DCs (CRB Remaster). -1/0 for negative levels.
 LEVEL_DC: dict[int, int] = {
@@ -46,7 +48,7 @@ SIMPLE_DC: dict[str, int] = {
 
 RARITY_ADJ: dict[str, int] = {"common": 0, "uncommon": 2, "rare": 5, "unique": 10}
 
-# Action â†’ required skill (deterministic validate_action). Keys lowercased.
+# Action → required skill (deterministic validate_action). Keys lowercased.
 ACTION_SKILL: dict[str, str] = {
     "trip": "athletics", "grapple": "athletics", "shove": "athletics",
     "disarm": "athletics", "reposition": "athletics",
@@ -60,7 +62,7 @@ ACTION_SKILL: dict[str, str] = {
     "deception": "deception", "intimidation": "intimidation",
 }
 
-# â”€â”€ Strict Pydantic mirror of spoke/lib/models/character.dart â”€â”€
+# ══ Strict Pydantic mirror of spoke/lib/models/character.dart ══
 
 class AbilityScoresModel(BaseModel):
     str: int = 10
@@ -125,9 +127,9 @@ class CharacterSheetModel(BaseModel):
             data["abilities"]["int"] = data["abilities"].pop("int")
         return cls.model_validate(data)
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ══════════════════════════════════════════════════════════════
 # Tool Definitions (exact from design chat)
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ══════════════════════════════════════════════════════════════
 
 RULES_LAWYER_TOOLS = [
     {
@@ -216,7 +218,6 @@ _ABSTENTION_INSTRUCTION = (
     "as a house rule and state that it is your ruling, not a citation."
 )
 
-
 @dataclass
 class Citation:
     """One deterministic source tag for an adjudication.
@@ -224,12 +225,108 @@ class Citation:
     Built from the retriever rows, never from the model's prose, so a citation
     cannot drift into naming a rule the model never actually saw.
     """
+
     source_book: str
     name: str
     category: str = ""
 
     def tag(self) -> str:
         return f"[{self.source_book} - {self.name}]"
+
+
+# A bracketed "[Book - Rule]" tag in model prose. Deliberately conservative:
+# it requires the book-name dash-name shape so ordinary square brackets in
+# prose (dice notation, flow tables, "[sic]") are left alone.
+_INLINE_TAG_RE = re.compile(r"\[([^\[\]\n]{1,80}?)\s+-\s+([^\[\]\n]{1,80}?)\]")
+
+
+def sanitize_inline_citations(
+    text: str, valid_tags: set[str]
+) -> tuple[str, list[str]]:
+    """Strip bracketed citation tags the model was never shown.
+
+    Verbatim forwarding fixed re-narration dropping citations, and the
+    deterministic Sources block is built from retrieval rows, so the *sources*
+    are trustworthy. The prose is not: a 3B model will still sprinkle in
+    plausible-looking ``[Core Rulebook - Grapple]`` tags for rules that were not
+    in its context. Those are worse than no citation at all, because they read
+    as verified.
+
+    Returns ``(cleaned_text, stripped_tags)``. A tag matching one of
+    ``valid_tags`` (case-insensitively, whitespace-normalised) is kept; anything
+    else shaped like a citation is removed along with one preceding space, and
+    reported so it can be logged as a retrieval defect.
+    """
+    if not text or "[" not in text:
+        return text, []
+
+    lookup = {re.sub(r"\s+", " ", t).strip().casefold() for t in valid_tags}
+    stripped: list[str] = []
+
+    def _replace(match: re.Match[str]) -> str:
+        whole = match.group(0)
+        normalized = re.sub(r"\s+", " ", whole).strip().casefold()
+        if normalized in lookup:
+            return whole
+        stripped.append(whole)
+        return ""
+
+    cleaned = _INLINE_TAG_RE.sub(_replace, text)
+    if not stripped:
+        return text, []
+    # Removing a mid-sentence tag can leave a double space; tidy those without
+    # touching intentional paragraph breaks.
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r" +([,.;:!?])", r"\1", cleaned)
+    return cleaned, stripped
+
+
+class InlineCitationScrubber:
+    """Streaming-safe wrapper around :func:`sanitize_inline_citations`.
+
+    A tag can straddle two model chunks, so scrubbing each chunk independently
+    would miss ``"[Core Rulebook - Grap"`` + ``"ple]"``. This holds back any
+    trailing text that could still grow into a bracket, and only emits the part
+    that is provably safe.
+    """
+
+    def __init__(self, valid_tags: set[str]) -> None:
+        self._valid = set(valid_tags)
+        self._held = ""
+        self.stripped: list[str] = []
+
+    def feed(self, chunk: str) -> str:
+        """Consume a chunk, returning the text that is safe to emit now."""
+        if not chunk:
+            return ""
+        self._held += chunk
+        # Everything up to the last unmatched '[' is safe: no later chunk can
+        # change a bracket that is already closed.
+        last_open = self._held.rfind("[")
+        if last_open == -1 or "]" in self._held[last_open:]:
+            safe, self._held = self._held, ""
+        else:
+            safe, self._held = self._held[:last_open], self._held[last_open:]
+        cleaned, found = sanitize_inline_citations(safe, self._valid)
+        self.stripped.extend(found)
+        return cleaned
+
+    def finish(self) -> str:
+        """Flush the held-back tail at end of stream.
+
+        A held-back tail can still be an *unterminated* citation - the stream
+        ended mid-tag. Showing "[Core Rulebook - Grap" to the player is both
+        ugly and misleading, so an unmatched opener and everything after it is
+        dropped and recorded as a stripped hallucination.
+        """
+        tail, self._held = self._held, ""
+        last_open = tail.rfind("[")
+        if last_open != -1 and "]" not in tail[last_open:]:
+            self.stripped.append(tail[last_open:].strip())
+            tail = tail[:last_open]
+        cleaned, found = sanitize_inline_citations(tail, self._valid)
+        self.stripped.extend(found)
+        return cleaned
 
 
 class RulesLawyerAgent:
@@ -304,7 +401,7 @@ class RulesLawyerAgent:
     ) -> ValidationResult:
         """Deterministic validation: check proficiency rank for action's required skill.
 
-        Never guesses â€” looks up ACTION_SKILL then checks CharacterSheetModel.
+        Never guesses — looks up ACTION_SKILL then checks CharacterSheetModel.
         Mirrors spoke/lib/models/character.dart SkillProficiencies index: 0=untrained.
         """
         key = (action or "").strip().lower()
@@ -315,11 +412,11 @@ class RulesLawyerAgent:
         sheet = CharacterSheetModel.from_any(character_sheet)
 
         if skill is None:
-            # Unknown action â€” fallback to rule lookup for citation, assume legal but flag
+            # Unknown action — fallback to rule lookup for citation, assume legal but flag
             rule_result = await self.lookup_rule(f"{action} action traits")
             return ValidationResult(
                 legal=True,
-                reason=f"Unknown action '{action}' not in deterministic table; per {rule_result.name}: {rule_result.content[:160]} â€” assuming legal, narrate with caution.",
+                reason=f"Unknown action '{action}' not in deterministic table; per {rule_result.name}: {rule_result.content[:160]} — assuming legal, narrate with caution.",
                 rule_citation=f"{rule_result.source_book} - {rule_result.name}",
             )
 
@@ -329,7 +426,7 @@ class RulesLawyerAgent:
         if rank >= 1:
             return ValidationResult(
                 legal=True,
-                reason=f"Success: Action '{action}' is legal. Roll {skill.capitalize()} vs DC (proficiency rank {rank} â‰¥ trained).",
+                reason=f"Success: Action '{action}' is legal. Roll {skill.capitalize()} vs DC (proficiency rank {rank} ≥ trained).",
                 rule_citation=f"Core Rulebook - {skill.capitalize()}",
             )
         else:
@@ -339,9 +436,9 @@ class RulesLawyerAgent:
                 rule_citation=f"Core Rulebook - {skill.capitalize()} (Untrained)",
             )
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ══════════════════════════════════════════════════════════════
     # Ollama Function Calling Interface
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ══════════════════════════════════════════════════════════════
 
     async def run_with_tools(self, user_query: str) -> str:
         """Run the agent with Ollama function calling."""
@@ -365,6 +462,7 @@ class RulesLawyerAgent:
         edition: str = "2e",
         context: list[dict] | None = None,
         abstain: bool = False,
+        route_score: float | None = None,
     ) -> tuple[AsyncGenerator[str, None], list[Citation]]:
         """Adjudicate a rules question and yield it verbatim.
 
@@ -401,10 +499,26 @@ class RulesLawyerAgent:
         # matters because it makes the guarantee hold for every caller instead
         # of depending on each one having run the gate first.
         if abstain or not citations:
+            # Record WHY we could not answer. A refusal is correct behaviour,
+            # but a rising count is the signal that the rules DB is missing
+            # material the group actually asks about.
+            log_miss(
+                "abstain",
+                query,
+                route_score=route_score,
+                details={
+                    "reason": "flagged" if abstain else "no_retrieval",
+                    "edition": edition,
+                    "rows": len(context or []),
+                },
+            )
+
             async def _refuse() -> AsyncGenerator[str, None]:
                 yield ABSTENTION_TEXT
 
             return _refuse(), []
+
+        valid_tags = {c.tag() for c in citations}
 
         async def _generate() -> AsyncGenerator[str, None]:
             # Reached only when `citations` is non-empty, i.e. there is at least
@@ -413,13 +527,28 @@ class RulesLawyerAgent:
             # unreachable once empty context short-circuited above: reaching here
             # requires a citable row, which requires a non-empty context.
             system = RULES_LAWYER_SYSTEM
+            scrubber = InlineCitationScrubber(valid_tags)
             async for chunk in self.ollama.stream(
                 prompt=query,
                 system=system,
                 model=self.settings.model_for("reasoning"),
             ):
                 if chunk:
-                    yield chunk
+                    safe = scrubber.feed(chunk)
+                    if safe:
+                        yield safe
+            tail = scrubber.finish()
+            if tail:
+                yield tail
+            if scrubber.stripped:
+                # The model cited rules it was never shown: a retrieval or
+                # prompt defect worth chasing, not something to show the player.
+                log_miss(
+                    "bad_inline_citation",
+                    query,
+                    route_score=route_score,
+                    details={"stripped": scrubber.stripped[:10]},
+                )
 
         return _generate(), citations
 
@@ -429,15 +558,21 @@ class RulesLawyerAgent:
         edition: str = "2e",
         context: list[dict] | None = None,
         abstain: bool = False,
+        route_score: float | None = None,
     ) -> tuple[str, list[Citation]]:
         """Buffered counterpart of stream_adjudication.
 
         Returns (answer, citations). Same zero-LLM guarantee: with abstain=True
         (or with no usable context) this returns the deterministic refusal
-        without touching Ollama.
+        without touching Ollama. Inline citation scrubbing happens in the shared
+        stream, so the buffered path inherits it.
         """
         stream, citations = await self.stream_adjudication(
-            query=query, edition=edition, context=context, abstain=abstain
+            query=query,
+            edition=edition,
+            context=context,
+            abstain=abstain,
+            route_score=route_score,
         )
         parts: list[str] = []
         async for chunk in stream:
@@ -445,9 +580,9 @@ class RulesLawyerAgent:
         return "".join(parts), citations
 
 
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ══════════════════════════════════════════════════════════════
 # Standalone Tool Functions (for direct calling)
-# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ══════════════════════════════════════════════════════════════
 
 async def lookup_rule_tool(query: str, repo: CampaignRepository) -> dict:
     agent = RulesLawyerAgent(repo)

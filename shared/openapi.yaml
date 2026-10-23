@@ -287,6 +287,8 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 2147483647
+          minimum: 1
           default: 1
           title: Campaign Id
       responses:
@@ -320,6 +322,8 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 2147483647
+          minimum: 1
           default: 1
           title: Campaign Id
       requestBody:
@@ -357,6 +361,8 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 2147483647
+          minimum: 1
           default: 1
           title: Campaign Id
       responses:
@@ -419,6 +425,8 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 2147483647
+          minimum: 1
           default: 1
           title: Campaign Id
       responses:
@@ -453,6 +461,8 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 2147483647
+          minimum: 1
           default: 1
           title: Campaign Id
       requestBody:
@@ -492,6 +502,8 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 2147483647
+          minimum: 1
           default: 1
           title: Campaign Id
       responses:
@@ -518,6 +530,8 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 2147483647
+          minimum: 1
           default: 1
           title: Campaign Id
       responses:
@@ -551,6 +565,8 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 2147483647
+          minimum: 1
           default: 1
           title: Campaign Id
       requestBody:
@@ -589,6 +605,8 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 2147483647
+          minimum: 1
           default: 1
           title: Campaign Id
       responses:
@@ -622,6 +640,8 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 2147483647
+          minimum: 1
           default: 1
           title: Campaign Id
       requestBody:
@@ -795,13 +815,15 @@ paths:
       tags:
       - combat
       summary: Set Scene
+      description: Persist the current combat scene so the live GM can reason about
+        it.
       operationId: set_scene_combat_scene_post
       requestBody:
+        required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/CombatSceneIn'
-        required: true
       responses:
         '200':
           description: Successful Response
@@ -826,7 +848,10 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 2147483647
+          minimum: 1
           default: 1
+          title: Campaign Id
       responses:
         '200':
           description: Successful Response
@@ -834,6 +859,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CombatSceneOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /encounter/generate:
     post:
       tags:
@@ -888,19 +919,13 @@ paths:
     post:
       tags:
       - voice
-      summary: Transcribe Audio
-      operationId: transcribe_audio_voice_transcribe_post
+      summary: Transcribe
+      operationId: transcribe_voice_transcribe_post
       requestBody:
         content:
           multipart/form-data:
             schema:
-              type: object
-              properties:
-                file:
-                  type: string
-                  format: binary
-              required:
-              - file
+              $ref: '#/components/schemas/Body_transcribe_voice_transcribe_post'
         required: true
       responses:
         '200':
@@ -909,19 +934,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TranscribeResponse'
-        '501':
-          description: ASR/TTS package absent; install faster-whisper / pyttsx3
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '413':
+          description: Request entity too large (audio exceeds the server limit)
+          content: {}
   /voice/speak:
     post:
       tags:
       - voice
-      summary: Speak Text
+      summary: Speak
       operationId: speak_voice_speak_post
       requestBody:
         content:
@@ -931,20 +957,32 @@ paths:
         required: true
       responses:
         '200':
-          description: WAV audio of the rendered text
+          description: Successful Response
           content:
-            audio/wav:
-              schema:
-                type: string
-                format: binary
-        '501':
-          description: ASR/TTS package absent; install faster-whisper / pyttsx3
+            application/json:
+              schema: {}
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /voice/asr-stream:
+    post:
+      tags:
+      - voice
+      summary: Streaming ASR (WebSocket)
+      description: '/voice/asr-stream is a WebSocket, which OpenAPI 3.0 cannot express
+        natively; it is documented here so the frame contract is pinned. The client
+        streams base64 PCM16 (16 kHz mono) chunks as {"type": "pcm", "data": "..."}
+        and receives partial frames of the form {"type": "partial", "text": "...",
+        "confirmed": "...", "unstable": "..."} where "confirmed" carries the LocalAgreement-2
+        prefix two consecutive passes agreed on, plus {"type": "final", "text": "..."}
+        on flush/end/stop/close.'
+      responses:
+        '101':
+          description: Switching Protocols (WebSocket upgrade)
+          content: {}
 components:
   schemas:
     AskRequest:
@@ -985,6 +1023,8 @@ components:
           title: History
         campaign_id:
           type: integer
+          maximum: 2147483647.0
+          minimum: 1.0
           title: Campaign Id
           default: 1
       type: object
@@ -1019,10 +1059,22 @@ components:
       - edition
       - sources
       title: AskResponse
+    Body_transcribe_voice_transcribe_post:
+      properties:
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+      type: object
+      required:
+      - file
+      title: Body_transcribe_voice_transcribe_post
     BuildCharacterRequest:
       properties:
         prompt:
           type: string
+          maxLength: 4000
+          minLength: 1
           title: Prompt
       type: object
       required:
@@ -1145,6 +1197,7 @@ components:
               additionalProperties: true
               type: object
             type: array
+            maxItems: 500
           - type: 'null'
           title: Party
         npcs:
@@ -1153,6 +1206,7 @@ components:
               additionalProperties: true
               type: object
             type: array
+            maxItems: 500
           - type: 'null'
           title: Npcs
         locations:
@@ -1161,6 +1215,7 @@ components:
               additionalProperties: true
               type: object
             type: array
+            maxItems: 500
           - type: 'null'
           title: Locations
         items:
@@ -1169,6 +1224,7 @@ components:
               additionalProperties: true
               type: object
             type: array
+            maxItems: 500
           - type: 'null'
           title: Items
         quests:
@@ -1177,6 +1233,7 @@ components:
               additionalProperties: true
               type: object
             type: array
+            maxItems: 500
           - type: 'null'
           title: Quests
         party_members:
@@ -1185,6 +1242,7 @@ components:
               additionalProperties: true
               type: object
             type: array
+            maxItems: 500
           - type: 'null'
           title: Party Members
         sessions:
@@ -1193,6 +1251,7 @@ components:
               additionalProperties: true
               type: object
             type: array
+            maxItems: 500
           - type: 'null'
           title: Sessions
         notes:
@@ -1201,6 +1260,7 @@ components:
               additionalProperties: true
               type: object
             type: array
+            maxItems: 500
           - type: 'null'
           title: Notes
         decisions:
@@ -1209,6 +1269,7 @@ components:
               additionalProperties: true
               type: object
             type: array
+            maxItems: 500
           - type: 'null'
           title: Decisions
         replace_existing:
@@ -1221,9 +1282,13 @@ components:
       properties:
         prompt:
           type: string
+          maxLength: 4000
+          minLength: 1
           title: Prompt
         response:
           type: string
+          maxLength: 4000
+          minLength: 1
           title: Response
       type: object
       required:
@@ -1249,6 +1314,35 @@ components:
       - party
       - notes
       title: CampaignStateResponse
+    CombatSceneIn:
+      properties:
+        campaign_id:
+          type: integer
+          maximum: 2147483647.0
+          minimum: 1.0
+          title: Campaign Id
+          default: 1
+        scene:
+          type: string
+          maxLength: 4000
+          title: Scene
+      type: object
+      required:
+      - scene
+      title: CombatSceneIn
+    CombatSceneOut:
+      properties:
+        campaign_id:
+          type: integer
+          title: Campaign Id
+        scene:
+          type: string
+          title: Scene
+      type: object
+      required:
+      - campaign_id
+      - scene
+      title: CombatSceneOut
     ConditionItem:
       properties:
         name:
@@ -1833,6 +1927,7 @@ components:
         notes:
           anyOf:
           - type: string
+            maxLength: 4000
           - type: 'null'
           title: Notes
       type: object
@@ -1843,29 +1938,37 @@ components:
       properties:
         name:
           type: string
+          maxLength: 120
+          minLength: 1
           title: Name
         player_name:
           anyOf:
           - type: string
+            maxLength: 120
           - type: 'null'
           title: Player Name
         class:
           anyOf:
           - type: string
+            maxLength: 60
           - type: 'null'
           title: Class
         level:
           type: integer
+          maximum: 30.0
+          minimum: 0.0
           title: Level
           default: 1
         ancestry:
           anyOf:
           - type: string
+            maxLength: 60
           - type: 'null'
           title: Ancestry
         background:
           anyOf:
           - type: string
+            maxLength: 120
           - type: 'null'
           title: Background
         stats:
@@ -1941,6 +2044,22 @@ components:
       - edition
       - results
       title: RulesSearchResponse
+    SpeakRequest:
+      properties:
+        text:
+          type: string
+          maxLength: 4000
+          minLength: 1
+          title: Text
+        voice:
+          type: string
+          maxLength: 120
+          title: Voice
+          default: default
+      type: object
+      required:
+      - text
+      title: SpeakRequest
     StrikeRequest:
       properties:
         attack_roll:
@@ -1997,9 +2116,11 @@ components:
           items:
             type: string
           type: array
+          maxItems: 500
           title: Events
         campaign_name:
           type: string
+          maxLength: 200
           title: Campaign Name
           default: Untitled Campaign
       type: object
@@ -2017,6 +2138,23 @@ components:
       - summary
       - event_count
       title: SummarizeSessionResponse
+    TranscribeResponse:
+      properties:
+        text:
+          type: string
+          title: Text
+        language:
+          type: string
+          title: Language
+        duration_s:
+          type: number
+          title: Duration S
+      type: object
+      required:
+      - text
+      - language
+      - duration_s
+      title: TranscribeResponse
     ValidationError:
       properties:
         loc:
@@ -2043,65 +2181,6 @@ components:
       - msg
       - type
       title: ValidationError
-    TranscribeResponse:
-      properties:
-        text:
-          type: string
-          title: Text
-        language:
-          type: string
-          title: Language
-        duration_s:
-          type: number
-          title: Duration S
-      type: object
-      required:
-      - text
-      - language
-      - duration_s
-      title: TranscribeResponse
-    SpeakRequest:
-      properties:
-        text:
-          type: string
-          maxLength: 4000
-          minLength: 1
-          title: Text
-        voice:
-          type: string
-          title: Voice
-          default: default
-      type: object
-      required:
-      - text
-      title: SpeakRequest
-    CombatSceneIn:
-      properties:
-        campaign_id:
-          type: integer
-          title: Campaign Id
-          default: 1
-        scene:
-          type: string
-          maxLength: 4000
-          title: Scene
-      type: object
-      required:
-      - scene
-      title: CombatSceneIn
-    CombatSceneOut:
-      properties:
-        campaign_id:
-          type: integer
-          title: Campaign Id
-        scene:
-          type: string
-          title: Scene
-      type: object
-      required:
-      - campaign_id
-      - scene
-      title: CombatSceneOut
   securitySchemes:
     HTTPBearer:
       type: http

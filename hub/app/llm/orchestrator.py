@@ -4,7 +4,7 @@
 # ============================================================
 
 """
-LLM Orchestrator â€” 2-tier fallback (Ollama â†’ Raw FTS5 excerpts).
+LLM Orchestrator — 2-tier fallback (Ollama → Raw FTS5 excerpts).
 
 The GM Storyteller can call these agent tools:
 - Rules Lawyer: lookup_rule, calculate_dc, validate_action
@@ -32,6 +32,7 @@ from app.db.repository import CampaignRepository
 from app.llm.ollama_client import OllamaClient
 from app.rag.raw_fallback import search_rules
 from app.rag.retriever import Retriever
+from app.telemetry import log_miss
 
 # ContinuityKeeper imported lazily to avoid circular import
 
@@ -213,9 +214,9 @@ class LLMOrchestrator:
         except Exception:
             logger.debug("live note/fold failed", exc_info=True)
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ══════════════════════════════════════════════════════════════
     # Main Generation Entry Point
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ══════════════════════════════════════════════════════════════
 
     def _supports_tools(self, model: str) -> bool:
         """qwen2.5 family natively supports ReAct tool calling; phi4-mini does not reliably."""
@@ -381,9 +382,9 @@ class LLMOrchestrator:
     ) -> str:
         """3-turn ReAct loop for tool-capable models (qwen2.5:3b Q4_K_M).
 
-        Turn 1: model decides tool_calls â†’ Turn 2: execute tools â†’ Turn 3: narrative.
+        Turn 1: model decides tool_calls → Turn 2: execute tools → Turn 3: narrative.
         Falls back to single generate if no tool_calls.
-        Gemini Â§15.3 minimal loop, adapted to async httpx + our repo tools.
+        Gemini §15.3 minimal loop, adapted to async httpx + our repo tools.
         """
         messages: list[dict] = [
             {"role": "system", "content": system},
@@ -400,7 +401,7 @@ class LLMOrchestrator:
         # Ollama returns {role, content, tool_calls: [{function:{name, arguments}}]}
         tool_calls = msg1.get("tool_calls") or []
         if not tool_calls:
-            # No tool needed â€” direct answer
+            # No tool needed — direct answer
             return msg1.get("content", "")
 
         messages.append(msg1)
@@ -512,6 +513,12 @@ class LLMOrchestrator:
                 # had already decided the rules corpus cannot answer. The
                 # streaming path already short-circuits via stream_adjudication;
                 # this mirrors it so /ask and /stream agree. No Ollama call.
+                log_miss(
+                    "abstain",
+                    original_prompt,
+                    route_score=self._rules_score(original_prompt),
+                    details={"route": "ask", "edition": edition},
+                )
                 return LLMResult(
                     answer=ABSTENTION_TEXT,
                     backend="abstention",
@@ -571,9 +578,9 @@ class LLMOrchestrator:
             sources=sources,
         )
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ══════════════════════════════════════════════════════════════
     # Tool Handlers (called when Ollama invokes a tool)
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ══════════════════════════════════════════════════════════════
 
     async def handle_tool_call(self, tool_name: str, arguments: dict, campaign_id: int = 1) -> dict:
         """Execute a tool call and return result."""
@@ -657,6 +664,9 @@ class LLMOrchestrator:
             # the live chat got no citation while the same question on /ask did.
             rules_turn = self._needs_tools(original_prompt)
             abstain = rules_turn and self._should_abstain(context, original_prompt, True)
+            # Recorded with any abstention so the miss log shows *how* confident
+            # the router was, which is what makes the log actionable.
+            route_score = self._rules_score(original_prompt) if rules_turn else None
 
             if rules_turn:
                 # BP-08 Pillar B: forward the Rules Lawyer's answer verbatim.
@@ -671,6 +681,7 @@ class LLMOrchestrator:
                     edition=edition,
                     context=context,
                     abstain=abstain,
+                    route_score=route_score,
                 )
                 async for chunk in lawyer_stream:
                     if chunk:
@@ -720,9 +731,9 @@ class LLMOrchestrator:
         if acc:
             self._record_live_note(original_prompt, "".join(acc), campaign_id)
 
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ══════════════════════════════════════════════════════════════
     # Prompt Builders
-    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ══════════════════════════════════════════════════════════════
 
     def _build_system_prompt(self, mode: str | None, edition: str) -> str:
         mode_desc = {
@@ -735,7 +746,7 @@ class LLMOrchestrator:
             "encounter": "Generate a balanced encounter with XP budget, terrain, and tactics.",
         }.get(mode, "Act as the Pathfinder GM.")
 
-        return f"""You are the Pathfinder God â€” a master GM with perfect rules knowledge for Pathfinder {edition.upper()}e.
+        return f"""You are the Pathfinder God — a master GM with perfect rules knowledge for Pathfinder {edition.upper()}e.
 {mode_desc}
 
 You are a PLAYER'S GM, not a rule server. Your job is to run the table, so:
@@ -765,7 +776,7 @@ Workflow for generation requests:
 2. Agent returns structured JSON
 3. You format it narratively for the player
 
-Be concise but evocative. Never hallucinate rules â€” if unsure, call the tool.
+Be concise but evocative. Never hallucinate rules — if unsure, call the tool.
 
 Citation Fidelity (MANDATORY):
 - Cite your sources using the exact format: [Source Book - Rule Name].
@@ -886,7 +897,7 @@ Every excerpt above is already labelled with its exact citation tag, e.g.
         lines = [f"Raw rule excerpts for '{query}':\n"]
         for i, hit in enumerate(hits, 1):
             lines.append(
-                f"{i}. **{hit['name']}** ({hit.get('system', '?')}) â€” {hit.get('source_book', 'Unknown')}\n"
+                f"{i}. **{hit['name']}** ({hit.get('system', '?')}) — {hit.get('source_book', 'Unknown')}\n"
                 f"   {hit['content'][:300]}..."
             )
         return "\n".join(lines)
