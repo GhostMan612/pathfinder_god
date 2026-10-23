@@ -6,6 +6,7 @@
 package com.pathfindergod.spoke.ui.pit
 
 import android.content.Context
+import com.google.android.filament.Filament
 import com.google.android.filament.filamat.MaterialBuilder
 import java.io.File
 
@@ -30,58 +31,35 @@ object PitMaterial {
         Kind.DIE -> """
             material {
                 name : $NAME,
-                requires : [ uv0, tangents ],
                 shadingModel : lit,
-                blending : opaque,
-                culling : back,
-                refractionMode : none,
-                roughness : ${ROUGHNESS},
-                metallic : ${METALLIC}
             }
-
             fragment {
                 void material(inout MaterialInputs material) {
-                    prepareMaterial(material);
-                    material.baseColor = texture(materialParams_baseColorMap, getUV0());
-                    material.normal = texture(materialParams_normalMap, getUV0()).xyz * 2.0 - 1.0;
+                    material.baseColor = vec3(0.8, 0.8, 0.8);
                 }
             }
         """.trimIndent()
         Kind.FELT -> """
             material {
                 name : FeltTable,
-                requires : [ uv0 ],
                 shadingModel : lit,
-                blending : opaque,
-                culling : back,
-                refractionMode : none,
-                roughness : ${FELT_ROUGHNESS},
-                metallic : 0.0
             }
-
             fragment {
                 void material(inout MaterialInputs material) {
-                    prepareMaterial(material);
-                    material.baseColor = texture(materialParams_baseColorMap, getUV0());
+                    material.baseColor = vec3(0.5, 0.5, 0.5);
                 }
             }
         """.trimIndent()
         Kind.SHADOW -> """
             material {
                 name : ContactShadow,
-                requires : [ uv0 ],
                 shadingModel : lit,
                 blending : transparent,
                 culling : none,
-                refractionMode : none,
-                roughness : 1.0,
-                metallic : 0.0
             }
-
             fragment {
                 void material(inout MaterialInputs material) {
-                    prepareMaterial(material);
-                    material.baseColor = texture(materialParams_baseColorMap, getUV0());
+                    material.baseColor = vec3(0.0, 0.0, 0.0, 0.5);
                 }
             }
         """.trimIndent()
@@ -136,6 +114,7 @@ object PitMaterial {
     ): Boolean {
         var initialised = false
         return try {
+            runCatching { Filament.init() }
             MaterialBuilder.init()
             initialised = true
             val dir = File(context.filesDir, CACHE_DIR).apply { mkdirs() }
@@ -158,9 +137,6 @@ object PitMaterial {
         val builder = MaterialBuilder()
         builder.name(nameOf(kind))
         builder.material(definition(kind))
-        builder.shading(MaterialBuilder.Shading.LIT)
-        builder.platform(MaterialBuilder.Platform.ALL)
-        builder.targetApi(MaterialBuilder.TargetApi.ALL)
         val pack = builder.build()
         if (!pack.isValid) {
             null
