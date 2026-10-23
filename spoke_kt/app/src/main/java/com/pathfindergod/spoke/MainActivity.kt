@@ -6,14 +6,14 @@
 package com.pathfindergod.spoke
 
 import android.os.Bundle
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.core.view.WindowCompat
-import com.google.androidgamesdk.GameActivity
 import com.pathfindergod.spoke.ui.navigation.NavigationShell
 import com.pathfindergod.spoke.ui.pit.PitFrameGovernor
 import com.pathfindergod.spoke.ui.theme.PathfinderGodTheme
 
-class MainActivity : GameActivity() {
+class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
