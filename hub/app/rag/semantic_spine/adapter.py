@@ -66,6 +66,7 @@ async def hybrid_search(
             endpoint=settings.ollama_host,
             model=settings.semantic_model,
             dimensions=settings.semantic_dimensions,
+            timeout_s=getattr(settings, "semantic_timeout_s", 15.0),
         )
 
         semantic_hits = await anyio.to_thread.run_sync(
@@ -76,7 +77,13 @@ async def hybrid_search(
             store,
             active_embedder,
         )
-        return reciprocal_rank_fusion(bounded_query, lexical_rows, semantic_hits, limit=k)
+        fused = reciprocal_rank_fusion(bounded_query, lexical_rows, semantic_hits, limit=k)
+        norm_ed = edition.strip().upper()
+        if norm_ed in ("1E", "PF1"):
+            fused = [r for r in fused if r.get("system") == "1E"]
+        elif norm_ed in ("2E", "PF2"):
+            fused = [r for r in fused if r.get("system") == "2E"]
+        return fused[:k]
     except Exception as exc:
         logger.warning("Semantic hybrid search failed (%s), using lexical fallback", type(exc).__name__)
         return lexical_rows

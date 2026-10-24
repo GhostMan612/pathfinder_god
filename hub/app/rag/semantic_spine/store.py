@@ -58,6 +58,9 @@ class SemanticStore:
             return {"state": "absent"}
         try:
             with closing(self._readonly(self.index_path)) as conn:
+                check = conn.execute("PRAGMA quick_check(1)").fetchone()
+                if not check or check[0] != "ok":
+                    return {"state": "corrupt"}
                 manifest = dict(conn.execute("SELECT key, value FROM manifest"))
         except (sqlite3.DatabaseError, OSError):
             return {"state": "unreadable"}

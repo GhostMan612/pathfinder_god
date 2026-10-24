@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 
 from app.config import get_settings
-from .benchmark import run_synthetic_benchmark
+from .benchmark import run_comparative_benchmark, run_synthetic_benchmark
 from .model import SemanticSpineError
 from .ollama import OllamaEmbedder
 from .store import SemanticStore
@@ -18,7 +18,7 @@ from .store import SemanticStore
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Pathfinder God optional, local semantic sidecar")
-    parser.add_argument("action", choices=("status", "preflight", "build", "search", "benchmark"))
+    parser.add_argument("action", choices=("status", "preflight", "build", "search", "benchmark", "evaluate"))
     parser.add_argument("--model", default="embeddinggemma-2:270m")
     parser.add_argument("--dimensions", type=int, choices=(128, 256, 512, 768), default=256)
     parser.add_argument("--batch-size", type=int, default=16)
@@ -52,6 +52,10 @@ def main() -> int:
             return 0
         if args.action == "benchmark":
             report = run_synthetic_benchmark(embedder)
+            print(json.dumps(report, indent=2))
+            return 0
+        if args.action == "evaluate":
+            report = run_comparative_benchmark(embedder)
             print(json.dumps(report, indent=2))
             return 0
         if not args.query.strip():

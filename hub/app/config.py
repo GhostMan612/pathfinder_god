@@ -121,6 +121,7 @@ class Settings(BaseSettings):
     semantic_dimensions: int = 256
     semantic_index_path: Path = DEFAULT_DATA_DIR / "semantic_rules.sqlite3"
     semantic_candidates: int = 20
+    semantic_timeout_s: float = 15.0
 
     # --- Campaign state ---
     campaign_state_path: Path = DEFAULT_DATA_DIR / "campaign_state.json"
