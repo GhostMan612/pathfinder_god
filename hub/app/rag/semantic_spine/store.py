@@ -12,6 +12,7 @@ import os
 import shutil
 import sqlite3
 import struct
+import sys
 import tempfile
 from contextlib import closing
 from pathlib import Path
@@ -183,6 +184,9 @@ class SemanticStore:
                                 pending_chunks.append(c)
                                 if len(pending_chunks) >= batch_size:
                                     flush_batch()
+                            if parent_count % 5000 == 0:
+                                sys.stderr.write(f"[BUILD PROGRESS] {parent_count} records processed ({chunk_count} chunks embedded)\n")
+                                sys.stderr.flush()
 
                     flush_batch()
 
