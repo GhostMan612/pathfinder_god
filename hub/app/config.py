@@ -115,6 +115,13 @@ class Settings(BaseSettings):
     rag_limit: int = 4  # rule snippets pulled into context per request
     rag_enabled: bool = True
 
+    # --- Semantic Sidecar (SS-001) ---
+    semantic_enabled: bool = False
+    semantic_model: str = "embeddinggemma-2:270m"
+    semantic_dimensions: int = 256
+    semantic_index_path: Path = DEFAULT_DATA_DIR / "semantic_rules.sqlite3"
+    semantic_candidates: int = 20
+
     # --- Campaign state ---
     campaign_state_path: Path = DEFAULT_DATA_DIR / "campaign_state.json"
 

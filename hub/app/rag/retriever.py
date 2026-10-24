@@ -9,12 +9,14 @@ RAG Retriever — Hybrid vector + FTS5 search for rule context.
 
 import logging
 import sqlite3
+from pathlib import Path
 
 import anyio
 
 from app.config import get_settings
 from app.db.repository import CampaignRepository
 from app.rag._fts import build_match_query, editions_for
+from app.rag.semantic_spine import hybrid_search
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +34,15 @@ class Retriever:
         # Fallback to first configured
         return str(self.settings.db_paths[0])
 
+    async def retrieve(self, query: str, edition: str = "both", limit: int = 5) -> list[dict]:
+        """Unified entrypoint: FTS5 lexical baseline fused with optional semantic sidecar."""
+        lexical = await self._fts5_search(query, edition, limit)
+        source_path = Path(self._get_db_path(edition))
+        return await hybrid_search(query, edition, limit, lexical, source_path=source_path)
+
     async def query(self, query: str, edition: str = "both", k: int = 5) -> list[dict]:
-        """Hybrid search: FTS5 + vector (if available)."""
-        # For now, FTS5 only — vector search can be added with Chroma
-        return await self._fts5_search(query, edition, k)
+        """Hybrid search: FTS5 + vector (when enabled)."""
+        return await self.retrieve(query, edition, k)
 
     async def _fts5_search(self, query: str, edition: str, k: int) -> list[dict]:
         # The body below is synchronous sqlite3 work on a 58 MB database,
@@ -151,7 +158,7 @@ class Retriever:
         Prefer `extract_sources_from_context` when the rows have already been
         fetched - see the note there.
         """
-        results = await self._fts5_search(query, edition, k)
+        results = await self.retrieve(query, edition, k)
         return self.extract_sources_from_context(results)
 
     @staticmethod
@@ -185,4 +192,4 @@ class Retriever:
 
     async def search(self, query: str, edition: str = "both", limit: int = 5) -> list[dict]:
         """Public search method for rules endpoint."""
-        return await self._fts5_search(query, edition, limit)
+        return await self.retrieve(query, edition, limit)

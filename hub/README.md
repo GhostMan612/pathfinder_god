@@ -10,6 +10,16 @@ that always returns an answer.
    `qwen2.5:3b` for tool-calling). RAG-grounded, citations attached.
 2. **Raw rule excerpts** — no LLM; hands back the retrieved rules directly.
 
+## Semantic Retrieval Overlay (SS-001)
+
+The Hub includes an optional hybrid semantic retrieval spine combining local lexical FTS5 search with vector similarity via Reciprocal Rank Fusion (RRF):
+
+- **Default-OFF in production**: Governed by `PFGOD_SEMANTIC_ENABLED=False` in `hub/.env` (or environment). When disabled, retrieval is pure lexical FTS5 with identical baseline performance.
+- **Model pin**: `embeddinggemma-2:270m` (text-only 270M parameters, 256 dimensions with L2 renormalization).
+- **Index requirement**: Requires an externally prebuilt SQLite sidecar index at `data/semantic_rules.sqlite3` built via `python -m app.rag.semantic_spine.cli build`. No index is built dynamically during user requests.
+- **Fail-closed safety**: If the sidecar is absent, stale, corrupted, or the local Ollama embedding service is unreachable/timed out, retrieval seamlessly falls back to lexical FTS5 without raising errors or fabricating results.
+- **Hub-only**: This capability exists solely on the Python Hub. The Android Spoke does not perform vector embeddings and continues to query its bundled offline FTS5 rulebook directly.
+
 ## Install & run
 
 Use the existing environment as-is — do **not** create a local `.venv`:
@@ -61,8 +71,9 @@ app/
 ├── discovery.py       # mDNS advertisement (_pathfindergod._tcp)
 ├── api/               # health, ask (+/stream WS), generate, rules,
 │                      # campaign (+export/import), monitoring, security
-├── rag/               # retriever.py (exact→FTS5→Unknown tiers, 2e→1e),
-│                      # raw_fallback.py, search.py (legacy shape detection)
+├── rag/               # retriever.py (hybrid router, exact→FTS5→Unknown tiers),
+│                      # raw_fallback.py, search.py (legacy shape detection),
+│                      # semantic_spine/ (OllamaEmbedder, SemanticStore, RRF, adapter)
 ├── llm/               # orchestrator.py (2-tier + qwen ReAct loop),
 │                      # ollama_client.py (generate/stream/chat/embeddings)
 ├── agents/            # rules_lawyer.py (deterministic LEVEL_DC/ACTION_SKILL),
