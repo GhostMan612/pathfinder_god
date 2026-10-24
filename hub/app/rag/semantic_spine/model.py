@@ -52,9 +52,41 @@ class RuleRecord:
 
 
 @dataclass(frozen=True)
+class ChunkRecord:
+    parent_id: str
+    chunk_index: int
+    total_chunks: int
+    start_char: int
+    end_char: int
+    system: str
+    category: str
+    name: str
+    source_book: str
+    chunk_text: str
+
+    def chunk_id(self) -> str:
+        return f"{self.parent_id}:{self.chunk_index:04d}"
+
+    def embedding_text(self) -> str:
+        header = f"Edition: {self.system}\nCategory: {self.category}\nName: {self.name}\nSource: {self.source_book}"
+        if self.total_chunks > 1:
+            header += f"\nSection: [{self.chunk_index + 1}/{self.total_chunks}]"
+        return f"{header}\nRule: {self.chunk_text}"
+
+
+@dataclass(frozen=True)
 class RankedRule:
     record: RuleRecord
     score: float
+    chunk_index: int = 0
+    total_chunks: int = 1
+    chunk_text: str = ""
+
+    def public_hit(self) -> dict[str, str]:
+        hit = self.record.public_hit()
+        if self.chunk_text:
+            hit["content"] = self.chunk_text
+        return hit
 
 
 def normalize_vector(values: Iterable[float], dimensions: int) -> tuple[float, ...]:

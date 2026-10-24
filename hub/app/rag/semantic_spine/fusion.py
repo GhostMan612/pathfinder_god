@@ -39,7 +39,7 @@ def reciprocal_rank_fusion(
         if hit.get("name", "").strip().casefold() == query.strip().casefold() and key not in anchors:
             anchors.append(key)
     for rank, item in enumerate(semantic, 1):
-        hit = item.record.public_hit()
+        hit = item.public_hit()
         key = _key(hit)
         hits.setdefault(key, hit)
         scores[key] = scores.get(key, 0.0) + semantic_weight / (rrf_k + rank)

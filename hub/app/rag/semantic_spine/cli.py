@@ -22,6 +22,8 @@ def main() -> int:
     parser.add_argument("--model", default="embeddinggemma-2:270m")
     parser.add_argument("--dimensions", type=int, choices=(128, 256, 512, 768), default=256)
     parser.add_argument("--batch-size", type=int, default=16)
+    parser.add_argument("--chunk-size", type=int, default=1800)
+    parser.add_argument("--chunk-overlap", type=int, default=200)
     parser.add_argument("--ollama-url", default=None)
     parser.add_argument("--source", type=Path, default=None)
     parser.add_argument("--index", type=Path, default=None)
@@ -48,7 +50,17 @@ def main() -> int:
             print(json.dumps({"model_identity": identity, "dimensions": len(vectors[0]), "state": "preflight-ok"}, indent=2))
             return 0
         if args.action == "build":
-            print(json.dumps(store.build(embedder, args.batch_size), indent=2))
+            print(
+                json.dumps(
+                    store.build(
+                        embedder,
+                        batch_size=args.batch_size,
+                        chunk_target_chars=args.chunk_size,
+                        chunk_overlap_chars=args.chunk_overlap,
+                    ),
+                    indent=2,
+                )
+            )
             return 0
         if args.action == "benchmark":
             report = run_synthetic_benchmark(embedder)

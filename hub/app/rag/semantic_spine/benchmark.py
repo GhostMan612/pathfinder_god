@@ -215,6 +215,7 @@ def run_synthetic_benchmark(embedder: Embedder, target_dir: Path | None = None) 
             "dimensions": embedder.dimensions,
             "corpus_stamp": build_result.get("source_stamp", ""),
             "records": int(build_result.get("rows", "0")),
+            "chunks": int(build_result.get("chunks", "0")),
             "build_time_ms": round(build_time_ms, 2),
             "index_disk_bytes": index_size_bytes,
             "query_p50_ms": round(p50, 2),
@@ -250,6 +251,9 @@ def run_comparative_benchmark(embedder: Embedder, target_dir: Path | None = None
         abstention_cases = [c for c in GOLDEN_EVALUATION_QUERIES if c.case_type == "abstention"]
 
         base_latencies: list[float] = []
+        embed_latencies: list[float] = []
+        sidecar_latencies: list[float] = []
+        fusion_latencies: list[float] = []
         hybrid_latencies: list[float] = []
 
         base_hits = 0
@@ -272,17 +276,38 @@ def run_comparative_benchmark(embedder: Embedder, target_dir: Path | None = None
             base_elapsed = (time.perf_counter() - t0) * 1000.0
             base_latencies.append(base_elapsed)
 
-            t1 = time.perf_counter()
-            semantic_hits = store.search(case.query, case.edition, embedder, limit=10)
-            hybrid_results = reciprocal_rank_fusion(case.query, base_results, semantic_hits, limit=5)
+            t_embed = time.perf_counter()
+            vectors = embedder.embed([case.query], query=True)
+            embed_query_ms = (time.perf_counter() - t_embed) * 1000.0
+            embed_latencies.append(embed_query_ms)
+
+            t_sidecar = time.perf_counter()
+            semantic_hits = store.search_vector(vectors[0], case.edition, limit=10)
+            sidecar_search_ms = (time.perf_counter() - t_sidecar) * 1000.0
+            sidecar_latencies.append(sidecar_search_ms)
+
+            t_fuse = time.perf_counter()
+            hybrid_results = reciprocal_rank_fusion(case.query, base_results, semantic_hits, limit=10)
             norm_ed = case.edition.strip().upper()
             if norm_ed in ("1E", "PF1"):
-                hybrid_results = [r for r in hybrid_results if r.get("system") == "1E"]
+                primary_system = "1E"
+                alternate_system = "2E"
             elif norm_ed in ("2E", "PF2"):
-                hybrid_results = [r for r in hybrid_results if r.get("system") == "2E"]
-            hybrid_results = hybrid_results[:5]
-            hybrid_elapsed = (time.perf_counter() - t1) * 1000.0
-            hybrid_latencies.append(hybrid_elapsed)
+                primary_system = "2E"
+                alternate_system = "1E"
+            else:
+                primary_system = "2E"
+                alternate_system = "1E"
+
+            primary_hits = [r for r in hybrid_results if r.get("system") == primary_system]
+            alt_hits = [r for r in hybrid_results if r.get("system") == alternate_system]
+            other_hits = [r for r in hybrid_results if r.get("system") not in (primary_system, alternate_system)]
+            hybrid_results = (primary_hits + alt_hits + other_hits)[:5]
+            fusion_ms = (time.perf_counter() - t_fuse) * 1000.0
+            fusion_latencies.append(fusion_ms)
+
+            total_end_to_end_ms = embed_query_ms + sidecar_search_ms + fusion_ms
+            hybrid_latencies.append(total_end_to_end_ms)
 
             base_names = [r["name"] for r in base_results]
             hybrid_names = [r["name"] for r in hybrid_results]
@@ -333,6 +358,9 @@ def run_comparative_benchmark(embedder: Embedder, target_dir: Path | None = None
 
         base_latencies.sort()
         hybrid_latencies.sort()
+        embed_latencies.sort()
+        sidecar_latencies.sort()
+        fusion_latencies.sort()
         nb = len(base_latencies)
         nh = len(hybrid_latencies)
 
@@ -363,6 +391,7 @@ def run_comparative_benchmark(embedder: Embedder, target_dir: Path | None = None
             "model_digest": embedder.identity(),
             "dimensions": embedder.dimensions,
             "records": int(build_result.get("rows", "0")),
+            "chunks": int(build_result.get("chunks", "0")),
             "cases_count": total_queries,
             "build_time_ms": round(build_time_ms, 2),
             "index_disk_bytes": index_size_bytes,
@@ -383,6 +412,12 @@ def run_comparative_benchmark(embedder: Embedder, target_dir: Path | None = None
                 "abstention_safety": round(hybrid_abstention, 4),
                 "p50_ms": round(hybrid_latencies[int(nh * 0.50)] if nh else 0.0, 2),
                 "p95_ms": round(hybrid_latencies[min(int(nh * 0.95), nh - 1)] if nh else 0.0, 2),
+                "latency_breakdown_p50_ms": {
+                    "embed_query_ms": round(embed_latencies[int(len(embed_latencies) * 0.50)] if embed_latencies else 0.0, 2),
+                    "sidecar_search_ms": round(sidecar_latencies[int(len(sidecar_latencies) * 0.50)] if sidecar_latencies else 0.0, 2),
+                    "fusion_ms": round(fusion_latencies[int(len(fusion_latencies) * 0.50)] if fusion_latencies else 0.0, 2),
+                    "total_end_to_end_ms": round(hybrid_latencies[int(nh * 0.50)] if nh else 0.0, 2),
+                },
             },
             "delta": {
                 "recall_gain": round(hybrid_recall - base_recall, 4),

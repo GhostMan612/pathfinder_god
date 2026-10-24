@@ -17,7 +17,8 @@ from contextlib import closing
 from pathlib import Path
 from typing import Protocol
 
-from .model import RankedRule, RuleRecord, SemanticSpineError, cosine, normalize_vector
+from .chunker import chunk_rule
+from .model import ChunkRecord, RankedRule, RuleRecord, SemanticSpineError, cosine, normalize_vector
 
 
 class Embedder(Protocol):
@@ -40,8 +41,8 @@ def _source_stamp(source: Path) -> str:
 
 
 class SemanticStore:
-    schema_version = "1"
-    max_record_chars = 8192
+    schema_version = "2"
+    max_chunk_chars = 4096
 
     def __init__(self, index_path: Path, source_path: Path) -> None:
         self.index_path = Path(index_path).resolve()
@@ -65,7 +66,7 @@ class SemanticStore:
         except (sqlite3.DatabaseError, OSError):
             return {"state": "unreadable"}
         if manifest.get("schema_version") != self.schema_version:
-            return {"state": "incompatible"}
+            return {"state": "incompatible", **manifest}
         try:
             stamp = _source_stamp(self.source_path)
         except (OSError, SemanticSpineError):
@@ -74,7 +75,13 @@ class SemanticStore:
             return {"state": "stale", **manifest}
         return {"state": "ready", **manifest}
 
-    def build(self, embedder: Embedder, batch_size: int = 16) -> dict[str, str]:
+    def build(
+        self,
+        embedder: Embedder,
+        batch_size: int = 16,
+        chunk_target_chars: int = 1800,
+        chunk_overlap_chars: int = 200,
+    ) -> dict[str, str]:
         if not self.source_path.is_file():
             raise SemanticSpineError("Source rules database is unavailable")
         if not (1 <= batch_size <= 128):
@@ -88,8 +95,10 @@ class SemanticStore:
         fd, filename = tempfile.mkstemp(prefix=".semantic-build-", suffix=".sqlite3", dir=self.index_path.parent)
         os.close(fd)
         staging = Path(filename)
-        count = 0
+        parent_count = 0
+        chunk_count = 0
         digest = hashlib.sha256()
+
         try:
             with closing(self._readonly(self.source_path)) as src:
                 src.row_factory = sqlite3.Row
@@ -100,57 +109,106 @@ class SemanticStore:
                     dst.execute(
                         "CREATE TABLE entries ("
                         "id TEXT PRIMARY KEY, "
+                        "parent_id TEXT NOT NULL, "
                         "system TEXT NOT NULL, "
                         "category TEXT NOT NULL, "
                         "name TEXT NOT NULL, "
                         "source_book TEXT NOT NULL, "
+                        "chunk_index INTEGER NOT NULL, "
+                        "total_chunks INTEGER NOT NULL, "
+                        "start_char INTEGER NOT NULL, "
+                        "end_char INTEGER NOT NULL, "
                         "content TEXT NOT NULL, "
                         "embedding BLOB NOT NULL"
                         ")"
                     )
+
                     cursor = src.execute(
                         "SELECT rowid, system, category, name, source_book, raw_content "
                         "FROM rules ORDER BY rowid"
                     )
+
+                    pending_chunks: list[ChunkRecord] = []
+
+                    def flush_batch() -> None:
+                        nonlocal chunk_count
+                        if not pending_chunks:
+                            return
+                        texts_to_embed = [c.embedding_text() for c in pending_chunks]
+                        vectors = embedder.embed(texts_to_embed, query=False)
+                        if len(vectors) != len(pending_chunks):
+                            raise SemanticSpineError("Incomplete embedding batch")
+
+                        batch_rows = []
+                        for chunk, vector in zip(pending_chunks, vectors):
+                            packed = struct.pack(f"<{dimensions}f", *normalize_vector(vector, dimensions))
+                            identifier = chunk.chunk_id()
+                            digest.update(identifier.encode("ascii"))
+                            batch_rows.append(
+                                (
+                                    identifier,
+                                    chunk.parent_id,
+                                    chunk.system,
+                                    chunk.category,
+                                    chunk.name,
+                                    chunk.source_book,
+                                    chunk.chunk_index,
+                                    chunk.total_chunks,
+                                    chunk.start_char,
+                                    chunk.end_char,
+                                    chunk.chunk_text,
+                                    packed,
+                                )
+                            )
+                        dst.executemany("INSERT INTO entries VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", batch_rows)
+                        dst.commit()
+                        chunk_count += len(batch_rows)
+                        pending_chunks.clear()
+
                     while True:
                         rows = cursor.fetchmany(batch_size)
                         if not rows:
                             break
-                        records = [RuleRecord.from_row(row) for row in rows]
-                        for record in records:
-                            if len(record.embedding_text()) > self.max_record_chars:
-                                raise SemanticSpineError(f"Record exceeds maximum context budget: {record.name}")
-                        vectors = embedder.embed([r.embedding_text() for r in records], query=False)
-                        if len(vectors) != len(records):
-                            raise SemanticSpineError("Incomplete embedding batch")
-                        batch = []
-                        for row, record, vector in zip(rows, records, vectors):
-                            packed = struct.pack(f"<{dimensions}f", *normalize_vector(vector, dimensions))
-                            identifier = hashlib.sha256((str(row["rowid"]) + ":" + record.identity()).encode("utf-8")).hexdigest()
-                            digest.update(identifier.encode("ascii"))
-                            batch.append((identifier, record.system, record.category, record.name, record.source_book, record.content, packed))
-                        dst.executemany("INSERT INTO entries VALUES (?,?,?,?,?,?,?)", batch)
-                        dst.commit()
-                        count += len(batch)
-                    if count == 0:
+                        for row in rows:
+                            record = RuleRecord.from_row(row)
+                            parent_count += 1
+                            record_chunks = chunk_rule(
+                                record,
+                                target_chars=chunk_target_chars,
+                                overlap_chars=chunk_overlap_chars,
+                            )
+                            for c in record_chunks:
+                                if len(c.chunk_text) > self.max_chunk_chars:
+                                    raise SemanticSpineError(f"Chunk exceeds maximum size: {c.name}")
+                                pending_chunks.append(c)
+                                if len(pending_chunks) >= batch_size:
+                                    flush_batch()
+
+                    flush_batch()
+
+                    if parent_count == 0 or chunk_count == 0:
                         raise SemanticSpineError("Refusing to publish an empty semantic index")
                     if _source_stamp(self.source_path) != source_stamp:
                         raise SemanticSpineError("Rules database changed during index construction")
+
                     manifest = {
                         "schema_version": self.schema_version,
                         "model_identity": model_identity,
                         "dimensions": str(dimensions),
                         "source_stamp": source_stamp,
                         "source_path": str(self.source_path),
-                        "rows": str(count),
+                        "rows": str(parent_count),
+                        "chunks": str(chunk_count),
                         "row_digest": digest.hexdigest(),
                     }
                     dst.executemany("INSERT INTO manifest VALUES (?,?)", manifest.items())
                     dst.execute("CREATE INDEX idx_entries_system ON entries(system)")
+                    dst.execute("CREATE INDEX idx_entries_parent ON entries(parent_id)")
                     dst.commit()
                     checked = dst.execute("PRAGMA integrity_check").fetchone()[0]
                     if checked != "ok":
                         raise SemanticSpineError("Semantic sidecar integrity check failed")
+
             if _source_stamp(self.source_path) != source_stamp:
                 raise SemanticSpineError("Rules database changed before publishing index")
             if self.index_path.is_file():
@@ -161,12 +219,78 @@ class SemanticStore:
             if staging.exists():
                 staging.unlink()
 
-    def search(self, query: str, edition: str, embedder: Embedder, limit: int = 10) -> list[RankedRule]:
+    def search_vector(
+        self,
+        vector: tuple[float, ...] | list[float],
+        edition: str,
+        limit: int = 10,
+    ) -> list[RankedRule]:
         status = self.status()
         if status["state"] != "ready":
             raise SemanticSpineError("Semantic index is not ready: " + status["state"])
         if status.get("source_path") != str(self.source_path):
             raise SemanticSpineError("Index was built against a different rules database path")
+        dimensions = int(status["dimensions"])
+        if len(vector) < dimensions:
+            raise SemanticSpineError("Embedding shorter than configured dimensions")
+        needle = normalize_vector(vector, dimensions)
+        edition = (edition or "both").lower().strip()
+        preferred = ["1E", "2E"] if edition in ("1e", "1", "pf1") else ["2E", "1E"]
+        if edition in ("both", "all", "any"):
+            preferred = ["2E", "1E"]
+
+        results: list[RankedRule] = []
+        with closing(self._readonly(self.index_path)) as conn:
+            for system in preferred:
+                best_by_parent: dict[str, tuple[float, RuleRecord, int, int, str]] = {}
+                cursor = conn.execute(
+                    "SELECT parent_id, system, category, name, source_book, chunk_index, total_chunks, content, embedding "
+                    "FROM entries WHERE system=?",
+                    (system,),
+                )
+                for row in cursor:
+                    parent_id = row[0]
+                    packed = row[8]
+                    if len(packed) != 4 * dimensions:
+                        raise SemanticSpineError("Index vector length mismatch")
+                    vector_values = struct.unpack(f"<{dimensions}f", packed)
+                    score = cosine(needle, vector_values)
+
+                    if parent_id not in best_by_parent or score > best_by_parent[parent_id][0]:
+                        record = RuleRecord(
+                            system=row[1],
+                            category=row[2],
+                            name=row[3],
+                            source_book=row[4],
+                            content=row[7],
+                        )
+                        best_by_parent[parent_id] = (score, record, row[5], row[6], row[7])
+
+                candidates = [
+                    RankedRule(
+                        record=rec,
+                        score=sc,
+                        chunk_index=c_idx,
+                        total_chunks=c_tot,
+                        chunk_text=c_text,
+                    )
+                    for sc, rec, c_idx, c_tot, c_text in best_by_parent.values()
+                ]
+
+                selected = heapq.nlargest(
+                    limit - len(results),
+                    candidates,
+                    key=lambda item: (item.score, item.record.source_book != "Unknown Source", item.record.name.casefold()),
+                )
+                results.extend(selected)
+                if len(results) >= limit:
+                    break
+        return results[:limit]
+
+    def search(self, query: str, edition: str, embedder: Embedder, limit: int = 10) -> list[RankedRule]:
+        status = self.status()
+        if status["state"] != "ready":
+            raise SemanticSpineError("Semantic index is not ready: " + status["state"])
         if status.get("model_identity") != embedder.identity() or int(status["dimensions"]) != embedder.dimensions:
             raise SemanticSpineError("Embedding model or dimensions changed; rebuild index")
         if not query.strip() or limit <= 0:
@@ -174,34 +298,4 @@ class SemanticStore:
         vector = embedder.embed([query], query=True)
         if len(vector) != 1:
             raise SemanticSpineError("Missing query embedding")
-        needle = normalize_vector(vector[0], embedder.dimensions)
-        edition = (edition or "both").lower().strip()
-        preferred = ["1E", "2E"] if edition in ("1e", "1", "pf1") else ["2E", "1E"]
-        if edition in ("both", "all", "any"):
-            preferred = ["2E", "1E"]
-        results: list[RankedRule] = []
-        with closing(self._readonly(self.index_path)) as conn:
-            for system in preferred:
-                ranked = []
-                cursor = conn.execute(
-                    "SELECT system,category,name,source_book,content,embedding FROM entries WHERE system=?",
-                    (system,),
-                )
-                for row in cursor:
-                    packed = row[5]
-                    dimensions = embedder.dimensions
-                    if len(packed) != 4 * dimensions:
-                        raise SemanticSpineError("Index vector length mismatch")
-                    vector_values = struct.unpack(f"<{dimensions}f", packed)
-                    score = cosine(needle, vector_values)
-                    record = RuleRecord(system=row[0], category=row[1], name=row[2], source_book=row[3], content=row[4])
-                    ranked.append(RankedRule(record=record, score=score))
-                selected = heapq.nlargest(
-                    limit - len(results),
-                    ranked,
-                    key=lambda item: (item.score, item.record.source_book != "Unknown Source", item.record.name.casefold()),
-                )
-                results.extend(selected)
-                if len(results) >= limit:
-                    break
-        return results[:limit]
+        return self.search_vector(vector[0], edition, limit=limit)

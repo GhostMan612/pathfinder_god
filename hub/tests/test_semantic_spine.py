@@ -72,6 +72,7 @@ def test_complete_spine_index_does_not_mutate_primary_rules(standalone_store):
     result = standalone_store.build(FakeEmbedder(), batch_size=2)
     assert result["state"] == "ready"
     assert result["rows"] == "4"
+    assert int(result["chunks"]) >= 4
     assert standalone_store.status()["state"] == "ready"
     assert standalone_store.source_path.read_bytes() == source_bytes
     assert standalone_store.index_path.is_file()
@@ -194,7 +195,7 @@ def test_ollama_embedder_dimension_mismatch_raises(monkeypatch):
         embedder.embed(["test query"])
 
 
-def test_over_context_budget_record_fails_publication(tmp_path):
+def test_large_record_is_chunked_and_indexed_successfully(tmp_path):
     source_db = tmp_path / "large_rules.db"
     with closing(sqlite3.connect(source_db)) as conn:
         conn.execute("CREATE VIRTUAL TABLE rules USING fts5(system, category, name, source_book, raw_content)")
@@ -204,8 +205,25 @@ def test_over_context_budget_record_fails_publication(tmp_path):
         )
         conn.commit()
     store = SemanticStore(tmp_path / "large_semantic.sqlite3", source_db)
-    with pytest.raises(SemanticSpineError, match="context budget"):
-        store.build(FakeEmbedder())
+    res = store.build(FakeEmbedder())
+    assert res["state"] == "ready"
+    assert res["rows"] == "1"
+    assert int(res["chunks"]) > 1
+    assert store.status()["state"] == "ready"
+
+
+def test_oversized_chunk_fails_publication(tmp_path):
+    source_db = tmp_path / "oversized_rules.db"
+    with closing(sqlite3.connect(source_db)) as conn:
+        conn.execute("CREATE VIRTUAL TABLE rules USING fts5(system, category, name, source_book, raw_content)")
+        conn.execute(
+            "INSERT INTO rules (system, category, name, source_book, raw_content) VALUES (?,?,?,?,?)",
+            ("2E", "action", "OversizedRule", "Player Core", "text " * 1000),
+        )
+        conn.commit()
+    store = SemanticStore(tmp_path / "oversized_semantic.sqlite3", source_db)
+    with pytest.raises(SemanticSpineError, match="Chunk exceeds maximum size"):
+        store.build(FakeEmbedder(), chunk_target_chars=5000)
 
 
 def test_repeated_build_creates_backup_and_succeeds(standalone_store):

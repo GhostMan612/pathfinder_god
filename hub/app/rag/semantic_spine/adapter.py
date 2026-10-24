@@ -77,13 +77,23 @@ async def hybrid_search(
             store,
             active_embedder,
         )
-        fused = reciprocal_rank_fusion(bounded_query, lexical_rows, semantic_hits, limit=k)
+        fused = reciprocal_rank_fusion(bounded_query, lexical_rows, semantic_hits, limit=candidate_limit)
         norm_ed = edition.strip().upper()
         if norm_ed in ("1E", "PF1"):
-            fused = [r for r in fused if r.get("system") == "1E"]
+            primary_system = "1E"
+            alternate_system = "2E"
         elif norm_ed in ("2E", "PF2"):
-            fused = [r for r in fused if r.get("system") == "2E"]
-        return fused[:k]
+            primary_system = "2E"
+            alternate_system = "1E"
+        else:
+            primary_system = "2E"
+            alternate_system = "1E"
+
+        primary_hits = [r for r in fused if r.get("system") == primary_system]
+        alternate_hits = [r for r in fused if r.get("system") == alternate_system]
+        other_hits = [r for r in fused if r.get("system") not in (primary_system, alternate_system)]
+        ordered = primary_hits + alternate_hits + other_hits
+        return ordered[:k]
     except Exception as exc:
         logger.warning("Semantic hybrid search failed (%s), using lexical fallback", type(exc).__name__)
         return lexical_rows
