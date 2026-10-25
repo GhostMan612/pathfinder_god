@@ -13,7 +13,6 @@ import shutil
 import sqlite3
 import struct
 import sys
-import tempfile
 from contextlib import closing
 from pathlib import Path
 from typing import Protocol
@@ -93,135 +92,172 @@ class SemanticStore:
             raise SemanticSpineError("Unsupported embedding dimensions")
         source_stamp = _source_stamp(self.source_path)
         self.index_path.parent.mkdir(parents=True, exist_ok=True)
-        fd, filename = tempfile.mkstemp(prefix=".semantic-build-", suffix=".sqlite3", dir=self.index_path.parent)
-        os.close(fd)
-        staging = Path(filename)
+        staging = self.index_path.with_name(self.index_path.stem + ".staging.sqlite3")
         parent_count = 0
         chunk_count = 0
+        last_rowid = 0
         digest = hashlib.sha256()
 
-        try:
+        with closing(sqlite3.connect(staging)) as dst:
+            dst.execute("PRAGMA synchronous=NORMAL")
+            dst.execute("CREATE TABLE IF NOT EXISTS manifest(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            dst.execute(
+                "CREATE TABLE IF NOT EXISTS entries ("
+                "id TEXT PRIMARY KEY, "
+                "source_rowid INTEGER NOT NULL, "
+                "parent_id TEXT NOT NULL, "
+                "system TEXT NOT NULL, "
+                "category TEXT NOT NULL, "
+                "name TEXT NOT NULL, "
+                "source_book TEXT NOT NULL, "
+                "chunk_index INTEGER NOT NULL, "
+                "total_chunks INTEGER NOT NULL, "
+                "start_char INTEGER NOT NULL, "
+                "end_char INTEGER NOT NULL, "
+                "content TEXT NOT NULL, "
+                "embedding BLOB NOT NULL"
+                ")"
+            )
+
+            manifest_map = dict(dst.execute("SELECT key, value FROM manifest").fetchall())
+            can_resume = (
+                manifest_map.get("source_stamp") == source_stamp
+                and manifest_map.get("model_identity") == model_identity
+                and manifest_map.get("dimensions") == str(dimensions)
+                and manifest_map.get("schema_version") == self.schema_version
+            )
+
+            if can_resume:
+                rowid_row = dst.execute("SELECT COALESCE(MAX(source_rowid), 0) FROM entries").fetchone()
+                last_rowid = int(rowid_row[0]) if rowid_row else 0
+                count_row = dst.execute("SELECT COUNT(DISTINCT parent_id), COUNT(*) FROM entries").fetchone()
+                if count_row:
+                    parent_count = int(count_row[0])
+                    chunk_count = int(count_row[1])
+                if last_rowid > 0:
+                    sys.stderr.write(
+                        f"[BUILD RESUME] Resuming build from rowid {last_rowid} "
+                        f"({parent_count} records, {chunk_count} chunks already indexed)\n"
+                    )
+                    sys.stderr.flush()
+            else:
+                dst.execute("DELETE FROM entries")
+                dst.execute("DELETE FROM manifest")
+                init_manifest = {
+                    "schema_version": self.schema_version,
+                    "model_identity": model_identity,
+                    "dimensions": str(dimensions),
+                    "source_stamp": source_stamp,
+                    "source_path": str(self.source_path),
+                }
+                dst.executemany("INSERT INTO manifest VALUES (?,?)", init_manifest.items())
+                dst.commit()
+
             with closing(self._readonly(self.source_path)) as src:
                 src.row_factory = sqlite3.Row
-                src.execute("BEGIN")
-                with closing(sqlite3.connect(staging)) as dst:
-                    dst.execute("PRAGMA synchronous=FULL")
-                    dst.execute("CREATE TABLE manifest(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-                    dst.execute(
-                        "CREATE TABLE entries ("
-                        "id TEXT PRIMARY KEY, "
-                        "parent_id TEXT NOT NULL, "
-                        "system TEXT NOT NULL, "
-                        "category TEXT NOT NULL, "
-                        "name TEXT NOT NULL, "
-                        "source_book TEXT NOT NULL, "
-                        "chunk_index INTEGER NOT NULL, "
-                        "total_chunks INTEGER NOT NULL, "
-                        "start_char INTEGER NOT NULL, "
-                        "end_char INTEGER NOT NULL, "
-                        "content TEXT NOT NULL, "
-                        "embedding BLOB NOT NULL"
-                        ")"
-                    )
+                cursor = src.execute(
+                    "SELECT rowid, system, category, name, source_book, raw_content "
+                    "FROM rules WHERE rowid > ? ORDER BY rowid",
+                    (last_rowid,),
+                )
 
-                    cursor = src.execute(
-                        "SELECT rowid, system, category, name, source_book, raw_content "
-                        "FROM rules ORDER BY rowid"
-                    )
+                pending_chunks: list[tuple[int, ChunkRecord]] = []
 
-                    pending_chunks: list[ChunkRecord] = []
+                def flush_batch() -> None:
+                    nonlocal chunk_count
+                    if not pending_chunks:
+                        return
+                    texts_to_embed = [c[1].embedding_text() for c in pending_chunks]
+                    vectors = embedder.embed(texts_to_embed, query=False)
+                    if len(vectors) != len(pending_chunks):
+                        raise SemanticSpineError("Incomplete embedding batch")
 
-                    def flush_batch() -> None:
-                        nonlocal chunk_count
-                        if not pending_chunks:
-                            return
-                        texts_to_embed = [c.embedding_text() for c in pending_chunks]
-                        vectors = embedder.embed(texts_to_embed, query=False)
-                        if len(vectors) != len(pending_chunks):
-                            raise SemanticSpineError("Incomplete embedding batch")
-
-                        batch_rows = []
-                        for chunk, vector in zip(pending_chunks, vectors):
-                            packed = struct.pack(f"<{dimensions}f", *normalize_vector(vector, dimensions))
-                            identifier = chunk.chunk_id()
-                            digest.update(identifier.encode("ascii"))
-                            batch_rows.append(
-                                (
-                                    identifier,
-                                    chunk.parent_id,
-                                    chunk.system,
-                                    chunk.category,
-                                    chunk.name,
-                                    chunk.source_book,
-                                    chunk.chunk_index,
-                                    chunk.total_chunks,
-                                    chunk.start_char,
-                                    chunk.end_char,
-                                    chunk.chunk_text,
-                                    packed,
-                                )
+                    batch_rows = []
+                    for (src_rowid, chunk), vector in zip(pending_chunks, vectors):
+                        packed = struct.pack(f"<{dimensions}f", *normalize_vector(vector, dimensions))
+                        identifier = chunk.chunk_id()
+                        digest.update(identifier.encode("ascii"))
+                        batch_rows.append(
+                            (
+                                identifier,
+                                src_rowid,
+                                chunk.parent_id,
+                                chunk.system,
+                                chunk.category,
+                                chunk.name,
+                                chunk.source_book,
+                                chunk.chunk_index,
+                                chunk.total_chunks,
+                                chunk.start_char,
+                                chunk.end_char,
+                                chunk.chunk_text,
+                                packed,
                             )
-                        dst.executemany("INSERT INTO entries VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", batch_rows)
-                        dst.commit()
-                        chunk_count += len(batch_rows)
-                        pending_chunks.clear()
-
-                    while True:
-                        rows = cursor.fetchmany(batch_size)
-                        if not rows:
-                            break
-                        for row in rows:
-                            record = RuleRecord.from_row(row)
-                            parent_count += 1
-                            record_chunks = chunk_rule(
-                                record,
-                                target_chars=chunk_target_chars,
-                                overlap_chars=chunk_overlap_chars,
-                            )
-                            for c in record_chunks:
-                                if len(c.chunk_text) > self.max_chunk_chars:
-                                    raise SemanticSpineError(f"Chunk exceeds maximum size: {c.name}")
-                                pending_chunks.append(c)
-                                if len(pending_chunks) >= batch_size:
-                                    flush_batch()
-                            if parent_count % 5000 == 0:
-                                sys.stderr.write(f"[BUILD PROGRESS] {parent_count} records processed ({chunk_count} chunks embedded)\n")
-                                sys.stderr.flush()
-
-                    flush_batch()
-
-                    if parent_count == 0 or chunk_count == 0:
-                        raise SemanticSpineError("Refusing to publish an empty semantic index")
-                    if _source_stamp(self.source_path) != source_stamp:
-                        raise SemanticSpineError("Rules database changed during index construction")
-
-                    manifest = {
-                        "schema_version": self.schema_version,
-                        "model_identity": model_identity,
-                        "dimensions": str(dimensions),
-                        "source_stamp": source_stamp,
-                        "source_path": str(self.source_path),
-                        "rows": str(parent_count),
-                        "chunks": str(chunk_count),
-                        "row_digest": digest.hexdigest(),
-                    }
-                    dst.executemany("INSERT INTO manifest VALUES (?,?)", manifest.items())
-                    dst.execute("CREATE INDEX idx_entries_system ON entries(system)")
-                    dst.execute("CREATE INDEX idx_entries_parent ON entries(parent_id)")
+                        )
+                    dst.executemany("INSERT INTO entries VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", batch_rows)
                     dst.commit()
-                    checked = dst.execute("PRAGMA integrity_check").fetchone()[0]
-                    if checked != "ok":
-                        raise SemanticSpineError("Semantic sidecar integrity check failed")
+                    chunk_count += len(batch_rows)
+                    pending_chunks.clear()
 
-            if _source_stamp(self.source_path) != source_stamp:
-                raise SemanticSpineError("Rules database changed before publishing index")
-            if self.index_path.is_file():
-                shutil.copy2(self.index_path, Path(str(self.index_path) + ".bak"))
-            os.replace(staging, self.index_path)
-            return {"state": "ready", **manifest}
-        finally:
-            if staging.exists():
-                staging.unlink()
+                while True:
+                    rows = cursor.fetchmany(batch_size)
+                    if not rows:
+                        break
+                    for row in rows:
+                        record = RuleRecord.from_row(row)
+                        parent_count += 1
+                        record_chunks = chunk_rule(
+                            record,
+                            target_chars=chunk_target_chars,
+                            overlap_chars=chunk_overlap_chars,
+                        )
+                        for c in record_chunks:
+                            if len(c.chunk_text) > self.max_chunk_chars:
+                                raise SemanticSpineError(f"Chunk exceeds maximum size: {c.name}")
+                            pending_chunks.append((int(row["rowid"]), c))
+                            if len(pending_chunks) >= batch_size:
+                                flush_batch()
+                        if parent_count % 1000 == 0:
+                            sys.stderr.write(
+                                f"[BUILD PROGRESS] {parent_count} records processed ({chunk_count} chunks embedded)\n"
+                            )
+                            sys.stderr.flush()
+
+                flush_batch()
+
+                total_parents = int(dst.execute("SELECT COUNT(DISTINCT parent_id) FROM entries").fetchone()[0])
+                total_chunks = int(dst.execute("SELECT COUNT(*) FROM entries").fetchone()[0])
+
+                if total_parents == 0 or total_chunks == 0:
+                    raise SemanticSpineError("Refusing to publish an empty semantic index")
+                if _source_stamp(self.source_path) != source_stamp:
+                    raise SemanticSpineError("Rules database changed during index construction")
+
+                final_manifest = {
+                    "schema_version": self.schema_version,
+                    "model_identity": model_identity,
+                    "dimensions": str(dimensions),
+                    "source_stamp": source_stamp,
+                    "source_path": str(self.source_path),
+                    "rows": str(total_parents),
+                    "chunks": str(total_chunks),
+                    "row_digest": digest.hexdigest(),
+                }
+                dst.execute("DELETE FROM manifest")
+                dst.executemany("INSERT INTO manifest VALUES (?,?)", final_manifest.items())
+                dst.execute("CREATE INDEX IF NOT EXISTS idx_entries_system ON entries(system)")
+                dst.execute("CREATE INDEX IF NOT EXISTS idx_entries_parent ON entries(parent_id)")
+                dst.commit()
+                checked = dst.execute("PRAGMA integrity_check").fetchone()[0]
+                if checked != "ok":
+                    raise SemanticSpineError("Semantic sidecar integrity check failed")
+
+        if _source_stamp(self.source_path) != source_stamp:
+            raise SemanticSpineError("Rules database changed before publishing index")
+        if self.index_path.is_file():
+            shutil.copy2(self.index_path, Path(str(self.index_path) + ".bak"))
+        os.replace(staging, self.index_path)
+        return {"state": "ready", **final_manifest}
 
     def search_vector(
         self,
