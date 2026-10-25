@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
@@ -39,20 +40,28 @@ class OllamaEmbedder:
 
     def _request(self, path: str, data: dict | None = None) -> dict:
         body = None if data is None else json.dumps(data).encode("utf-8")
-        request = Request(
-            self.endpoint + path,
-            data=body,
-            headers={"Content-Type": "application/json"},
-            method="GET" if body is None else "POST",
-        )
-        try:
-            with urlopen(request, timeout=self.timeout_s) as response:
-                result = json.load(response)
-        except (HTTPError, URLError, ValueError, TimeoutError, OSError) as exc:
-            raise SemanticSpineError(f"Local Ollama request failed: {type(exc).__name__}") from exc
-        if not isinstance(result, dict):
-            raise SemanticSpineError("Malformed Ollama response")
-        return result
+        max_retries = 3
+        last_exc: Exception | None = None
+        for attempt in range(max_retries):
+            request = Request(
+                self.endpoint + path,
+                data=body,
+                headers={"Content-Type": "application/json", "Connection": "close"},
+                method="GET" if body is None else "POST",
+            )
+            try:
+                with urlopen(request, timeout=self.timeout_s) as response:
+                    result = json.load(response)
+                if not isinstance(result, dict):
+                    raise SemanticSpineError("Malformed Ollama response")
+                return result
+            except (HTTPError, URLError, ValueError, TimeoutError, OSError) as exc:
+                last_exc = exc
+                if attempt < max_retries - 1:
+                    time.sleep(1.0 * (attempt + 1))
+                    continue
+                raise SemanticSpineError(f"Local Ollama request failed: {type(exc).__name__}") from exc
+        raise SemanticSpineError(f"Local Ollama request failed: {type(last_exc).__name__}") from last_exc
 
     def identity(self) -> str:
         payload = self._request("/api/tags")
