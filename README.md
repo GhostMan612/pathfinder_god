@@ -77,7 +77,7 @@ browse models, search rules, run generators, roll dice, chat with the God, watch
 |---|---|
 | `hub/` | Python FastAPI service. See [`hub/README.md`](hub/README.md). |
 | `spoke_kt/` | Native Kotlin app (`com.pathfindergod.spoke`, Compose + one Filament pit). Hub owns all agents; Kotlin owns ViewModels + rendering per `shared/openapi.yaml`. |
-| `shared/openapi.yaml` | The API contract both sides build against (v0.1.0, 26 paths). |
+| `shared/openapi.yaml` | The API contract both sides build against (v0.1.0, 30 paths). |
 | `data/` | Laptop-only `.db` files (git-ignored). Schema: [`data/SCHEMA.md`](data/SCHEMA.md). |
 | `tools/` | Command Center source (PySide6). The old `gen_audio.py` sound synth was deleted in BP-06 WP-2 — all bundled audio is licensed third-party and credited in [`docs/audio-credits.md`](docs/audio-credits.md). |
 | `tools/command_center/dist/` | Standalone `.exe` (git-ignored, built via PyInstaller). |
@@ -116,8 +116,10 @@ Flutter spoke deleted (Phase 22): `spoke_kt/` is the client. Terminal UI is Jetp
 Compose **plus one first-party Filament surface** — the dice pit (`ui/pit/FilamentPit.kt`,
 lit `shadingModel`, directional key light + IBL, shadow-mapped ground plane). No
 Unity/Godot, no game engine, no NDK/CMake — which is also why AGDK's Swappy is rejected.
-Current: hub `pytest hub/tests/`: 107/107 · `assembleDebug`: BUILD SUCCESSFUL.
-BP-06 (WP-0…WP-9) is code-complete; see `blueprints/CURRENT_STATE.md` (local-only).
+Current: hub `pytest hub/tests/`: 300 passed · `assembleDebug`: BUILD SUCCESSFUL.
+BP-06 (WP-0…WP-9), BP-08, and SS-001 (P01–P05) are code-complete; semantic
+retrieval stays default-OFF (`PFGOD_SEMANTIC_ENABLED=False`) until a real-corpus
+index budget is recorded. See `blueprints/CURRENT_STATE.md` (local-only).
 History: [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 
 ---
