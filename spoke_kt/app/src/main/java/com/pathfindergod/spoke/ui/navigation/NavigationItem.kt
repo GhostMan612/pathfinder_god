@@ -105,7 +105,7 @@ enum class NavigationItem(val destination: Destination) {
     HERO(Destinations.Hero),
     RULES(Destinations.Rules);
 
-    fun matches(route: String?): Boolean = destination.route == route
+    fun matches(route: String?): Boolean = destination.entry == route?.substringBefore("?")
 }
 
 @Composable

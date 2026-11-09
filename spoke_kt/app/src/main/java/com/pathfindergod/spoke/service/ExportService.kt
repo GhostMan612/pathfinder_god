@@ -48,7 +48,11 @@ object ExportService {
 
     fun shareMapImage(context: Context, base64Png: String, fileName: String) {
         val appContext = context.applicationContext
-        val safe = fileName.take(48).ifBlank { "map" }
+        val safe = fileName
+            .replace(Regex("[^a-zA-Z0-9._-]"), "_")
+            .take(48)
+            .trim('.', '_')
+            .ifBlank { "map" }
         exportScope.launch {
             val uri = writeMap(appContext, base64Png, safe) ?: return@launch
             withContext(Dispatchers.Main) { sendImage(appContext, uri, safe) }
@@ -65,6 +69,7 @@ object ExportService {
             val bitmap = BitmapFactory.decodeByteArray(raw, 0, raw.size) ?: return@withContext null
             val dir = File(context.cacheDir, "exports").apply { mkdirs() }
             val file = File(dir, "$safe.png")
+            if (file.canonicalFile.parentFile != dir.canonicalFile) return@withContext null
             FileOutputStream(file).use { out ->
                 bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
             }

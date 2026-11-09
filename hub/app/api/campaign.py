@@ -154,6 +154,8 @@ async def add_campaign_note(
             await continuity_keeper.process_session(campaign_id, session_num, note.prompt + "\n" + note.response)
         except Exception as e:
             logger.warning(f"Continuity processing failed: {e}")
+        finally:
+            await orchestrator.close()
     background_tasks.add_task(_safe_process)
 
     state = repo.get_campaign_state(campaign_id)

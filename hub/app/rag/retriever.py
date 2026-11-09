@@ -59,17 +59,22 @@ class Retriever:
         if not escaped:
             return []
 
-        # Edition order: 2E first, then 1E (for "both") - DB uses uppercase
         editions = editions_for(edition)
 
         all_results = []
         seen: set[str] = set()
+        query_stripped = query.strip()
+        query_lower = query_stripped.lower()
         for ed in editions:
             if len(all_results) >= k:
                 break
 
             try:
-                conn = sqlite3.connect(db_path)
+                conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10.0)
+            except sqlite3.OperationalError as e:
+                logger.warning(f"FTS5 search failed for {ed}: {e}")
+                continue
+            try:
                 conn.row_factory = sqlite3.Row
                 need = k - len(all_results)
 
@@ -88,42 +93,29 @@ class Retriever:
                             "content": row["raw_content"],
                         })
 
-                # Tier 0: exact name match — "Flanking" must return Flanking,
-                # not Mirror's Reflection.
                 take(conn.execute(
                     "SELECT system, category, name, source_book, raw_content"
                     " FROM rules WHERE system = ? AND name = ? COLLATE NOCASE"
                     " LIMIT ?",
-                    (ed, query.strip(), need),
+                    (ed, query_stripped, need),
                 ).fetchall())
                 if len(all_results) >= k:
-                    conn.close()
                     break
                 need = k - len(all_results)
 
-                # Tier 0b: the rule's NAME appears somewhere inside the
-                # question. The retriever is handed whole conversational
-                # sentences ("How does flanking work for melee attacks?"), so
-                # Tier 0's `name = <whole sentence>` never matched and FTS5 then
-                # OR-ed common words (how/does/work/for/melee) into unrelated
-                # feats - Flanking was returning Quick Reversal and Wolf Stance.
-                # Longest names win, so "Persistent Flame" beats "Fire" when
-                # both are mentioned.
                 take(conn.execute(
                     "SELECT system, category, name, source_book, raw_content"
                     " FROM rules WHERE system = ?"
                     "  AND length(name) >= 4"
-                    "  AND instr(lower(?), lower(name)) > 0"
+                    "  AND instr(?, lower(name)) > 0"
                     "  AND source_book != 'Unknown Source'"
                     " ORDER BY length(name) DESC LIMIT ?",
-                    (ed, query.strip(), need),
+                    (ed, query_lower, need),
                 ).fetchall())
                 if len(all_results) >= k:
-                    conn.close()
                     break
                 need = k - len(all_results)
 
-                # Tier 1: FTS5 rank over known-source rows.
                 take(conn.execute(
                     "SELECT system, category, name, source_book, raw_content"
                     " FROM rules WHERE system = ? AND rules MATCH ?"
@@ -132,11 +124,9 @@ class Retriever:
                     (ed, escaped, need),
                 ).fetchall())
                 if len(all_results) >= k:
-                    conn.close()
                     break
                 need = k - len(all_results)
 
-                # Tier 2: FTS5 rank over legacy Unknown Source rows.
                 take(conn.execute(
                     "SELECT system, category, name, source_book, raw_content"
                     " FROM rules WHERE system = ? AND rules MATCH ?"
@@ -144,11 +134,11 @@ class Retriever:
                     " ORDER BY rank LIMIT ?",
                     (ed, escaped, need),
                 ).fetchall())
-                conn.close()
-
             except sqlite3.OperationalError as e:
                 logger.warning(f"FTS5 search failed for {ed}: {e}")
                 continue
+            finally:
+                conn.close()
 
         return all_results[:k]
 

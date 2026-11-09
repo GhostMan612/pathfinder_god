@@ -48,40 +48,49 @@ def verify_api_key(api_key: str, hashed: str) -> bool:
     return secrets.compare_digest(hash_api_key(api_key), hashed)
 
 
+def _require_secret_key(settings: Settings) -> str:
+    key = settings.secret_key or ""
+    if len(key) < 32:
+        raise RuntimeError("PFGOD_SECRET_KEY must be at least 32 characters")
+    return key
+
+
 def create_access_token(
     subject: str,
     expires_delta: timedelta | None = None,
     settings: Settings | None = None
 ) -> str:
-    """Create a JWT access token."""
     if settings is None:
         settings = get_settings()
-    
+
     expire = datetime.now(UTC) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode = {"sub": subject, "exp": expire, "type": "access"}
-    return jwt.encode(to_encode, settings.secret_key, algorithm=ALGORITHM)
+    return jwt.encode(to_encode, _require_secret_key(settings), algorithm=ALGORITHM)
 
 
 def create_refresh_token(subject: str, settings: Settings | None = None) -> str:
-    """Create a JWT refresh token."""
     if settings is None:
         settings = get_settings()
-    
+
     expire = datetime.now(UTC) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     to_encode = {"sub": subject, "exp": expire, "type": "refresh"}
-    return jwt.encode(to_encode, settings.secret_key, algorithm=ALGORITHM)
+    return jwt.encode(to_encode, _require_secret_key(settings), algorithm=ALGORITHM)
 
 
 def decode_token(token: str, settings: Settings | None = None) -> dict:
-    """Decode and validate a JWT token."""
     if settings is None:
         settings = get_settings()
-    
+
+    _require_secret_key(settings)
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
+        if payload.get("type") != "access":
+            raise HTTPException(status_code=401, detail="Invalid token type")
         return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
+    except HTTPException:
+        raise
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 

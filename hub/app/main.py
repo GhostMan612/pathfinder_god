@@ -37,13 +37,18 @@ from app.db.repository import CampaignRepository
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: initialize database
+    import logging
+
     CampaignRepository(str(settings.data_dir / "campaign.db"))
-    # Zero-config LAN discovery for the phone (no-op if zeroconf missing)
+    if settings.host in ("0.0.0.0", "::", "[::]", "*") and not (settings.api_key_sha256 or "").strip():
+        logging.getLogger(__name__).warning(
+            "Hub binds %s:%s without PFGOD_API_KEY_SHA256 — any LAN host can reach unauthenticated routes",
+            settings.host,
+            settings.port,
+        )
     from app.discovery import start_advertisement, stop_advertisement
     start_advertisement(settings.port, settings.version, settings.ollama_model)
     yield
-    # Shutdown: cleanup if needed
     stop_advertisement()
 
 
