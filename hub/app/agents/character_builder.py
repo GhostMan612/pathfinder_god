@@ -18,6 +18,7 @@ import json
 import logging
 from dataclasses import dataclass
 
+from app.agents.json_builder import generate_validated_json
 from app.agents.rules_lawyer import (
     CharacterSheetModel,
     RulesLawyerAgent,
@@ -78,6 +79,7 @@ class BuildResult:
     valid: bool
     character: CharacterSheetModel | None
     errors: list[str]
+    attempts: int = 1
 
 
 class CharacterBuilderAgent:
@@ -88,36 +90,33 @@ class CharacterBuilderAgent:
 
     async def build(self, prompt: str) -> BuildResult:
         full_prompt = SYSTEM_PROMPT + "\n\nUser request: " + prompt.strip()
-        try:
-            raw = await self._llm.generate(
-                prompt=full_prompt,
-                model=self._settings.model_for("builders"),
-                temperature=0.3,
-                num_predict=1200,
-            )
-        except Exception as e:
-            logger.error(f"CharacterBuilder LLM failed: {e}")
-            return BuildResult(False, None, [f"LLM generation failed: {e}"])
+        validated: dict[str, CharacterSheetModel] = {}
 
-        # Parse JSON from LLM response
-        data = self._extract_json(raw)
-        if data is None:
-            return BuildResult(False, None, ["LLM returned no valid JSON object"])
+        def _validate(data: object) -> list[str]:
+            if not isinstance(data, dict):
+                return ["LLM returned a JSON value that is not an object"]
+            try:
+                model = CharacterSheetModel.model_validate(data)
+            except Exception as exc:
+                return [f"Schema validation failed: {exc}"]
+            lawyer_errors = self._validate_with_lawyer(model)
+            if lawyer_errors:
+                return lawyer_errors
+            validated["model"] = model
+            return []
 
-        # Schema validation via Pydantic
-        try:
-            model = CharacterSheetModel.model_validate(data)
-        except Exception as e:
-            logger.warning(f"CharacterBuilder schema validation failed: {e}")
-            return BuildResult(False, None, [f"Schema validation failed: {e}"])
-
-        # Rules Lawyer: validate proficiencies, DCs, feat prereqs, ancestry/class HP
-        errors = self._validate_with_lawyer(model)
-        if errors:
-            logger.info(f"CharacterBuilder validation failed: {errors}")
-            return BuildResult(False, None, errors)
-
-        return BuildResult(True, model, [])
+        outcome = await generate_validated_json(
+            self._llm,
+            prompt=full_prompt,
+            model=self._settings.model_for("builders"),
+            temperature=0.3,
+            num_predict=1200,
+            validate=_validate,
+        )
+        if outcome.data is None or "model" not in validated:
+            logger.info("CharacterBuilder validation failed: %s", outcome.errors)
+            return BuildResult(False, None, outcome.errors or ["LLM returned no valid JSON object"], attempts=outcome.attempts)
+        return BuildResult(True, validated["model"], outcome.errors, attempts=outcome.attempts)
 
     def _extract_json(self, text: str) -> dict | None:
         text = text.strip()

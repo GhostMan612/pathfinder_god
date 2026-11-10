@@ -79,6 +79,112 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /generate/npc:
+    post:
+      tags:
+      - gm
+      summary: Build Npc Endpoint
+      operationId: build_npc_endpoint_generate_npc_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuildNPCRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildNPCResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
+  /generate/monster:
+    post:
+      tags:
+      - gm
+      summary: Build Monster Endpoint
+      operationId: build_monster_endpoint_generate_monster_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuildMonsterRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildMonsterResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /generate/boss/statblock:
+    post:
+      tags:
+      - gm
+      summary: Build Boss Endpoint
+      operationId: build_boss_endpoint_generate_boss_statblock_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuildMonsterRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildMonsterResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /generate/world:
+    post:
+      tags:
+      - gm
+      summary: Build World Endpoint
+      operationId: build_world_endpoint_generate_world_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuildWorldRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildWorldResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
   /generate/{kind}:
     post:
       tags:
@@ -1078,10 +1184,163 @@ components:
           type: array
           title: Errors
           default: []
+        attempts:
+          type: integer
+          title: Attempts
+          default: 1
       type: object
       required:
       - valid
       title: BuildCharacterResponse
+    BuildMonsterRequest:
+      properties:
+        prompt:
+          type: string
+          maxLength: 2000
+          minLength: 1
+          title: Prompt
+        level:
+          anyOf:
+          - type: integer
+            maximum: 20.0
+            minimum: 1.0
+          - type: 'null'
+          title: Level
+        party_level:
+          anyOf:
+          - type: integer
+            maximum: 20.0
+            minimum: 1.0
+          - type: 'null'
+          title: Party Level
+      type: object
+      required:
+      - prompt
+      title: BuildMonsterRequest
+    BuildMonsterResponse:
+      properties:
+        valid:
+          type: boolean
+          title: Valid
+        monster:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Monster
+        attempts:
+          type: integer
+          title: Attempts
+          default: 1
+        errors:
+          items:
+            type: string
+          type: array
+          title: Errors
+          default: []
+      type: object
+      required:
+      - valid
+      title: BuildMonsterResponse
+    BuildNPCRequest:
+      properties:
+        concept:
+          type: string
+          maxLength: 2000
+          minLength: 1
+          title: Concept
+        campaign_id:
+          type: integer
+          maximum: 2147483647.0
+          minimum: 1.0
+          title: Campaign Id
+          default: 1
+      type: object
+      required:
+      - concept
+      title: BuildNPCRequest
+    BuildNPCResponse:
+      properties:
+        valid:
+          type: boolean
+          title: Valid
+        npc:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Npc
+        npc_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Npc Id
+        source:
+          type: string
+          title: Source
+          default: llm
+        attempts:
+          type: integer
+          title: Attempts
+          default: 1
+        errors:
+          items:
+            type: string
+          type: array
+          title: Errors
+          default: []
+      type: object
+      required:
+      - valid
+      title: BuildNPCResponse
+    BuildWorldRequest:
+      properties:
+        prompt:
+          type: string
+          maxLength: 2000
+          minLength: 1
+          title: Prompt
+        campaign_id:
+          type: integer
+          maximum: 2147483647.0
+          minimum: 1.0
+          title: Campaign Id
+          default: 1
+      type: object
+      required:
+      - prompt
+      title: BuildWorldRequest
+    BuildWorldResponse:
+      properties:
+        valid:
+          type: boolean
+          title: Valid
+        world:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: World
+        persisted:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Persisted
+        attempts:
+          type: integer
+          title: Attempts
+          default: 1
+        errors:
+          items:
+            type: string
+          type: array
+          title: Errors
+          default: []
+      type: object
+      required:
+      - valid
+      title: BuildWorldResponse
     CampaignExport:
       properties:
         campaign:
@@ -1480,6 +1739,14 @@ components:
             $ref: '#/components/schemas/EncounterMonsterResponse'
           type: array
           title: Monsters
+        attempts:
+          type: integer
+          title: Attempts
+          default: 1
+        source:
+          type: string
+          title: Source
+          default: llm
       type: object
       required:
       - target_xp
@@ -1713,6 +1980,10 @@ components:
           type: array
           title: Errors
           default: []
+        attempts:
+          type: integer
+          title: Attempts
+          default: 1
       type: object
       required:
       - valid
@@ -1780,6 +2051,10 @@ components:
           - type: string
           - type: 'null'
           title: Error
+        attempts:
+          type: integer
+          title: Attempts
+          default: 1
       type: object
       required:
       - valid

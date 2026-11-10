@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from .model import RankedRule, RuleRecord
+from .model import RankedRule
 
 
 def _key(hit: dict[str, str]) -> tuple[str, str, str, str]:

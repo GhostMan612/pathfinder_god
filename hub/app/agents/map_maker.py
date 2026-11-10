@@ -19,6 +19,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from app.agents.json_builder import generate_validated_json
 from app.config import get_settings
 from app.llm.ollama_client import OllamaClient
 
@@ -118,6 +119,7 @@ class BuildResult:
     player_base64_png: str | None
     error: str | None
     scene: MapScene | None = None
+    attempts: int = 1
 
 
 SYSTEM_PROMPT = """You are a Pathfinder 2e battle map designer.
@@ -143,16 +145,14 @@ class MapMakerAgent:
         self._settings = get_settings()
 
     def _parse_layout(self, raw: str) -> MapLayout | None:
-        text = raw.strip()
-        start = text.find("{")
-        end = text.rfind("}")
-        if start == -1 or end == -1 or end <= start:
-            return None
-        try:
-            data = json.loads(text[start:end + 1])
-        except json.JSONDecodeError:
-            return None
+        from app.agents.continuity import parse_json_loose
 
+        data = parse_json_loose(raw)
+        if not isinstance(data, dict):
+            return None
+        return self._layout_from_data(data)
+
+    def _layout_from_data(self, data: dict) -> MapLayout | None:
         try:
             width = int(data.get("width", 0))
             height = int(data.get("height", 0))
@@ -396,22 +396,33 @@ class MapMakerAgent:
 
     async def build(self, prompt: str, grid_enabled: bool = True) -> BuildResult:
         full_prompt = SYSTEM_PROMPT + "\n\nUser request: " + prompt.strip()
-        try:
-            raw = await self._llm.generate(
-                prompt=full_prompt,
-                model=self._settings.model_for("builders"),
-                temperature=0.3,
-                num_predict=800,
-            )
-        except Exception as e:
-            logger.error(f"MapMaker LLM failed: {e}")
-            return BuildResult(False, None, None, None, f"LLM generation failed: {e}")
+        validated: dict[str, MapLayout] = {}
 
-        layout = self._parse_layout(raw)
-        if layout is None:
+        def _validate(data: object) -> list[str]:
+            if not isinstance(data, dict):
+                return ["LLM returned a JSON value that is not an object"]
+            layout = self._layout_from_data(data)
+            if layout is None:
+                return ["LLM returned invalid JSON or invalid layout"]
+            validated["layout"] = layout
+            return []
+
+        outcome = await generate_validated_json(
+            self._llm,
+            prompt=full_prompt,
+            model=self._settings.model_for("builders"),
+            temperature=0.3,
+            num_predict=800,
+            validate=_validate,
+        )
+        if outcome.data is None or "layout" not in validated:
+            logger.error("MapMaker LLM failed: %s", "; ".join(outcome.errors))
             return BuildResult(
-                False, None, None, None, "LLM returned invalid JSON or invalid layout"
+                False, None, None, None,
+                "; ".join(outcome.errors) or "LLM returned invalid JSON or invalid layout",
+                attempts=outcome.attempts,
             )
+        layout = validated["layout"]
 
         try:
             # render() is fully synchronous Pillow work - two 2500x2500 RGBA
@@ -423,7 +434,7 @@ class MapMakerAgent:
             )
         except Exception as e:
             logger.error(f"Map rendering failed: {e}")
-            return BuildResult(False, None, None, None, f"Map rendering failed: {e}")
+            return BuildResult(False, None, None, None, f"Map rendering failed: {e}", attempts=outcome.attempts)
 
         return BuildResult(
             valid=True,
@@ -432,5 +443,6 @@ class MapMakerAgent:
             player_base64_png=player_b64,
             error=None,
             scene=self.derive_scene(layout),
+            attempts=outcome.attempts,
         )
 

@@ -9,7 +9,6 @@ import hashlib
 import sqlite3
 import sys
 from contextlib import closing
-from pathlib import Path
 
 import pytest
 

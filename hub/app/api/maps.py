@@ -92,6 +92,7 @@ class MapResponse(BaseModel):
     secret_features: list[MapSecretResponse] | None = None
     scene: SceneResponse | None = None
     error: str | None = None
+    attempts: int = 1
 
 
 @router.post("/generate", response_model=MapResponse)
@@ -184,4 +185,5 @@ async def generate_map(request: MapRequest) -> MapResponse:
         ] if result.layout else None,
         scene=scene,
         error=result.error,
+        attempts=result.attempts,
     )

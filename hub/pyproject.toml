@@ -46,4 +46,8 @@ filterwarnings = [
     # Our pins (fastapi 0.141.1 / starlette 1.6.0 / httpx 0.28.1) are the released
     # combination; the only upgrade that clears it is a starlette release we do not have.
     "ignore:Using .httpx. with .starlette.testclient. is deprecated",
+    # anyio 4.16 deprecates the anyio.abc.BlockingPortal alias while
+    # starlette.testclient still imports it. Ignore only this import-time warning
+    # until starlette ships the from_thread.BlockingPortal import.
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated",
 ]

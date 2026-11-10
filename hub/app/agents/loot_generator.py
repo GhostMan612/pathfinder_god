@@ -22,6 +22,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.agents.json_builder import generate_validated_json
 from app.config import get_settings
 from app.llm.ollama_client import OllamaClient
 
@@ -66,6 +67,7 @@ class LootBuildResult:
     craft_dc: int | None
     craft_dc_breakdown: str
     errors: list[str]
+    attempts: int = 1
 
 
 SYSTEM_PROMPT = """You are a Pathfinder 2e treasure vault curator.
@@ -100,34 +102,39 @@ class LootGeneratorAgent:
 
     async def build(self, prompt: str) -> LootBuildResult:
         full_prompt = SYSTEM_PROMPT + "\n\nUser request: " + prompt.strip()
-        try:
-            raw = await self._llm.generate(
-                prompt=full_prompt,
-                model=self._settings.model_for("builders"),
-                temperature=0.4,
-                num_predict=700,
+        validated: dict[str, LootItemModel] = {}
+
+        def _validate(data: object) -> list[str]:
+            if not isinstance(data, dict):
+                return ["LLM returned a JSON value that is not an object"]
+            try:
+                item = LootItemModel.model_validate(data)
+            except Exception as exc:
+                return [f"Schema validation failed: {exc}"]
+            crafting_errors = self._validate_crafting(item)
+            if crafting_errors:
+                return crafting_errors
+            validated["item"] = item
+            return []
+
+        outcome = await generate_validated_json(
+            self._llm,
+            prompt=full_prompt,
+            model=self._settings.model_for("builders"),
+            temperature=0.4,
+            num_predict=700,
+            validate=_validate,
+        )
+        if outcome.data is None or "item" not in validated:
+            logger.info("LootGenerator validation failed: %s", outcome.errors)
+            return LootBuildResult(
+                False, None, None, "", outcome.errors or ["LLM returned no valid JSON object"],
+                attempts=outcome.attempts,
             )
-        except Exception as e:
-            logger.error(f"LootGenerator LLM failed: {e}")
-            return LootBuildResult(False, None, None, "", [f"LLM generation failed: {e}"])
 
-        data = self._extract_json(raw)
-        if data is None:
-            return LootBuildResult(False, None, None, "", ["LLM returned no valid JSON object"])
-
-        try:
-            item = LootItemModel.model_validate(data)
-        except Exception as e:
-            logger.warning(f"LootGenerator schema validation failed: {e}")
-            return LootBuildResult(False, None, None, "", [f"Schema validation failed: {e}"])
-
-        errors = self._validate_crafting(item)
-        if errors:
-            logger.info(f"LootGenerator validation failed: {errors}")
-            return LootBuildResult(False, None, None, "", errors)
-
+        item = validated["item"]
         dc = await self._lawyer.calculate_dc(item.level, item.rarity)
-        return LootBuildResult(True, item, dc.dc, dc.breakdown, [])
+        return LootBuildResult(True, item, dc.dc, dc.breakdown, outcome.errors, attempts=outcome.attempts)
 
     def _extract_json(self, text: str) -> dict | None:
         text = text.strip()

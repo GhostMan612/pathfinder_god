@@ -53,6 +53,13 @@ def _hermetic_hub(tmp_path: Path, monkeypatch, rules_db_dir: Path):
         str(tmp_path / "campaign.db")
     )
     main.app.dependency_overrides[get_settings] = lambda: test_settings
+    # /health captured the original get_settings function object at import
+    # time. Override that exact dependency too, otherwise the route falls back
+    # to the real repo/data directory and fails on a fresh clone with no DB.
+    from app.api import monitoring
+
+    health_settings_dep = monitoring.health.__defaults__[0].dependency
+    main.app.dependency_overrides[health_settings_dep] = lambda: test_settings
     yield
     main.app.dependency_overrides.clear()
 
@@ -136,7 +143,11 @@ def test_ask_returns_answer(authenticated_client):
 
 
 def test_generate_boss_forces_mode(authenticated_client):
-    r = authenticated_client.post("/generate/boss", json={"prompt": "a lich sorcerer-king", "edition": "both"})
+    # /generate/boss remains the prose route; the typed stat block is at
+    # /generate/boss/statblock, covered by test_monster_builder.py.
+    r = authenticated_client.post(
+        "/generate/boss", json={"prompt": "a lich sorcerer-king", "edition": "both"}
+    )
     assert r.status_code == 200
     assert r.json()["mode"] == "boss"
 
@@ -148,7 +159,9 @@ def test_generate_unknown_kind_returns_400_with_valid_kinds(authenticated_client
 
 
 def test_generate_all_kinds(authenticated_client):
-    kinds = ["npc", "monster", "boss", "map", "campaign", "encounter"]
+    # Prose kinds still flow through /generate/{kind}. npc and monster are
+    # typed endpoints now and are covered by their dedicated builder tests.
+    kinds = ["boss", "map", "campaign", "encounter"]
     for kind in kinds:
         r = authenticated_client.post(f"/generate/{kind}", json={"prompt": "test", "edition": "2e"})
         assert r.status_code == 200, f"kind={kind} failed"

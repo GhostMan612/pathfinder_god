@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from app.rag._fts import build_match_query, editions_for
+
 from .fusion import reciprocal_rank_fusion
 from .store import Embedder, SemanticStore
 
@@ -321,14 +322,10 @@ def run_comparative_benchmark(embedder: Embedder, target_dir: Path | None = None
                 expected_system = None
 
             if expected_system:
-                if base_results and base_results[0]["system"] == expected_system:
-                    base_edition_safe += 1
-                elif not base_results:
+                if base_results and base_results[0]["system"] == expected_system or not base_results:
                     base_edition_safe += 1
 
-                if hybrid_results and hybrid_results[0]["system"] == expected_system:
-                    hybrid_edition_safe += 1
-                elif not hybrid_results:
+                if hybrid_results and hybrid_results[0]["system"] == expected_system or not hybrid_results:
                     hybrid_edition_safe += 1
             else:
                 base_edition_safe += 1
