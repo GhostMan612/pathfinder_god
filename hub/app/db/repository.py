@@ -276,6 +276,23 @@ class CampaignRepository:
                             """
                         )
                         conn.execute("DROP TABLE combatants_legacy")
+                        # schema.sql ran before this rebuild, so the old
+                        # index/trigger followed the renamed table and were
+                        # dropped with it. Recreate them on the new table.
+                        conn.execute(
+                            "CREATE INDEX IF NOT EXISTS idx_combatants_campaign "
+                            "ON combatants(campaign_id)"
+                        )
+                        conn.execute(
+                            """
+                            CREATE TRIGGER IF NOT EXISTS trigger_combatants_updated
+                            AFTER UPDATE ON combatants
+                            BEGIN
+                                UPDATE combatants SET updated_at = datetime('now')
+                                WHERE id = NEW.id;
+                            END
+                            """
+                        )
                 except sqlite3.OperationalError:
                     pass
                 # Index any already-saved sessions into the recall FTS table so
@@ -1596,6 +1613,21 @@ class CampaignRepository:
             conn.execute(
                 "DELETE FROM combatants WHERE campaign_id = ?", (campaign_id,)
             )
+
+    def clear_non_hero_combatants(self, campaign_id: int) -> int:
+        """Remove the encounter roster but keep persistent hero rows.
+
+        start_combat used to clear every combatant, including heroes, and then
+        recreate them at full HP. That silently erased wounds, Dying/Wounded
+        conditions, and rest healing between encounters. Heroes now survive;
+        only monsters/NPCs from the previous fight are discarded.
+        """
+        with self._conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM combatants WHERE campaign_id = ? AND kind != 'hero'",
+                (campaign_id,),
+            )
+            return cur.rowcount
 
     def deactivate_combatants(self, campaign_id: int) -> int:
         """Mark every combatant in the campaign inactive; returns how many

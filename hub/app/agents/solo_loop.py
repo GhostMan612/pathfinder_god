@@ -28,10 +28,12 @@ down, the turn still resolves with template narration and the same dice
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import random
 import re
+import weakref
 import zlib
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -67,6 +69,25 @@ SKILL_CHECK_DC = 15
 REST_HEAL_DICE = "1d8"
 HERO_INITIATIVE_BONUS = 2
 MONSTER_INITIATIVE_BONUS = 1
+
+# One turn gate per campaign, scoped to the running event loop. The API creates
+# a fresh SoloLoop per request, so a per-instance lock would not coordinate two
+# simultaneous requests. This keeps state mutations serialized in this process;
+# reserve_turn_num() is still the database-level guard for turn numbering.
+_TURN_LOCKS: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+def _campaign_turn_lock(campaign_id: int) -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    by_campaign = _TURN_LOCKS.get(loop)
+    if by_campaign is None:
+        by_campaign = {}
+        _TURN_LOCKS[loop] = by_campaign
+    lock = by_campaign.get(campaign_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        by_campaign[campaign_id] = lock
+    return lock
 
 
 def hero_max_hp(level: int) -> int:
@@ -437,7 +458,19 @@ class SoloLoop:
         actor: str = "player",
         seed: int | None = None,
     ) -> TurnResult:
-        """Resolve one player action and persist everything it changes."""
+        """Resolve one player action, serialized with other state changes."""
+        async with _campaign_turn_lock(campaign_id):
+            return await self._take_turn_locked(
+                campaign_id, action, actor=actor, seed=seed
+            )
+
+    async def _take_turn_locked(
+        self,
+        campaign_id: int,
+        action: str,
+        actor: str = "player",
+        seed: int | None = None,
+    ) -> TurnResult:
         if not self.repo.campaign_exists(campaign_id):
             raise ValueError(f"no campaign {campaign_id}")
         state = self.repo.ensure_solo_state(campaign_id)
@@ -978,17 +1011,31 @@ class SoloLoop:
     def _ensure_hero_combatants(
         self, campaign_id: int, rng: random.Random, party_level: int = 1
     ) -> list[int]:
-        """Create (or refresh) one hero combatant row per party member.
+        """Create missing hero rows and reactivate existing ones.
 
-        Heroes are unique by name, so upsert is safe here. Rows start at
-        full HP: the party table stores no current HP, so a hero with no
-        combatant row yet is assumed unwounded. start_combat calls this to
-        build the roster; resting in exploration calls it so a rest before
-        the first combat still has rows to heal.
+        Existing rows keep their HP, conditions, AC, and max HP across
+        encounters. Only a hero with no row yet starts at full HP. This is
+        what lets rest healing and Wounded/Dying state survive the next
+        ``start_combat``; the old implementation cleared every row and
+        recreated heroes at full HP.
         """
         party = self.repo.get_party(campaign_id)
+        existing = [
+            c for c in self.repo.get_combatants(campaign_id) if c.kind == "hero"
+        ]
         hero_ids: list[int] = []
         for member in party:
+            name = member.get("name") or "Hero"
+            initiative = rng.randint(1, 20) + HERO_INITIATIVE_BONUS
+            match = next((c for c in existing if c.name == name), None)
+            if match is not None:
+                existing.remove(match)
+                self.repo.update_combatant(
+                    match.id, initiative=initiative, is_active=True
+                )
+                hero_ids.append(match.id)
+                continue
+
             level = int(member.get("level") or 1)
             stats = member.get("stats_json")
             if isinstance(stats, str):
@@ -1000,26 +1047,36 @@ class SoloLoop:
             hero_ids.append(
                 self.repo.upsert_combatant(
                     campaign_id=campaign_id,
-                    name=member.get("name") or "Hero",
+                    name=name,
                     kind="hero",
                     hp=max_hp,
                     max_hp=max_hp,
                     ac=15,
-                    initiative=rng.randint(1, 20) + HERO_INITIATIVE_BONUS,
+                    initiative=initiative,
                 )
             )
+
         if not hero_ids:
-            hero_ids.append(
-                self.repo.upsert_combatant(
-                    campaign_id=campaign_id,
-                    name="Hero",
-                    kind="hero",
-                    hp=hero_max_hp(party_level),
-                    max_hp=hero_max_hp(party_level),
-                    ac=15,
-                    initiative=rng.randint(1, 20) + HERO_INITIATIVE_BONUS,
+            initiative = rng.randint(1, 20) + HERO_INITIATIVE_BONUS
+            if existing:
+                hero = existing[0]
+                self.repo.update_combatant(
+                    hero.id, initiative=initiative, is_active=True
                 )
-            )
+                hero_ids.append(hero.id)
+            else:
+                max_hp = hero_max_hp(party_level)
+                hero_ids.append(
+                    self.repo.upsert_combatant(
+                        campaign_id=campaign_id,
+                        name="Hero",
+                        kind="hero",
+                        hp=max_hp,
+                        max_hp=max_hp,
+                        ac=15,
+                        initiative=initiative,
+                    )
+                )
         return hero_ids
 
     async def start_combat(
@@ -1031,16 +1088,36 @@ class SoloLoop:
         party_level: int = 1,
         seed: int | None = None,
     ) -> CombatStartResult:
-        """Build combatants from party + monsters, roll initiative, open round 1."""
+        """Build combatants from party + monsters, serialized with turns."""
+        async with _campaign_turn_lock(campaign_id):
+            return await self._start_combat_locked(
+                campaign_id,
+                monster_names=monster_names,
+                theme=theme,
+                threat=threat,
+                party_level=party_level,
+                seed=seed,
+            )
+
+    async def _start_combat_locked(
+        self,
+        campaign_id: int,
+        monster_names: list[str] | None = None,
+        theme: str | None = None,
+        threat: str = "moderate",
+        party_level: int = 1,
+        seed: int | None = None,
+    ) -> CombatStartResult:
         if not self.repo.campaign_exists(campaign_id):
             raise ValueError(f"no campaign {campaign_id}")
         state = self.repo.ensure_solo_state(campaign_id)
         rng = random.Random(
             seed if seed is not None else zlib.crc32(f"combat:{campaign_id}".encode())
         )
-        self.repo.clear_combatants(campaign_id)
+        # Keep persistent hero rows; discard only the previous encounter.
+        self.repo.clear_non_hero_combatants(campaign_id)
 
-        # Heroes first, in party order.
+        # Heroes first, in party order. Existing heroes keep HP/conditions.
         hero_ids = self._ensure_hero_combatants(campaign_id, rng, party_level)
 
         # Monsters: named builds via the monster builder, theme via the
@@ -1079,7 +1156,7 @@ class SoloLoop:
                 )
             )
 
-        combatants = self.repo.get_combatants(campaign_id)
+        combatants = self.repo.get_combatants(campaign_id, active_only=True)
         combatants.sort(key=lambda c: (-c.initiative, c.name))
         for order, c in enumerate(combatants):
             self.repo.update_combatant(c.id, turn_order=order)
@@ -1173,7 +1250,11 @@ class SoloLoop:
             return []
 
     async def end_turn(self, campaign_id: int) -> dict:
-        """Advance initiative by one combatant without a player action."""
+        """Advance initiative by one combatant, serialized with other turns."""
+        async with _campaign_turn_lock(campaign_id):
+            return await self._end_turn_locked(campaign_id)
+
+    async def _end_turn_locked(self, campaign_id: int) -> dict:
         if not self.repo.campaign_exists(campaign_id):
             raise ValueError(f"no campaign {campaign_id}")
         state = self.repo.ensure_solo_state(campaign_id)
@@ -1190,6 +1271,10 @@ class SoloLoop:
 
     async def end_combat(self, campaign_id: int) -> dict:
         """Close combat: back to exploration, initiative cleared."""
+        async with _campaign_turn_lock(campaign_id):
+            return await self._end_combat_locked(campaign_id)
+
+    async def _end_combat_locked(self, campaign_id: int) -> dict:
         if not self.repo.campaign_exists(campaign_id):
             raise ValueError(f"no campaign {campaign_id}")
         self.repo.update_solo_state(

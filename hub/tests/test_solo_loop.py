@@ -8,6 +8,7 @@ only; the LLM is always faked — no Ollama is contacted.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -591,6 +592,66 @@ async def test_rest_before_first_combat_creates_hero_rows(tmp_path: Path) -> Non
     assert heroes[0].hp == heroes[0].max_hp
 
 
+async def test_hero_hp_and_conditions_survive_next_combat(tmp_path: Path) -> None:
+    loop = _make_loop(tmp_path / "campaign.db")
+    created = await loop.create_campaign(
+        "SAMPLE CAMPAIGN", premise="A quiet valley.", hero_prompt="a brave human fighter"
+    )
+    cid = created["campaign_id"]
+    await loop.start_combat(cid, monster_names=["SAMPLE GOBLIN"], seed=3)
+    hero = next(c for c in loop.repo.get_combatants(cid) if c.kind == "hero")
+    loop.repo.update_combatant(
+        hero.id, hp=5, conditions=[{"name": "Wounded", "value": 1}]
+    )
+    await loop.end_combat(cid)
+
+    # The next encounter keeps the same hero row rather than deleting it and
+    # recreating a full-HP replacement.
+    await loop.start_combat(cid, monster_names=["SAMPLE GOBLIN"], seed=4)
+    heroes = [c for c in loop.repo.get_combatants(cid) if c.kind == "hero"]
+    assert len(heroes) == 1
+    assert heroes[0].id == hero.id
+    assert heroes[0].hp == 5
+    assert heroes[0].max_hp == hero.max_hp
+    assert heroes[0].conditions == [{"name": "Wounded", "value": 1}]
+    assert heroes[0].is_active is True
+    # Old monsters are replaced, not accumulated.
+    assert len([c for c in loop.repo.get_combatants(cid) if c.kind == "monster"]) == 1
+
+
+async def test_concurrent_turns_are_serialized(tmp_path: Path) -> None:
+    class SlowFakeLLM(FakeLLM):
+        def __init__(self) -> None:
+            super().__init__()
+            self.active = 0
+            self.max_active = 0
+
+        async def generate(self, prompt: str = "", **kwargs):
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            try:
+                await asyncio.sleep(0.01)
+                return await super().generate(prompt, **kwargs)
+            finally:
+                self.active -= 1
+
+    llm = SlowFakeLLM()
+    loop = _make_loop(tmp_path / "campaign.db", llm=llm)
+    created = await loop.create_campaign(
+        "SAMPLE CAMPAIGN", premise="A quiet valley.", hero_prompt="a brave human fighter"
+    )
+    cid = created["campaign_id"]
+    await loop.start_combat(cid, monster_names=["SAMPLE GOBLIN"], seed=3)
+
+    first, second = await asyncio.gather(
+        loop.take_turn(cid, "I attack the SAMPLE GOBLIN", seed=1),
+        loop.take_turn(cid, "I attack the SAMPLE GOBLIN", seed=2),
+    )
+    assert sorted([first.turn_num, second.turn_num]) == [1, 2]
+    assert llm.max_active == 1
+    assert len(loop.repo.get_recent_turns(cid)) == 2
+
+
 def test_encounter_monster_ac_scales_with_level_and_template() -> None:
     from app.agents.solo_loop import _encounter_monster_ac
 
@@ -718,6 +779,37 @@ def test_legacy_db_migrates_combatants_unique_and_turn_counter(tmp_path: Path) -
     goblins = [c for c in repo.get_combatants(1) if c.name == "SAMPLE GOBLIN"]
     assert len(goblins) == 3
     assert sorted(c.hp for c in goblins) == [8, 12, 12]
+
+    # The rebuild must not leave the new table without its index or its
+    # updated_at trigger; both originally belonged to the renamed table.
+    check = sqlite3.connect(str(db_path))
+    try:
+        schema_objects = {
+            row[0]
+            for row in check.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type IN ('index', 'trigger') AND tbl_name = 'combatants'"
+            )
+        }
+        assert "idx_combatants_campaign" in schema_objects
+        assert "trigger_combatants_updated" in schema_objects
+        check.execute(
+            "UPDATE combatants SET updated_at = '2000-01-01 00:00:00' WHERE id = ?",
+            (first,),
+        )
+        check.commit()
+    finally:
+        check.close()
+    repo.update_combatant(first, hp=4)
+    check = sqlite3.connect(str(db_path))
+    try:
+        stamp = check.execute(
+            "SELECT updated_at FROM combatants WHERE id = ?", (first,)
+        ).fetchone()[0]
+    finally:
+        check.close()
+    assert stamp != "2000-01-01 00:00:00"
+
     # The turn counter was backfilled past the two recorded turns.
     assert repo.reserve_turn_num(1) == 3
     assert repo.reserve_turn_num(1) == 4
