@@ -33,6 +33,55 @@ logger = logging.getLogger(__name__)
 
 CELL_SIZE = 50
 
+PROP_TYPES = ("crate", "brazier", "pillar", "chest", "barrel", "altar")
+
+
+@dataclass
+class MapProp:
+    type: str
+    x: int
+    y: int
+    rot: int
+    scale: float = 1.0
+
+
+@dataclass
+class MapLight:
+    x: int
+    y: int
+    color: str
+    radius_m: float
+
+
+@dataclass
+class MapZone:
+    name: str
+    biome: str
+    rect: tuple[int, int, int, int]
+
+
+@dataclass
+class MapFog:
+    color: str
+    density: float
+
+
+@dataclass
+class MapGrid:
+    w: int
+    h: int
+    tile_m: float
+
+
+@dataclass
+class MapScene:
+    grid: MapGrid
+    heightmap: list[list[int]]
+    zones: list[MapZone]
+    props: list[MapProp]
+    lights: list[MapLight]
+    fog: MapFog | None
+
 
 @dataclass
 class MapRoom:
@@ -68,6 +117,7 @@ class BuildResult:
     gm_base64_png: str | None
     player_base64_png: str | None
     error: str | None
+    scene: MapScene | None = None
 
 
 SYSTEM_PROMPT = """You are a Pathfinder 2e battle map designer.
@@ -157,6 +207,79 @@ class MapMakerAgent:
         if not (1 <= w <= width and 1 <= h <= height):
             return False
         return 0 <= x + w <= width and 0 <= y + h <= height
+
+    @staticmethod
+    def _seed_for(layout: MapLayout) -> int:
+        import hashlib
+
+        payload = json.dumps(
+            {
+                "width": layout.width,
+                "height": layout.height,
+                "rooms": [
+                    {"x": r.x, "y": r.y, "w": r.w, "h": r.h, "name": r.name}
+                    for r in layout.rooms
+                ],
+            },
+            sort_keys=True,
+        ).encode("utf-8")
+        return int.from_bytes(hashlib.sha256(payload).digest()[:8], "big")
+
+    @classmethod
+    def derive_scene(cls, layout: MapLayout) -> MapScene:
+        import random
+
+        rng = random.Random(cls._seed_for(layout))
+        heightmap = [[0 for _ in range(layout.width)] for _ in range(layout.height)]
+        zones: list[MapZone] = []
+        props: list[MapProp] = []
+        lights: list[MapLight] = []
+
+        for room in layout.rooms:
+            for dy in range(room.h):
+                for dx in range(room.w):
+                    gx, gy = room.x + dx, room.y + dy
+                    on_border = dx == 0 or dy == 0 or dx == room.w - 1 or dy == room.h - 1
+                    heightmap[gy][gx] = 3 if on_border else 1
+            lowered = room.name.lower()
+            if any(k in lowered for k in ("tavern", "inn", "warden", "guild")):
+                biome = "tavern"
+            elif any(k in lowered for k in ("crypt", "dungeon", "vault", "treasure")):
+                biome = "vault"
+            else:
+                biome = "stone"
+            zones.append(
+                MapZone(
+                    name=room.name,
+                    biome=biome,
+                    rect=(room.x, room.y, room.w, room.h),
+                )
+            )
+            if room.w >= 2 and room.h >= 2 and len(props) < 8:
+                cx = room.x + room.w // 2
+                cy = room.y + room.h // 2
+                prop_type = PROP_TYPES[len(props) % len(PROP_TYPES)]
+                rot = rng.choice([0, 90, 180, 270])
+                props.append(MapProp(type=prop_type, x=cx, y=cy, rot=rot, scale=1.0))
+            if room.w >= 3 and room.h >= 3 and len(lights) < 8:
+                lights.append(
+                    MapLight(
+                        x=room.x + room.w // 2,
+                        y=room.y + room.h // 2,
+                        color="#ff9a3c",
+                        radius_m=3.0,
+                    )
+                )
+
+        fog = MapFog(color="#0a0d14", density=0.02) if layout.rooms else None
+        return MapScene(
+            grid=MapGrid(w=layout.width, h=layout.height, tile_m=1.0),
+            heightmap=heightmap,
+            zones=zones,
+            props=props,
+            lights=lights,
+            fog=fog,
+        )
 
     @staticmethod
     def _load_font() -> Any:
@@ -308,5 +431,6 @@ class MapMakerAgent:
             gm_base64_png=gm_b64,
             player_base64_png=player_b64,
             error=None,
+            scene=self.derive_scene(layout),
         )
 

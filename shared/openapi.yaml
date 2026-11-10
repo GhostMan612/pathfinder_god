@@ -940,9 +940,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-        '413':
-          description: Request entity too large (audio exceeds the server limit)
-          content: {}
   /voice/speak:
     post:
       tags:
@@ -967,22 +964,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /voice/asr-stream:
-    post:
-      tags:
-      - voice
-      summary: Streaming ASR (WebSocket)
-      description: '/voice/asr-stream is a WebSocket, which OpenAPI 3.0 cannot express
-        natively; it is documented here so the frame contract is pinned. The client
-        streams base64 PCM16 (16 kHz mono) chunks as {"type": "pcm", "data": "..."}
-        and receives partial frames of the form {"type": "partial", "text": "...",
-        "confirmed": "...", "unstable": "..."} where "confirmed" carries the LocalAgreement-2
-        prefix two consecutive passes agreed on, plus {"type": "final", "text": "..."}
-        on flush/end/stop/close.'
-      responses:
-        '101':
-          description: Switching Protocols (WebSocket upgrade)
-          content: {}
 components:
   schemas:
     AskRequest:
@@ -1561,6 +1542,19 @@ components:
       required:
       - q
       title: FetchRequest
+    FogResponse:
+      properties:
+        color:
+          type: string
+          title: Color
+        density:
+          type: number
+          title: Density
+      type: object
+      required:
+      - color
+      - density
+      title: FogResponse
     GenerateRequest:
       properties:
         prompt:
@@ -1608,6 +1602,23 @@ components:
       - edition
       - sources
       title: GenerateResponse
+    GridResponse:
+      properties:
+        w:
+          type: integer
+          title: W
+        h:
+          type: integer
+          title: H
+        tile_m:
+          type: number
+          title: Tile M
+      type: object
+      required:
+      - w
+      - h
+      - tile_m
+      title: GridResponse
     HTTPValidationError:
       properties:
         detail:
@@ -1648,6 +1659,27 @@ components:
       - timestamp
       - uptime_seconds
       title: HealthResponse
+    LightResponse:
+      properties:
+        x:
+          type: integer
+          title: X
+        y:
+          type: integer
+          title: Y
+        color:
+          type: string
+          title: Color
+        radius_m:
+          type: number
+          title: Radius M
+      type: object
+      required:
+      - x
+      - y
+      - color
+      - radius_m
+      title: LightResponse
     LootRequest:
       properties:
         prompt:
@@ -1739,6 +1771,10 @@ components:
             type: array
           - type: 'null'
           title: Secret Features
+        scene:
+          anyOf:
+          - $ref: '#/components/schemas/SceneResponse'
+          - type: 'null'
         error:
           anyOf:
           - type: string
@@ -1981,6 +2017,34 @@ components:
       required:
       - name
       title: PartyMemberRequest
+    PropResponse:
+      properties:
+        type:
+          type: string
+          pattern: ^(crate|brazier|pillar|chest|barrel|altar)$
+          title: Type
+        x:
+          type: integer
+          title: X
+        y:
+          type: integer
+          title: Y
+        rot:
+          type: integer
+          maximum: 270.0
+          minimum: 0.0
+          title: Rot
+        scale:
+          type: number
+          title: Scale
+          default: 1.0
+      type: object
+      required:
+      - type
+      - x
+      - y
+      - rot
+      title: PropResponse
     ReadinessResponse:
       properties:
         status:
@@ -2044,6 +2108,44 @@ components:
       - edition
       - results
       title: RulesSearchResponse
+    SceneResponse:
+      properties:
+        grid:
+          $ref: '#/components/schemas/GridResponse'
+        heightmap:
+          items:
+            items:
+              type: integer
+            type: array
+          type: array
+          title: Heightmap
+        zones:
+          items:
+            $ref: '#/components/schemas/ZoneResponse'
+          type: array
+          title: Zones
+        props:
+          items:
+            $ref: '#/components/schemas/PropResponse'
+          type: array
+          title: Props
+        lights:
+          items:
+            $ref: '#/components/schemas/LightResponse'
+          type: array
+          title: Lights
+        fog:
+          anyOf:
+          - $ref: '#/components/schemas/FogResponse'
+          - type: 'null'
+      type: object
+      required:
+      - grid
+      - heightmap
+      - zones
+      - props
+      - lights
+      title: SceneResponse
     SpeakRequest:
       properties:
         text:
@@ -2181,6 +2283,25 @@ components:
       - msg
       - type
       title: ValidationError
+    ZoneResponse:
+      properties:
+        name:
+          type: string
+          title: Name
+        biome:
+          type: string
+          title: Biome
+        rect:
+          items:
+            type: integer
+          type: array
+          title: Rect
+      type: object
+      required:
+      - name
+      - biome
+      - rect
+      title: ZoneResponse
   securitySchemes:
     HTTPBearer:
       type: http
