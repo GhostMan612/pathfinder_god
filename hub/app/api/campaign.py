@@ -598,3 +598,216 @@ async def add_party_member(
         stats=member.stats,
     )
     return {"id": member_id, "name": member.name}
+
+
+# ──────────────────────────────────────────────────────────────
+# Solo campaign loop — typed endpoints (all require_auth)
+#
+# These are the solo-play surface: create a campaign, take turns
+# against the server-owned state machine, and open/close combat.
+# The legacy routes above (GET /campaign, /note, /reset, /npcs, /party)
+# are untouched and keep working.
+# ──────────────────────────────────────────────────────────────
+
+from app.agents.solo_loop import SoloLoop
+
+
+class CreateCampaignRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    edition: Literal["1e", "2e"] = "2e"
+    premise: str = Field(default="", max_length=4000)
+    hero_prompt: str | None = Field(default=None, max_length=2000)
+
+
+class CreateCampaignResponse(BaseModel):
+    campaign_id: int
+    name: str
+    edition: str
+    location: str | None = None
+    quest: str | None = None
+    hero: str | None = None
+    opening_narration: str
+    source: str = "fallback"
+
+
+class TurnRequest(BaseModel):
+    action: str = Field(..., min_length=1, max_length=4000)
+    actor: str = Field(default="player", max_length=60)
+    # Optional explicit seed: replaying a turn with the same seed
+    # reproduces its dice exactly. Without it the seed is derived from
+    # campaign:turn, which is equally reproducible.
+    seed: int | None = Field(default=None, ge=0, le=2147483647)
+
+
+class TurnResponse(BaseModel):
+    campaign_id: int
+    turn_num: int
+    narration: str
+    dice_rolls: list[dict] = []
+    hp_changes: list[dict] = []
+    conditions: list[dict] = []
+    quest_updates: list[dict] = []
+    location: str | None = None
+    phase: str
+    round: int
+    active_combatant: str | None = None
+    choices: list[str] = []
+    seed: int
+    source: str = "fallback"
+    kind: str = "other"
+
+
+class SoloStateResponse(BaseModel):
+    campaign_id: int
+    name: str
+    edition: str
+    phase: str
+    round: int
+    location: str | None = None
+    location_id: int | None = None
+    active_combatant_id: int | None = None
+    combatants: list[dict] = []
+    quests: list[dict] = []
+    recent_turns: list[dict] = []
+    chronicle: str = ""
+
+
+class CombatStartRequest(BaseModel):
+    monster_names: list[str] | None = Field(default=None, max_length=20)
+    theme: str | None = Field(default=None, max_length=200)
+    threat: Literal["trivial", "low", "moderate", "severe", "extreme"] = "moderate"
+    party_level: int = Field(default=1, ge=1, le=20)
+    seed: int | None = Field(default=None, ge=0, le=2147483647)
+
+
+class CombatStartResponse(BaseModel):
+    campaign_id: int
+    phase: str
+    round: int
+    combatants: list[dict] = []
+    active_combatant: str | None = None
+
+
+class CombatEndTurnResponse(BaseModel):
+    phase: str
+    round: int
+    active_combatant: str | None = None
+
+
+def _solo_loop(repo: CampaignRepository) -> SoloLoop:
+    """Build a SoloLoop with its own LLM + orchestrator clients.
+
+    Callers must `await loop.close()` in a finally block: the loop owns
+    the httpx clients it creates.
+    """
+    settings = get_settings()
+    llm = OllamaClient(settings.ollama_host)
+    orchestrator = LLMOrchestrator(repo)
+    return SoloLoop(repo, llm=llm, orchestrator=orchestrator)
+
+
+@router.post("/create", response_model=CreateCampaignResponse)
+async def create_solo_campaign(
+    request: CreateCampaignRequest,
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+) -> CreateCampaignResponse:
+    audit_logger.log_data_access(
+        user_id=user.get("sub", "unknown"),
+        resource="campaign",
+        action="create",
+        ip="unknown",
+    )
+    loop = _solo_loop(repo)
+    try:
+        result = await loop.create_campaign(
+            name=request.name,
+            edition=request.edition,
+            premise=request.premise,
+            hero_prompt=request.hero_prompt,
+        )
+    finally:
+        await loop.close()
+    return CreateCampaignResponse(**result)
+
+
+@router.post("/{campaign_id}/turn", response_model=TurnResponse)
+async def solo_turn(
+    campaign_id: int,
+    request: TurnRequest,
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+) -> TurnResponse:
+    loop = _solo_loop(repo)
+    try:
+        result = await loop.take_turn(
+            campaign_id, request.action, actor=request.actor, seed=request.seed
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    finally:
+        await loop.close()
+    return TurnResponse(**result.to_dict())
+
+
+@router.get("/{campaign_id}/state", response_model=SoloStateResponse)
+async def solo_state(
+    campaign_id: int,
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+) -> SoloStateResponse:
+    loop = SoloLoop(repo)
+    try:
+        return SoloStateResponse(**loop.get_state(campaign_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/{campaign_id}/combat/start", response_model=CombatStartResponse)
+async def solo_combat_start(
+    campaign_id: int,
+    request: CombatStartRequest,
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+) -> CombatStartResponse:
+    loop = _solo_loop(repo)
+    try:
+        result = await loop.start_combat(
+            campaign_id,
+            monster_names=request.monster_names,
+            theme=request.theme,
+            threat=request.threat,
+            party_level=request.party_level,
+            seed=request.seed,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    finally:
+        await loop.close()
+    return CombatStartResponse(**result.to_dict())
+
+
+@router.post("/{campaign_id}/combat/end-turn", response_model=CombatEndTurnResponse)
+async def solo_combat_end_turn(
+    campaign_id: int,
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+) -> CombatEndTurnResponse:
+    loop = SoloLoop(repo)
+    try:
+        return CombatEndTurnResponse(**await loop.end_turn(campaign_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/{campaign_id}/combat/end", response_model=CombatEndTurnResponse)
+async def solo_combat_end(
+    campaign_id: int,
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+) -> CombatEndTurnResponse:
+    loop = SoloLoop(repo)
+    try:
+        return CombatEndTurnResponse(**await loop.end_combat(campaign_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

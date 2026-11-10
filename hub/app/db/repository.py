@@ -114,6 +114,44 @@ class Decision:
     made_by: str | None
 
 
+@dataclass
+class Combatant:
+    id: int
+    campaign_id: int
+    name: str
+    kind: str
+    hp: int
+    max_hp: int
+    temp_hp: int = 0
+    ac: int = 10
+    initiative: int = 0
+    conditions: list[dict] | None = None
+    is_active: bool = True
+    turn_order: int = 0
+
+
+@dataclass
+class SoloState:
+    campaign_id: int
+    phase: str = "exploration"
+    round_num: int = 1
+    current_location_id: int | None = None
+    active_combatant_id: int | None = None
+    turn_order: list[int] | None = None
+
+
+@dataclass
+class CampaignTurn:
+    id: int
+    campaign_id: int
+    turn_num: int
+    actor: str
+    action: str
+    narration: str
+    outcome: dict
+    dice: list[dict]
+
+
 class CampaignRepository:
     def __init__(self, db_path: str | None = None):
         self.db_path = db_path or str(settings.data_dir / "campaign.db")
@@ -196,6 +234,22 @@ class CampaignRepository:
             )
             row = cur.fetchone()
             return Campaign(**dict(row))
+
+    def create_campaign(self, name: str, edition: str = "2e") -> Campaign:
+        """Create a brand-new campaign row with an auto-assigned id."""
+        with self._conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO campaigns (name, edition) VALUES (?, ?) RETURNING *",
+                (name, edition),
+            )
+            return Campaign(**dict(cur.fetchone()))
+
+    def campaign_exists(self, campaign_id: int) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM campaigns WHERE id = ?", (campaign_id,)
+            ).fetchone()
+            return row is not None
 
     def reset_campaign(self, campaign_id: int) -> None:
         with self._conn() as conn:
@@ -1142,6 +1196,396 @@ class CampaignRepository:
                 counts["quests"] += 1
 
         return counts
+
+    # ──────────────────────────────────────────────────────────────
+    # Solo campaign loop (server-owned play state)
+    # ──────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _combatant_from_row(row: dict) -> Combatant:
+        values = dict(row)
+        values["conditions"] = json.loads(values.pop("conditions_json") or "[]")
+        values["is_active"] = bool(values.get("is_active", 1))
+        values.pop("created_at", None)
+        values.pop("updated_at", None)
+        return Combatant(**values)
+
+    def ensure_solo_state(self, campaign_id: int) -> SoloState:
+        """Create the solo_state row if missing, else return the existing one."""
+        with self._conn() as conn:
+            self._ensure_campaign(conn, campaign_id)
+            conn.execute(
+                """
+                INSERT INTO solo_state (campaign_id)
+                VALUES (?)
+                ON CONFLICT(campaign_id) DO NOTHING
+                """,
+                (campaign_id,),
+            )
+            row = conn.execute(
+                "SELECT * FROM solo_state WHERE campaign_id = ?", (campaign_id,)
+            ).fetchone()
+            values = dict(row)
+            values["turn_order"] = json.loads(values.pop("turn_order_json") or "[]")
+            values.pop("created_at", None)
+            values.pop("updated_at", None)
+            return SoloState(**values)
+
+    def get_solo_state(self, campaign_id: int) -> SoloState | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM solo_state WHERE campaign_id = ?", (campaign_id,)
+            ).fetchone()
+            if not row:
+                return None
+            values = dict(row)
+            values["turn_order"] = json.loads(values.pop("turn_order_json") or "[]")
+            values.pop("created_at", None)
+            values.pop("updated_at", None)
+            return SoloState(**values)
+
+    def update_solo_state(
+        self,
+        campaign_id: int,
+        *,
+        phase: str | None = None,
+        round_num: int | None = None,
+        current_location_id: int | None = None,
+        active_combatant_id: int | None = None,
+        turn_order: list[int] | None = None,
+        clear_active: bool = False,
+    ) -> SoloState:
+        """Patch solo_state fields; only the given fields change."""
+        state = self.ensure_solo_state(campaign_id)
+        new_phase = phase if phase is not None else state.phase
+        new_round = round_num if round_num is not None else state.round_num
+        new_location = (
+            current_location_id
+            if current_location_id is not None
+            else state.current_location_id
+        )
+        new_active = (
+            None
+            if clear_active
+            else (
+                active_combatant_id
+                if active_combatant_id is not None
+                else state.active_combatant_id
+            )
+        )
+        new_order = turn_order if turn_order is not None else (state.turn_order or [])
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE solo_state SET phase = ?, round_num = ?,
+                    current_location_id = ?, active_combatant_id = ?,
+                    turn_order_json = ?
+                WHERE campaign_id = ?
+                """,
+                (
+                    new_phase,
+                    new_round,
+                    new_location,
+                    new_active,
+                    json.dumps(new_order),
+                    campaign_id,
+                ),
+            )
+        return SoloState(
+            campaign_id=campaign_id,
+            phase=new_phase,
+            round_num=new_round,
+            current_location_id=new_location,
+            active_combatant_id=new_active,
+            turn_order=new_order,
+        )
+
+    def set_current_location(self, campaign_id: int, location_id: int) -> SoloState:
+        return self.update_solo_state(campaign_id, current_location_id=location_id)
+
+    def upsert_combatant(
+        self,
+        campaign_id: int,
+        name: str,
+        kind: str = "monster",
+        hp: int = 1,
+        max_hp: int = 1,
+        temp_hp: int = 0,
+        ac: int = 10,
+        initiative: int = 0,
+        conditions: list[dict] | None = None,
+        turn_order: int = 0,
+        is_active: bool = True,
+    ) -> int:
+        with self._conn() as conn:
+            self._ensure_campaign(conn, campaign_id)
+            cur = conn.execute(
+                """
+                INSERT INTO combatants (campaign_id, name, kind, hp, max_hp, temp_hp,
+                                       ac, initiative, conditions_json, is_active, turn_order)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(campaign_id, name) DO UPDATE SET
+                    kind = excluded.kind, hp = excluded.hp, max_hp = excluded.max_hp,
+                    temp_hp = excluded.temp_hp, ac = excluded.ac,
+                    initiative = excluded.initiative,
+                    conditions_json = excluded.conditions_json,
+                    is_active = excluded.is_active, turn_order = excluded.turn_order,
+                    updated_at = datetime('now')
+                RETURNING id
+                """,
+                (
+                    campaign_id,
+                    name,
+                    kind,
+                    max(0, hp),
+                    max(1, max_hp),
+                    max(0, temp_hp),
+                    ac,
+                    initiative,
+                    json.dumps(conditions or []),
+                    1 if is_active else 0,
+                    turn_order,
+                ),
+            )
+            return cur.fetchone()[0]
+
+    def get_combatants(self, campaign_id: int, active_only: bool = False) -> list[Combatant]:
+        with self._conn() as conn:
+            sql = "SELECT * FROM combatants WHERE campaign_id = ?"
+            if active_only:
+                sql += " AND is_active = 1"
+            sql += " ORDER BY turn_order, id"
+            rows = conn.execute(sql, (campaign_id,)).fetchall()
+            return [self._combatant_from_row(dict(r)) for r in rows]
+
+    def get_combatant(self, campaign_id: int, combatant_id: int) -> Combatant | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM combatants WHERE campaign_id = ? AND id = ?",
+                (campaign_id, combatant_id),
+            ).fetchone()
+            return self._combatant_from_row(dict(row)) if row else None
+
+    def get_combatant_by_name(self, campaign_id: int, name: str) -> Combatant | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM combatants WHERE campaign_id = ? AND name = ?",
+                (campaign_id, name),
+            ).fetchone()
+            return self._combatant_from_row(dict(row)) if row else None
+
+    def update_combatant(
+        self,
+        combatant_id: int,
+        *,
+        hp: int | None = None,
+        temp_hp: int | None = None,
+        conditions: list[dict] | None = None,
+        initiative: int | None = None,
+        turn_order: int | None = None,
+        is_active: bool | None = None,
+    ) -> Combatant | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM combatants WHERE id = ?", (combatant_id,)
+            ).fetchone()
+            if not row:
+                return None
+            current = self._combatant_from_row(dict(row))
+            new_hp = max(0, hp) if hp is not None else current.hp
+            new_temp = max(0, temp_hp) if temp_hp is not None else current.temp_hp
+            new_conds = conditions if conditions is not None else (current.conditions or [])
+            new_init = initiative if initiative is not None else current.initiative
+            new_order = turn_order if turn_order is not None else current.turn_order
+            new_active = is_active if is_active is not None else current.is_active
+            conn.execute(
+                """
+                UPDATE combatants SET hp = ?, temp_hp = ?, conditions_json = ?,
+                    initiative = ?, turn_order = ?, is_active = ?
+                WHERE id = ?
+                """,
+                (
+                    new_hp,
+                    new_temp,
+                    json.dumps(new_conds),
+                    new_init,
+                    new_order,
+                    1 if new_active else 0,
+                    combatant_id,
+                ),
+            )
+            return Combatant(
+                id=current.id,
+                campaign_id=current.campaign_id,
+                name=current.name,
+                kind=current.kind,
+                hp=new_hp,
+                max_hp=current.max_hp,
+                temp_hp=new_temp,
+                ac=current.ac,
+                initiative=new_init,
+                conditions=new_conds,
+                is_active=new_active,
+                turn_order=new_order,
+            )
+
+    def clear_combatants(self, campaign_id: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "DELETE FROM combatants WHERE campaign_id = ?", (campaign_id,)
+            )
+
+    def get_next_turn_num(self, campaign_id: int) -> int:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(turn_num), 0) FROM campaign_turns WHERE campaign_id = ?",
+                (campaign_id,),
+            ).fetchone()
+            return (row[0] if row else 0) + 1
+
+    def record_turn(
+        self,
+        campaign_id: int,
+        turn_num: int,
+        actor: str,
+        action: str,
+        narration: str,
+        outcome: dict | None = None,
+        dice: list[dict] | None = None,
+    ) -> int:
+        with self._conn() as conn:
+            self._ensure_campaign(conn, campaign_id)
+            cur = conn.execute(
+                """
+                INSERT INTO campaign_turns (campaign_id, turn_num, actor, action,
+                                           narration, outcome_json, dice_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                RETURNING id
+                """,
+                (
+                    campaign_id,
+                    turn_num,
+                    actor,
+                    action,
+                    narration,
+                    json.dumps(outcome or {}),
+                    json.dumps(dice or []),
+                ),
+            )
+            return cur.fetchone()[0]
+
+    def get_recent_turns(self, campaign_id: int, limit: int = 10) -> list[CampaignTurn]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM campaign_turns WHERE campaign_id = ?"
+                " ORDER BY turn_num DESC LIMIT ?",
+                (campaign_id, limit),
+            ).fetchall()
+            out = []
+            for r in rows:
+                values = dict(r)
+                values["outcome"] = json.loads(values.pop("outcome_json") or "{}")
+                values["dice"] = json.loads(values.pop("dice_json") or "[]")
+                values.pop("created_at", None)
+                out.append(CampaignTurn(**values))
+            return list(reversed(out))
+
+    def get_quests(self, campaign_id: int) -> list[Quest]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM quests WHERE campaign_id = ? ORDER BY name",
+                (campaign_id,),
+            ).fetchall()
+            out = []
+            for r in rows:
+                values = dict(r)
+                values["objectives"] = json.loads(values.pop("objectives_json") or "[]")
+                values["rewards"] = json.loads(values.pop("rewards_json") or "[]")
+                values.pop("created_at", None)
+                values.pop("updated_at", None)
+                out.append(Quest(**values))
+            return out
+
+    def set_quest_objective(
+        self, campaign_id: int, quest_name: str, objective_description: str
+    ) -> dict | None:
+        """Mark one objective of a quest completed; complete the quest when all are done.
+
+        Returns {"quest": name, "objective": description, "quest_completed": bool}
+        or None when the quest/objective was not found. Objective matching is
+        case-insensitive substring on the objective description.
+        """
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM quests WHERE campaign_id = ? AND name = ?",
+                (campaign_id, quest_name),
+            ).fetchone()
+            if not row:
+                return None
+            values = dict(row)
+            objectives = json.loads(values.get("objectives_json") or "[]")
+            needle = objective_description.strip().lower()
+            matched = False
+            for obj in objectives:
+                if not isinstance(obj, dict):
+                    continue
+                desc = str(obj.get("description", ""))
+                if needle and needle in desc.lower():
+                    obj["completed"] = True
+                    matched = True
+            if not matched:
+                return None
+            all_done = bool(objectives) and all(
+                bool(o.get("completed")) for o in objectives if isinstance(o, dict)
+            )
+            status = "completed" if all_done else values.get("status", "active")
+            conn.execute(
+                """
+                UPDATE quests SET objectives_json = ?, status = ?,
+                    completed_session = CASE WHEN ? = 'completed'
+                        THEN COALESCE(completed_session, 1) ELSE completed_session END,
+                    updated_at = datetime('now')
+                WHERE campaign_id = ? AND name = ?
+                """,
+                (json.dumps(objectives), status, status, campaign_id, quest_name),
+            )
+            return {
+                "quest": quest_name,
+                "objective": objective_description,
+                "quest_completed": all_done,
+            }
+
+    def mirror_combat_json(self, campaign_id: int) -> str:
+        """Rebuild the legacy opaque combat_json from solo combatants + state.
+
+        The spoke still reads campaigns.combat_json; this keeps that mirror
+        current without making it the source of truth.
+        """
+        state = self.get_solo_state(campaign_id)
+        combatants = self.get_combatants(campaign_id)
+        scene = {
+            "phase": state.phase if state else "exploration",
+            "round": state.round_num if state else 1,
+            "active_combatant_id": state.active_combatant_id if state else None,
+            "combatants": [
+                {
+                    "id": c.id,
+                    "name": c.name,
+                    "kind": c.kind,
+                    "hp": c.hp,
+                    "max_hp": c.max_hp,
+                    "temp_hp": c.temp_hp,
+                    "ac": c.ac,
+                    "initiative": c.initiative,
+                    "conditions": c.conditions or [],
+                    "is_active": c.is_active,
+                }
+                for c in combatants
+            ],
+        }
+        scene_json = json.dumps(scene)
+        self.set_combat_json(campaign_id, scene_json)
+        return scene_json
 
     def get_session_notes(self, campaign_id: int) -> list[dict]:
         with self._conn() as conn:
