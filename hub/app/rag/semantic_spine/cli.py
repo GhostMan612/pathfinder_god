@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 
 from app.config import get_settings
+
 from .benchmark import run_comparative_benchmark, run_synthetic_benchmark
 from .model import SemanticSpineError
 from .ollama import OllamaEmbedder
@@ -25,6 +26,7 @@ def main() -> int:
     parser.add_argument("--chunk-size", type=int, default=1800)
     parser.add_argument("--chunk-overlap", type=int, default=200)
     parser.add_argument("--ollama-url", default=None)
+    parser.add_argument("--num-ctx", type=int, default=4096)
     parser.add_argument("--source", type=Path, default=None)
     parser.add_argument("--index", type=Path, default=None)
     parser.add_argument("--edition", choices=("1e", "2e", "both"), default="both")
@@ -43,6 +45,7 @@ def main() -> int:
             endpoint=args.ollama_url or settings.ollama_host,
             model=args.model,
             dimensions=args.dimensions,
+            num_ctx=args.num_ctx,
         )
         if args.action == "preflight":
             identity = embedder.identity()

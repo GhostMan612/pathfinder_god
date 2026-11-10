@@ -23,6 +23,7 @@ class OllamaEmbedder:
         timeout_s: float = 120.0,
         query_prefix: str = "",
         document_prefix: str = "",
+        num_ctx: int = 4096,
     ) -> None:
         parsed = urlsplit(endpoint)
         if parsed.scheme != "http" or parsed.hostname not in ("localhost", "127.0.0.1", "::1"):
@@ -31,12 +32,15 @@ class OllamaEmbedder:
             raise SemanticSpineError("Ollama endpoint must be a bare loopback base URL")
         if dimensions not in (128, 256, 512, 768):
             raise SemanticSpineError("Invalid embedding dimensions")
+        if not 512 <= num_ctx <= 32768:
+            raise SemanticSpineError("Invalid embedding context length")
         self.endpoint = endpoint.rstrip("/")
         self.model = model
         self.dimensions = dimensions
         self.timeout_s = timeout_s
         self.query_prefix = query_prefix
         self.document_prefix = document_prefix
+        self.num_ctx = num_ctx
 
     def _request(self, path: str, data: dict | None = None) -> dict:
         body = None if data is None else json.dumps(data).encode("utf-8")
@@ -91,7 +95,17 @@ class OllamaEmbedder:
         prefix = self.query_prefix if query else self.document_prefix
         payload = self._request(
             "/api/embed",
-            {"model": self.model, "input": [prefix + text for text in texts], "dimensions": self.dimensions, "truncate": False},
+            {
+                "model": self.model,
+                "input": [prefix + text for text in texts],
+                "dimensions": self.dimensions,
+                "truncate": False,
+                # Ollama's global OLLAMA_CONTEXT_LENGTH (262144 on the Dell)
+                # makes every slot allocate a huge KV cache. Embedding chunks
+                # are <= 1200 tokens, and a request that landed in that regime
+                # hung for 59 minutes before failing. Pin a sane context.
+                "options": {"num_ctx": self.num_ctx},
+            },
         )
         vectors = payload.get("embeddings")
         if not isinstance(vectors, list) or len(vectors) != len(texts):
