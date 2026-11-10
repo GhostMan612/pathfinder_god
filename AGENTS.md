@@ -99,3 +99,6 @@ $env:JAVA_HOME='C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1
 - `./gradlew` daemons get reaped in this shell → always `--no-daemon` with a capped heap
 - `io.requery:sqlite-android` does not exist on Central — the fork is `mil.nga:sqlite-android`, do not "fix" it
 - **Command Center**: Use the standalone exe at `tools/command_center/dist/PathfinderGodCommandCenter.exe` (no venv needed). `Start_CommandCenter.bat` updated.
+## Session start (OpenCode / any agent)
+- Before doing anything else, read `docs/MASTER_PROMPT.md` — it is the current mission brief: verified repo state, architecture facts, house rules, toolchain routing, and the prioritized task list.
+- Then read `artifact-chain/CHAIN.md` (status board) and `COUNCIL.md` (roles and gates). Glenn is the only merge authority; nothing merges or pushes to `main` without his explicit say-so.
