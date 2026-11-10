@@ -119,6 +119,14 @@ class TestMonsterBuild:
         assert monster.hp == int(VALID_MONSTER["hp"] * 1.2)
         assert monster.saves.fortitude == VALID_MONSTER["saves"]["fortitude"] + 2
         assert monster.strikes[0].attack_bonus == 12 + 2
+        assert monster.strikes[0].damage == "1d8+6"
+
+    @pytest.mark.asyncio
+    async def test_llm_supplied_template_is_rejected(self):
+        bad = dict(VALID_MONSTER, template="elite")
+        result = await _agent([json.dumps(bad)]).build("undead hound", level=5)
+        assert result.valid is False
+        assert any("template 'normal'" in e for e in result.errors)
 
 
 class TestMonsterEndpoints:
@@ -143,9 +151,10 @@ class TestMonsterEndpoints:
 
     def test_generate_boss_endpoint_applies_elite(self, tmp_path: Path, monkeypatch):
         client = self._client(tmp_path, monkeypatch)
-        r = client.post("/generate/boss", json={"prompt": "undead hound", "level": 5})
+        r = client.post("/generate/boss/statblock", json={"prompt": "undead hound", "level": 5})
         assert r.status_code == 200, r.text[:300]
         body = r.json()
         assert body["valid"] is True
         assert body["monster"]["template"] == "elite"
         assert body["monster"]["ac"] == VALID_MONSTER["ac"] + 2
+        assert body["monster"]["strikes"][0]["damage"] == "1d8+6"

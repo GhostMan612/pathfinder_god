@@ -231,6 +231,10 @@ class EncounterBuilderAgent:
         )
 
         candidates: list[dict[str, Any]] = []
+        # Selection and hydration both key on the creature name. Keep the first
+        # hit per name so two bestiary entries with the same name at different
+        # levels cannot make validation and hydration resolve to different XP.
+        seen_names: set[str] = set()
         for h in hits:
             # The rules table stores editions uppercase ('2E'/'1E'), confirmed
             # against the live DB. Comparing against lowercase "2e" dropped
@@ -241,9 +245,13 @@ class EncounterBuilderAgent:
             level = self._extract_level(content)
             if level is None or not (min_level <= level <= max_level):
                 continue
+            name = h["name"]
+            if name in seen_names:
+                continue
+            seen_names.add(name)
             xp = self.creature_xp(party_level, level + level_bump)
             candidates.append({
-                "name": h["name"],
+                "name": name,
                 "level": level,
                 "xp_each": xp,
                 "content": h["content"],
@@ -313,6 +321,10 @@ class EncounterBuilderAgent:
         monsters, total_xp = self._hydrate(
             selection, candidates, party_level, level_bump, template
         )
+        # Keep the old invariant: a fallback or duplicate-name resolution must
+        # never return an encounter that silently misses the XP budget.
+        if total_xp != target_xp:
+            raise ValueError(f"Selection total XP ({total_xp}) != target ({target_xp})")
 
         return BuildResult(
             target_xp=target_xp,

@@ -367,3 +367,21 @@ class TestGreedyXpFallback:
         )
         assert result.total_xp == 60
         assert result.source == "greedy-fallback"
+
+    @pytest.mark.asyncio
+    async def test_duplicate_candidate_names_keep_xp_invariant(self):
+        """Same-name bestiary entries at different levels must not break XP."""
+        from app.agents.encounter_builder import EncounterBuilderAgent
+
+        agent = EncounterBuilderAgent(
+            _GarbageLlm(),
+            _FakeRetriever([_hit("Sample Duplicate", 4), _hit("Sample Duplicate", 5)]),
+        )
+        result = await agent.build(
+            party_level=5, party_size=4, threat="severe", theme="duplicate"
+        )
+        assert result.target_xp == result.total_xp == 120
+        assert result.source == "greedy-fallback"
+        assert len(result.monsters) == 1
+        assert result.monsters[0].level == 4
+        assert result.monsters[0].count == 4

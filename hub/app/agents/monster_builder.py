@@ -43,9 +43,8 @@ class MonsterSaves(BaseModel):
 class MonsterStrike(BaseModel):
     name: str = Field(..., min_length=1, max_length=120)
     attack_bonus: int = Field(..., ge=-5, le=50)
-    damage: str = Field(..., min_length=3, max_length=20)  # NdM, e.g. "2d8+4"
+    damage: str = Field(..., min_length=3, max_length=20)  # NdM or NdM+X, e.g. "2d8+4"
     damage_type: str = Field(default="slashing", max_length=40)
-    damage_bonus: int = Field(default=0, ge=-5, le=20)
 
 
 class MonsterModel(BaseModel):
@@ -84,7 +83,7 @@ Required fields:
 - ac: integer, plausible Armor Class for the level (roughly 12-18 at level 1, growing with level)
 - perception: integer modifier
 - saves: {fortitude, reflex, will} integer modifiers
-- strikes: array of at least one {name, attack_bonus, damage ("NdM" or "NdM+X"), damage_type, damage_bonus}
+- strikes: array of at least one {name, attack_bonus, damage ("NdM" or "NdM+X"), damage_type}
 - abilities: array of special ability names/descriptions (strings)
 - tactics: one or two sentences describing how it fights
 - loot_table: array of strings (items it might carry)
@@ -99,6 +98,12 @@ def validate_monster(model: MonsterModel, requested_level: int | None = None) ->
     """Deterministic PF2e sanity checks on a validated MonsterModel."""
     errors: list[str] = []
     level = model.level
+    if model.template != "normal":
+        # The endpoint applies elite/weak itself. Accepting an LLM-supplied
+        # template here would make /generate/boss apply the elite template twice.
+        errors.append(
+            f"LLM must return template 'normal', got {model.template!r}"
+        )
     if requested_level is not None and level != requested_level:
         errors.append(f"Requested level {requested_level}, got level {level}")
     # HP: generous PF2e-plausible band. Level 1 creatures sit ~8-40 HP;
@@ -170,6 +175,19 @@ class MonsterBuilderAgent:
         return MonsterBuildResult(True, model, outcome.errors, attempts=outcome.attempts)
 
     @staticmethod
+    def _adjust_damage(damage: str, delta: int) -> str:
+        """Add ``delta`` to the numeric modifier in an NdM+N / NdM expression."""
+        match = DAMAGE_RE.match(damage)
+        if not match:
+            return damage
+        dice_count, die, bonus = match.groups()
+        modifier = int(bonus or 0) + delta
+        if modifier == 0:
+            return f"{dice_count}d{die}"
+        sign = "+" if modifier > 0 else "-"
+        return f"{dice_count}d{die}{sign}{abs(modifier)}"
+
+    @staticmethod
     def _apply_elite(model: MonsterModel) -> MonsterModel:
         """Elite template (Bestiary building rules): +2 AC/saves/attack/damage, HP x1.2."""
         return model.model_copy(
@@ -188,7 +206,7 @@ class MonsterBuilderAgent:
                     s.model_copy(
                         update={
                             "attack_bonus": s.attack_bonus + 2,
-                            "damage_bonus": s.damage_bonus + 2,
+                            "damage": MonsterBuilderAgent._adjust_damage(s.damage, 2),
                         }
                     )
                     for s in model.strikes

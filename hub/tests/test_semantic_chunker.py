@@ -5,9 +5,7 @@
 
 from __future__ import annotations
 
-import pytest
-
-from app.rag.semantic_spine import ChunkRecord, RankedRule, RuleRecord, chunk_rule
+from app.rag.semantic_spine import RankedRule, RuleRecord, chunk_rule
 
 
 def test_empty_content_returns_single_empty_chunk():

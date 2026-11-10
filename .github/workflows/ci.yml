@@ -86,7 +86,9 @@ jobs:
           pip install pytest pytest-asyncio httpx
       - name: Run tests
         working-directory: hub
-        run: pytest tests/ -v --tb=short
+        # `python -m pytest` puts the hub package root on sys.path; the bare
+        # pytest console script does not, so conftest could not import `app`.
+        run: python -m pytest tests/ -v --tb=short
 
   hub-lint:
     name: Hub - Lint

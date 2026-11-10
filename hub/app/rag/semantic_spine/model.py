@@ -8,8 +8,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 
 class SemanticSpineError(RuntimeError):
@@ -25,7 +25,7 @@ class RuleRecord:
     content: str
 
     @classmethod
-    def from_row(cls, row: object) -> "RuleRecord":
+    def from_row(cls, row: object) -> RuleRecord:
         return cls(
             system=str(row["system"] or ""),
             category=str(row["category"] or ""),
