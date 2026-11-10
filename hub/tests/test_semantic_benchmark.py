@@ -9,8 +9,6 @@ import hashlib
 import sqlite3
 from contextlib import closing
 
-import pytest
-
 from app.rag.semantic_spine import normalize_vector, run_synthetic_benchmark
 from app.rag.semantic_spine.benchmark import populate_benchmark_corpus
 

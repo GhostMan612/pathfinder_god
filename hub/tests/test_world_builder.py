@@ -8,7 +8,6 @@ import json
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from app.agents.world_builder import WorldBuilderAgent
 from app.db.repository import CampaignRepository
@@ -108,26 +107,25 @@ class TestWorldBuild:
 
 
 class TestWorldEndpoint:
-    def test_generate_world_endpoint_persists(self, tmp_path: Path, monkeypatch):
+    def test_generate_world_endpoint_persists(
+        self, tmp_path: Path, monkeypatch, authenticated_client
+    ):
         from app.api.deps import get_repo
         from app.llm.ollama_client import OllamaClient
-        from app.main import create_app
 
         async def fake_generate(self, **kwargs):
             return json.dumps(VALID_WORLD)
 
         monkeypatch.setattr(OllamaClient, "generate", fake_generate)
         repo = CampaignRepository(str(tmp_path / "campaign.db"))
-        app = create_app()
-        app.dependency_overrides[get_repo] = lambda: repo
+        authenticated_client.app.dependency_overrides[get_repo] = lambda: repo
         try:
-            client = TestClient(app, raise_server_exceptions=False)
-            r = client.post(
+            r = authenticated_client.post(
                 "/generate/world",
                 json={"prompt": "a valley with a sealed crypt", "campaign_id": 3},
             )
         finally:
-            app.dependency_overrides.clear()
+            authenticated_client.app.dependency_overrides.pop(get_repo, None)
         assert r.status_code == 200, r.text[:300]
         body = r.json()
         assert body["valid"] is True
@@ -138,3 +136,10 @@ class TestWorldEndpoint:
         assert "SAMPLE CRYPT" in location_names
         assert repo.get_active_quests(3)[0].name == "SAMPLE SEAL"
         assert repo.get_locations(1) == []
+
+    def test_generate_world_requires_auth(self, client, tmp_path: Path):
+        r = client.post(
+            "/generate/world",
+            json={"prompt": "a valley with a sealed crypt", "campaign_id": 3},
+        )
+        assert r.status_code == 401

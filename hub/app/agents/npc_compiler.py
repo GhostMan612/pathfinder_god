@@ -26,6 +26,7 @@ Pipeline (same pattern as CharacterBuilderAgent):
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -107,6 +108,12 @@ NPC_SCHEMA = {
     "class": "string",
     "key_ability": "string",
     "ability_scores": {"str": "int", "dex": "int", "con": "int", "int": "int", "wis": "int", "cha": "int"},
+    "ac": "int | null",
+    "hp": "int | null",
+    "perception": "int | null",
+    "saves": {"fortitude": "int", "reflex": "int", "will": "int"},
+    "class_dc": "int | null",
+    "spell_dc": "int | null",
     "skills": [{"name": "string", "rank": "untrained|trained|expert|master|legendary", "modifier": "int"}],
     "feats": [{"name": "string", "level": "int", "type": "ancestry|skill|class|general"}],
     "formulas": ["string"],  # for alchemists (optional)
@@ -136,6 +143,12 @@ class NPCAbilityScores(BaseModel):
     int_: int = Field(..., ge=8, le=18, alias="int")
     wis: int = Field(..., ge=8, le=18)
     cha: int = Field(..., ge=8, le=18)
+
+
+class NPCSaves(BaseModel):
+    fortitude: int = Field(..., ge=-5, le=50)
+    reflex: int = Field(..., ge=-5, le=50)
+    will: int = Field(..., ge=-5, le=50)
 
 
 class NPCSkill(BaseModel):
@@ -169,6 +182,12 @@ class NPCModel(BaseModel):
     class_: str = Field(..., alias="class", min_length=1, max_length=60)
     key_ability: Literal["str", "dex", "con", "int", "wis", "cha"]
     ability_scores: NPCAbilityScores
+    ac: int | None = Field(default=None, ge=1, le=60)
+    hp: int | None = Field(default=None, ge=1, le=100000)
+    perception: int | None = Field(default=None, ge=-5, le=50)
+    saves: NPCSaves | None = None
+    class_dc: int | None = Field(default=None, ge=1, le=60)
+    spell_dc: int | None = Field(default=None, ge=1, le=60)
     skills: list[NPCSkill] = Field(default_factory=list, max_length=30)
     feats: list[NPCFeat] = Field(default_factory=list, max_length=30)
     formulas: list[str] = Field(default_factory=list, max_length=30)
@@ -193,6 +212,12 @@ class NPCStatBlock:
     equipment: list[dict]
     personality: str
     hooks: list[str]
+    ac: int | None = None
+    hp: int | None = None
+    perception: int | None = None
+    saves: dict[str, int] | None = None
+    class_dc: int | None = None
+    spell_dc: int | None = None
     # Provenance: "llm" when the blueprint came from the model, "fallback"
     # when every LLM attempt failed and the deterministic template was used.
     source: str = "llm"
@@ -213,6 +238,14 @@ class NPCStatBlock:
                     "class": self.class_,
                 },
                 "abilities": self.ability_scores,
+                "attributes": {
+                    "ac": {"value": self.ac},
+                    "hp": {"value": self.hp, "max": self.hp},
+                    "perception": {"value": self.perception},
+                    "classDC": {"value": self.class_dc},
+                    "spellDC": {"value": self.spell_dc},
+                },
+                "saves": self.saves or {},
                 "skills": {s["name"]: {"rank": s["rank"], "value": s["modifier"]} for s in self.skills},
                 "feats": {f["name"]: {"level": f["level"], "type": f["type"]} for f in self.feats},
                 "equipment": self.equipment,
@@ -334,6 +367,12 @@ class NPCCompilerAgent:
             equipment=[e.model_dump() for e in model.equipment],
             personality=model.personality,
             hooks=list(model.hooks),
+            ac=model.ac,
+            hp=model.hp,
+            perception=model.perception,
+            saves=model.saves.model_dump() if model.saves else None,
+            class_dc=model.class_dc,
+            spell_dc=model.spell_dc,
             source=source,
             attempts=attempts,
             errors=list(errors),
@@ -384,34 +423,52 @@ class NPCCompilerAgent:
         elif "ranger" in concept_lower: class_ = "Ranger"
         elif "sorcerer" in concept_lower: class_ = "Sorcerer"
 
-        # Build basic stat block
+        # Build basic stat block. Derived values are still approximate, but they
+        # are present (the LLM path must supply its own via NPCModel).
+        scores = self._standard_array(level)
+        mods = {key: (value - 10) // 2 for key, value in scores.items()}
+        key_ability = self._key_ability(class_)
+        class_dc = 10 + level + 2 + mods[key_ability]
         return NPCStatBlock(
-            name=self._generate_name(ancestry, class_),
+            name=self._generate_name(ancestry, class_, concept),
             level=level,
             ancestry=ancestry,
             heritage=None,
             background="Merchant" if "shopkeep" in concept_lower else "Artisan",
             class_=class_,
-            key_ability=self._key_ability(class_),
-            ability_scores=self._standard_array(level),
+            key_ability=key_ability,
+            ability_scores=scores,
             skills=self._skills_for_class(class_, level),
             feats=self._feats_for_class(class_, level, ancestry),
             formulas=self._formulas_for_class(class_),
             equipment=self._equipment_for_class(class_),
             personality="Gruff, suspicious of the Pathfinder Society, secretly proud of his craft",
             hooks=["Needs rare reagent from Pathfinder lodge", "Hides a Pathfinder star in his cellar"],
+            ac=10 + level + 4,
+            hp=max(1, 12 + level * 5 + mods["con"]),
+            perception=level + 2 + mods["wis"],
+            saves={
+                "fortitude": level + 2 + mods["con"],
+                "reflex": level + 2 + mods["dex"],
+                "will": level + 2 + mods["wis"],
+            },
+            class_dc=class_dc,
+            spell_dc=class_dc if class_ in {"Wizard", "Cleric", "Bard", "Sorcerer"} else None,
             source="fallback",
         )
 
-    def _generate_name(self, ancestry: str, class_: str) -> str:
+    def _generate_name(self, ancestry: str, class_: str, concept: str) -> str:
         names = {
             "Dwarf": ["Thorin", "Borin", "Durin", "Gimli", "Kili", "Fili"],
             "Elf": ["Elrond", "Legolas", "Thranduil", "Celeborn", "Galadriel"],
             "Human": ["Marcus", "Aldric", "Bran", "Cedric", "Darian"],
             "Goblin": ["Ruk", "Grib", "Snag", "Vex", "Zik"],
         }
-        import random
-        return f"{random.choice(names.get(ancestry, ['Adventurer']))} the {class_}"
+        options = names.get(ancestry, ["Adventurer"])
+        digest = hashlib.sha256(
+            f"{concept.strip().lower()}|{ancestry}|{class_}".encode()
+        ).digest()
+        return f"{options[digest[0] % len(options)]} the {class_}"
 
     def _key_ability(self, class_: str) -> str:
         return {"Wizard": "int", "Sorcerer": "cha", "Cleric": "wis", "Rogue": "dex",

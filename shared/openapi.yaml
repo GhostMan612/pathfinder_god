@@ -104,6 +104,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
   /generate/monster:
     post:
       tags:
@@ -129,12 +132,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /generate/boss:
+  /generate/boss/statblock:
     post:
       tags:
       - gm
       summary: Build Boss Endpoint
-      operationId: build_boss_endpoint_generate_boss_post
+      operationId: build_boss_endpoint_generate_boss_statblock_post
       requestBody:
         content:
           application/json:
@@ -179,6 +182,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
   /generate/{kind}:
     post:
       tags:

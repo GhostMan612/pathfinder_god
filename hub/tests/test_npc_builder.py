@@ -8,7 +8,6 @@ import json
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from app.agents.npc_compiler import (
     NPCCompilerAgent,
@@ -26,6 +25,12 @@ VALID_NPC = {
     "class": "Alchemist",
     "key_ability": "int",
     "ability_scores": {"str": 12, "dex": 14, "con": 13, "int": 16, "wis": 10, "cha": 8},
+    "ac": 20,
+    "hp": 45,
+    "perception": 12,
+    "saves": {"fortitude": 11, "reflex": 12, "will": 9},
+    "class_dc": 20,
+    "spell_dc": None,
     "skills": [{"name": "Crafting", "rank": "expert", "modifier": 12}],
     "feats": [{"name": "Quick Bomber", "level": 1, "type": "class"}],
     "formulas": ["Lesser Acid Flask"],
@@ -69,7 +74,13 @@ class TestNpcLlmBuild:
         assert npc.name == "SAMPLE MERCHANT"
         assert npc.class_ == "Alchemist"
         assert npc.ability_scores["int"] == 16
-        assert npc.to_foundry_json()["system"]["details"]["class"] == "Alchemist"
+        assert npc.ac == 20
+        assert npc.hp == 45
+        assert npc.saves == {"fortitude": 11, "reflex": 12, "will": 9}
+        foundry = npc.to_foundry_json()
+        assert foundry["system"]["details"]["class"] == "Alchemist"
+        assert foundry["system"]["attributes"]["ac"]["value"] == 20
+        assert foundry["system"]["saves"]["fortitude"] == 11
 
     @pytest.mark.asyncio
     async def test_garbage_then_valid_retries(self, tmp_path: Path):
@@ -116,7 +127,16 @@ class TestNpcLlmBuild:
         assert result.npc.ancestry == "Dwarf"
         assert result.npc.class_ == "Alchemist"
         assert "the Alchemist" in result.npc.name
+        assert result.npc.ac is not None
+        assert result.npc.hp is not None
+        assert result.npc.saves is not None
         assert any("fallback" in e for e in result.errors)
+
+        # The deterministic fallback must not pick a random name on each call.
+        other = NPCCompilerAgent(repo, llm=_RaisingLlm())
+        second = await other.build("cranky level 5 Dwarven alchemist shopkeep")
+        assert second.npc is not None
+        assert second.npc.name == result.npc.name
 
     @pytest.mark.asyncio
     async def test_create_npc_tool_returns_both_class_keys(
@@ -151,26 +171,25 @@ class TestNpcLlmBuild:
 
 
 class TestNpcEndpoint:
-    def test_generate_npc_endpoint_persists(self, tmp_path: Path, monkeypatch):
+    def test_generate_npc_endpoint_persists(
+        self, tmp_path: Path, monkeypatch, authenticated_client
+    ):
         from app.api.deps import get_repo
         from app.llm.ollama_client import OllamaClient
-        from app.main import create_app
 
         async def fake_generate(self, **kwargs):
             return json.dumps(VALID_NPC)
 
         monkeypatch.setattr(OllamaClient, "generate", fake_generate)
         repo = CampaignRepository(str(tmp_path / "campaign.db"))
-        app = create_app()
-        app.dependency_overrides[get_repo] = lambda: repo
+        authenticated_client.app.dependency_overrides[get_repo] = lambda: repo
         try:
-            client = TestClient(app, raise_server_exceptions=False)
-            r = client.post(
+            r = authenticated_client.post(
                 "/generate/npc",
                 json={"concept": "dwarven alchemist shopkeep", "campaign_id": 2},
             )
         finally:
-            app.dependency_overrides.clear()
+            authenticated_client.app.dependency_overrides.pop(get_repo, None)
         assert r.status_code == 200, r.text[:300]
         body = r.json()
         assert body["valid"] is True
@@ -180,3 +199,10 @@ class TestNpcEndpoint:
         assert isinstance(body["npc_id"], int)
         assert repo.get_npc(2, "SAMPLE MERCHANT") is not None
         assert repo.get_npc(1, "SAMPLE MERCHANT") is None
+
+    def test_generate_npc_requires_auth(self, client, tmp_path: Path):
+        r = client.post(
+            "/generate/npc",
+            json={"concept": "dwarven alchemist shopkeep", "campaign_id": 2},
+        )
+        assert r.status_code == 401

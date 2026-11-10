@@ -18,6 +18,7 @@ from app.agents.npc_compiler import NPCCompilerAgent
 from app.agents.rules_lawyer import RulesLawyerAgent
 from app.agents.world_builder import WorldBuilderAgent
 from app.api.deps import get_repo
+from app.api.security import require_auth
 from app.config import get_settings
 from app.db.repository import CampaignRepository
 from app.llm.ollama_client import OllamaClient
@@ -138,6 +139,7 @@ async def build_character_endpoint(
 async def build_npc_endpoint(
     request: BuildNPCRequest,
     repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
 ) -> BuildNPCResponse:
     agent = NPCCompilerAgent(repo)
     try:
@@ -190,7 +192,10 @@ async def build_monster_endpoint(request: BuildMonsterRequest) -> BuildMonsterRe
     return await _build_monster_response(request, elite=False)
 
 
-@router.post("/boss", response_model=BuildMonsterResponse)
+# Keep the existing prose /generate/{kind} route for kind="boss". The typed
+# boss builder lives one path deeper so adding it cannot change the response
+# shape of the already-published /generate/boss URL.
+@router.post("/boss/statblock", response_model=BuildMonsterResponse)
 async def build_boss_endpoint(request: BuildMonsterRequest) -> BuildMonsterResponse:
     return await _build_monster_response(request, elite=True)
 
@@ -203,6 +208,7 @@ async def build_boss_endpoint(request: BuildMonsterRequest) -> BuildMonsterRespo
 async def build_world_endpoint(
     request: BuildWorldRequest,
     repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
 ) -> BuildWorldResponse:
     settings = get_settings()
     llm = OllamaClient(settings.ollama_host)
