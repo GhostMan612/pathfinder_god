@@ -55,13 +55,25 @@ class SemanticStore:
         return sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=8.0)
 
     def status(self) -> dict[str, str]:
+        return self._status(deep=True)
+
+    def _status(self, *, deep: bool) -> dict[str, str]:
+        """Index state check.
+
+        ``status()`` runs ``PRAGMA quick_check`` because the CLI reports health.
+        Query paths use ``deep=False``: quick_check walks the whole sidecar
+        (~0.7 s at 43k chunks), which would dwarf a 7 ms matmul on every
+        search. The manifest read still validates the header and schema, and
+        the index is immutable after the atomic publish.
+        """
         if not self.index_path.is_file():
             return {"state": "absent"}
         try:
             with closing(self._readonly(self.index_path)) as conn:
-                check = conn.execute("PRAGMA quick_check(1)").fetchone()
-                if not check or check[0] != "ok":
-                    return {"state": "corrupt"}
+                if deep:
+                    check = conn.execute("PRAGMA quick_check(1)").fetchone()
+                    if not check or check[0] != "ok":
+                        return {"state": "corrupt"}
                 manifest = dict(conn.execute("SELECT key, value FROM manifest"))
         except (sqlite3.DatabaseError, OSError):
             return {"state": "unreadable"}
@@ -273,7 +285,7 @@ class SemanticStore:
         edition: str,
         limit: int = 10,
     ) -> list[RankedRule]:
-        status = self.status()
+        status = self._status(deep=False)
         if status["state"] != "ready":
             raise SemanticSpineError("Semantic index is not ready: " + status["state"])
         if status.get("source_path") != str(self.source_path):
@@ -413,7 +425,7 @@ class SemanticStore:
         return results
 
     def search(self, query: str, edition: str, embedder: Embedder, limit: int = 10) -> list[RankedRule]:
-        status = self.status()
+        status = self._status(deep=False)
         if status["state"] != "ready":
             raise SemanticSpineError("Semantic index is not ready: " + status["state"])
         if status.get("model_identity") != embedder.identity() or int(status["dimensions"]) != embedder.dimensions:
