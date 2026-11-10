@@ -32,6 +32,8 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
+import psutil
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT / "hub") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "hub"))
@@ -98,7 +100,7 @@ def ollama_generate(url: str, model: str, prompt: str, timeout: float = 180.0) -
             "model": model,
             "prompt": prompt,
             "stream": False,
-            "options": {"temperature": 0.4, "num_predict": 48},
+            "options": {"temperature": 0.4, "num_predict": 48, "num_ctx": 4096},
         }
     ).encode("utf-8")
     request = urllib.request.Request(
@@ -311,6 +313,8 @@ def main() -> int:
         "dimensions": args.dimensions,
         "sampled_rules": sampled,
         "query_count": len(cases),
+        "index_bytes": args.index.stat().st_size,
+        "peak_rss_mb": round(psutil.Process().memory_info().rss / (1024 * 1024), 1),
         "baseline_fts5": baseline["summary"],
         "hybrid_retriever": hybrid["summary"],
         "delta": {
