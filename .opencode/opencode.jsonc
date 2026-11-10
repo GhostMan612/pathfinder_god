@@ -1,0 +1,17 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "pf": {
+        "type": "local",
+        "command": ["python", "tools/local_grunt_mcp.py"],
+        "cwd": ".",
+        "timeout": {
+          "startup": 15000,
+          "catalog": 15000,
+          "execution": 180000
+        }
+      }
+    }
+  }
+}

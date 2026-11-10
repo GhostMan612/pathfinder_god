@@ -262,6 +262,27 @@
     <string name="character_hp_pattern">%1$s/%2$s</string>
     <string name="character_ability_default">10</string>
     <string name="character_entry_pattern">%1$s · %2$s</string>
+    <string name="character_equipment">Equipment &amp; Weapons</string>
+    <string name="character_weapons">Weapons</string>
+    <string name="character_armor">Armor</string>
+    <string name="character_shield">Shield</string>
+    <string name="character_gear">Gear</string>
+    <string name="character_coins">Coins</string>
+    <string name="character_spellcasting">Spellcasting</string>
+    <string name="character_conditions">Conditions</string>
+    <string name="character_notes">Notes</string>
+    <string name="character_forge_title">Forge a hero</string>
+    <string name="character_forge_prompt_label">Who walks the path?</string>
+    <string name="character_forge_prompt_hint">e.g., a dwarven champion of Torag</string>
+    <string name="character_forge_action">FORGE</string>
+    <string name="character_forge_cancel">CANCEL</string>
+    <string name="character_forge_working">The forge is shaping a hero.</string>
+    <string name="character_forge_empty">Describe the hero first.</string>
+    <string name="character_forge_rejected">The forge rejected the commission.</string>
+    <string name="character_forge_failed">The forge could not finish. Check the hub and try again.</string>
+    <string name="a11y_character_forge">Forge a new hero</string>
+    <string name="a11y_character_forge_submit">Forge the hero</string>
+    <string name="a11y_character_forge_cancel">Cancel and close the forge</string>
 
     <string name="encounter_forge">Forge</string>
     <string name="encounter_party_level">Party Level</string>

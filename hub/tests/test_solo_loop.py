@@ -479,3 +479,245 @@ def test_api_solo_endpoints_require_auth(rules_db_dir: Path) -> None:
     client = TestClient(main.app)
     r = client.post("/campaign/create", json={"name": "SAMPLE CAMPAIGN"})
     assert r.status_code in (401, 403)
+
+
+# ── Regression tests: seven PR #2 review findings ──────────────
+# Each test below pins one of the seven correctness bugs found in the
+# review of draft PR #2, so none of them can silently come back.
+
+
+async def test_duplicate_monster_names_get_separate_rows(tmp_path: Path) -> None:
+    loop = _make_loop(tmp_path / "campaign.db")
+    created = await loop.create_campaign(
+        "SAMPLE CAMPAIGN", premise="A quiet valley.", hero_prompt="a brave human fighter"
+    )
+    cid = created["campaign_id"]
+    await loop.start_combat(cid, monster_names=["SAMPLE GOBLIN", "SAMPLE GOBLIN"], seed=3)
+    goblins = [c for c in loop.repo.get_combatants(cid) if c.kind == "monster"]
+    assert len(goblins) == 2
+    assert len({c.id for c in goblins}) == 2
+    assert all(c.name == "SAMPLE GOBLIN" and c.hp == 12 for c in goblins)
+    # Heroes are still unique by name: one hero row, refreshed not duplicated.
+    heroes = [c for c in loop.repo.get_combatants(cid) if c.kind == "hero"]
+    assert len(heroes) == 1
+
+
+async def test_end_combat_deactivates_combatants(tmp_path: Path) -> None:
+    loop = _make_loop(tmp_path / "campaign.db")
+    created = await loop.create_campaign("SAMPLE CAMPAIGN", premise="A quiet valley.")
+    cid = created["campaign_id"]
+    await loop.start_combat(cid, monster_names=["SAMPLE GOBLIN"], seed=3)
+    assert loop.repo.get_combatants(cid, active_only=True)
+    ended = await loop.end_combat(cid)
+    assert ended["phase"] == "exploration"
+    assert loop.repo.get_combatants(cid, active_only=True) == []
+    assert all(not c.is_active for c in loop.repo.get_combatants(cid))
+
+
+async def test_end_turn_and_end_combat_on_missing_campaign_raise(tmp_path: Path) -> None:
+    loop = _make_loop(tmp_path / "campaign.db")
+    with pytest.raises(ValueError, match="no campaign 999"):
+        await loop.end_turn(999)
+    with pytest.raises(ValueError, match="no campaign 999"):
+        await loop.end_combat(999)
+    # Nothing was auto-created by the failed calls.
+    assert loop.repo.campaign_exists(999) is False
+
+
+def test_api_end_turn_and_end_combat_on_missing_campaign_are_404(
+    authenticated_client,
+) -> None:
+    r = authenticated_client.post("/campaign/999/combat/end-turn")
+    assert r.status_code == 404
+    r = authenticated_client.post("/campaign/999/combat/end")
+    assert r.status_code == 404
+
+
+async def test_llm_refined_other_to_attack_actually_resolves(tmp_path: Path) -> None:
+    llm = FakeLLM(outcome={**OUTCOME_JSON, "kind": "attack", "target": "SAMPLE GOBLIN"})
+    loop = _make_loop(tmp_path / "campaign.db", llm=llm)
+    created = await loop.create_campaign(
+        "SAMPLE CAMPAIGN", premise="A quiet valley.", hero_prompt="a brave human fighter"
+    )
+    cid = created["campaign_id"]
+    await loop.start_combat(cid, monster_names=["SAMPLE GOBLIN"], seed=3)
+    before = loop.repo.get_combatant_by_name(cid, "SAMPLE GOBLIN")
+    assert before is not None and before.hp == 12
+    # "stare" classifies as "other": the deterministic pass resolves nothing.
+    assert classify_action("I stare at the SAMPLE GOBLIN") == "other"
+    result = await loop.take_turn(cid, "I stare at the SAMPLE GOBLIN", seed=42)
+    assert result.kind == "attack"
+    # The refined attack must actually roll dice and change HP state.
+    assert result.dice_rolls and result.dice_rolls[0]["notation"] == "d20"
+    assert result.hp_changes
+    change = result.hp_changes[0]
+    assert change["name"] == "SAMPLE GOBLIN"
+    after = loop.repo.get_combatant_by_name(cid, "SAMPLE GOBLIN")
+    assert after is not None and after.hp == change["hp"]
+
+
+async def test_rest_in_exploration_heals_wounded_hero(tmp_path: Path) -> None:
+    loop = _make_loop(tmp_path / "campaign.db")
+    created = await loop.create_campaign(
+        "SAMPLE CAMPAIGN", premise="A quiet valley.", hero_prompt="a brave human fighter"
+    )
+    cid = created["campaign_id"]
+    await loop.start_combat(cid, monster_names=["SAMPLE GOBLIN"], seed=3)
+    hero = next(c for c in loop.repo.get_combatants(cid) if c.kind == "hero")
+    loop.repo.update_combatant(hero.id, hp=5)
+    await loop.end_combat(cid)
+    result = await loop.take_turn(cid, "I rest and bandage my wounds", seed=7)
+    assert result.kind == "rest"
+    assert result.hp_changes
+    assert result.hp_changes[0]["healed"] > 0
+    after = loop.repo.get_combatant(cid, hero.id)
+    assert after is not None and after.hp > 5
+
+
+async def test_rest_before_first_combat_creates_hero_rows(tmp_path: Path) -> None:
+    loop = _make_loop(tmp_path / "campaign.db")
+    created = await loop.create_campaign(
+        "SAMPLE CAMPAIGN", premise="A quiet valley.", hero_prompt="a brave human fighter"
+    )
+    cid = created["campaign_id"]
+    assert loop.repo.get_combatants(cid) == []
+    result = await loop.take_turn(cid, "We rest for the night", seed=7)
+    assert result.kind == "rest"
+    # Nobody was wounded, so nothing was healed — and the turn does not
+    # claim otherwise.
+    assert result.hp_changes == []
+    heroes = [c for c in loop.repo.get_combatants(cid) if c.kind == "hero"]
+    assert len(heroes) == 1
+    assert heroes[0].hp == heroes[0].max_hp
+
+
+def test_encounter_monster_ac_scales_with_level_and_template() -> None:
+    from app.agents.solo_loop import _encounter_monster_ac
+
+    assert _encounter_monster_ac(1, "normal") == 13
+    assert _encounter_monster_ac(5, "elite") == 19
+    assert _encounter_monster_ac(3, "weak") == 13
+
+
+async def test_encounter_built_monsters_use_level_based_ac(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.agents.encounter_builder import BuildResult, EncounterMonster
+
+    class FakeEncounterAgent:
+        def __init__(self, llm, retriever) -> None:
+            pass
+
+        async def build(self, *, party_level, party_size, threat, theme):
+            return BuildResult(
+                target_xp=70,
+                total_xp=70,
+                monsters=[
+                    EncounterMonster(
+                        name="SAMPLE WOLF",
+                        count=2,
+                        level=3,
+                        xp_each=30,
+                        content="",
+                        source_book="",
+                        hp=20,
+                        template="elite",
+                    ),
+                    EncounterMonster(
+                        name="SAMPLE RAT",
+                        count=1,
+                        level=1,
+                        xp_each=10,
+                        content="",
+                        source_book="",
+                        hp=6,
+                        template="weak",
+                    ),
+                ],
+                party_level=party_level,
+                party_size=party_size,
+                threat=threat,
+                theme=theme,
+            )
+
+    monkeypatch.setattr(
+        "app.agents.encounter_builder.EncounterBuilderAgent", FakeEncounterAgent
+    )
+    loop = _make_loop(tmp_path / "campaign.db")
+    specs = await loop._build_encounter_specs("forest", "moderate", 3, 4)
+    by_name: dict[str, list[dict]] = {}
+    for spec in specs:
+        by_name.setdefault(spec["name"], []).append(spec)
+    assert len(specs) == 3
+    assert [s["ac"] for s in by_name["SAMPLE WOLF"]] == [17, 17]  # 12 + 3 + 2 elite
+    assert by_name["SAMPLE RAT"][0]["ac"] == 11  # 12 + 1 - 2 weak
+
+
+def test_reserved_turn_numbers_never_collide(tmp_path: Path) -> None:
+    repo = CampaignRepository(str(tmp_path / "campaign.db"))
+    campaign = repo.create_campaign("SAMPLE CAMPAIGN")
+    first = repo.reserve_turn_num(campaign.id)
+    second = repo.reserve_turn_num(campaign.id)
+    assert (first, second) == (1, 2)
+    repo.record_turn(campaign.id, first, "player", "first", "First.")
+    repo.record_turn(campaign.id, second, "player", "second", "Second.")
+    turns = repo.get_recent_turns(campaign.id)
+    assert sorted(t.turn_num for t in turns) == [1, 2]
+
+
+def test_legacy_db_migrates_combatants_unique_and_turn_counter(tmp_path: Path) -> None:
+    import sqlite3
+
+    db_path = tmp_path / "legacy.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(
+        """
+        CREATE TABLE campaigns (id INTEGER PRIMARY KEY, name TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')));
+        CREATE TABLE campaign_turns (id INTEGER PRIMARY KEY AUTOINCREMENT,
+            campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+            turn_num INTEGER NOT NULL, actor TEXT NOT NULL DEFAULT 'player',
+            action TEXT NOT NULL, narration TEXT NOT NULL DEFAULT '',
+            outcome_json TEXT NOT NULL DEFAULT '{}', dice_json TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(campaign_id, turn_num));
+        CREATE TABLE solo_state (campaign_id INTEGER PRIMARY KEY REFERENCES campaigns(id) ON DELETE CASCADE,
+            phase TEXT NOT NULL DEFAULT 'exploration', round_num INTEGER NOT NULL DEFAULT 1,
+            current_location_id INTEGER, active_combatant_id INTEGER,
+            turn_order_json TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')));
+        CREATE TABLE combatants (id INTEGER PRIMARY KEY AUTOINCREMENT,
+            campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+            name TEXT NOT NULL, kind TEXT DEFAULT 'monster',
+            hp INTEGER NOT NULL DEFAULT 1, max_hp INTEGER NOT NULL DEFAULT 1,
+            temp_hp INTEGER NOT NULL DEFAULT 0, ac INTEGER NOT NULL DEFAULT 10,
+            initiative INTEGER NOT NULL DEFAULT 0, conditions_json TEXT NOT NULL DEFAULT '[]',
+            is_active INTEGER NOT NULL DEFAULT 1, turn_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(campaign_id, name));
+        INSERT INTO campaigns (id, name) VALUES (1, 'SAMPLE CAMPAIGN');
+        INSERT INTO solo_state (campaign_id) VALUES (1);
+        INSERT INTO campaign_turns (campaign_id, turn_num, actor, action, narration)
+            VALUES (1, 1, 'player', 'first', 'First.');
+        INSERT INTO campaign_turns (campaign_id, turn_num, actor, action, narration)
+            VALUES (1, 2, 'player', 'second', 'Second.');
+        INSERT INTO combatants (campaign_id, name, kind, hp, max_hp, ac)
+            VALUES (1, 'SAMPLE GOBLIN', 'monster', 12, 12, 16);
+        """
+    )
+    conn.commit()
+    conn.close()
+    repo = CampaignRepository(str(db_path))
+    # Duplicate names are now allowed, and the old goblin survived the rebuild.
+    first = repo.add_combatant(1, "SAMPLE GOBLIN", hp=12, max_hp=12, ac=16)
+    second = repo.add_combatant(1, "SAMPLE GOBLIN", hp=8, max_hp=8, ac=14)
+    assert first != second
+    goblins = [c for c in repo.get_combatants(1) if c.name == "SAMPLE GOBLIN"]
+    assert len(goblins) == 3
+    assert sorted(c.hp for c in goblins) == [8, 12, 12]
+    # The turn counter was backfilled past the two recorded turns.
+    assert repo.reserve_turn_num(1) == 3
+    assert repo.reserve_turn_num(1) == 4

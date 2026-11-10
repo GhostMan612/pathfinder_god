@@ -238,8 +238,7 @@ CREATE TABLE IF NOT EXISTS combatants (
     is_active INTEGER NOT NULL DEFAULT 1,
     turn_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(campaign_id, name)
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS campaign_turns (
@@ -262,6 +261,7 @@ CREATE TABLE IF NOT EXISTS solo_state (
     current_location_id INTEGER REFERENCES locations(id),
     active_combatant_id INTEGER,
     turn_order_json TEXT NOT NULL DEFAULT '[]',
+    next_turn_num INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

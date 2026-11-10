@@ -84,6 +84,22 @@ def _hero_hp_from_stats(stats: dict | None, level: int) -> int:
     return hero_max_hp(level)
 
 
+def _encounter_monster_ac(level: int, template: str = "normal") -> int:
+    """Armor Class for an encounter-built monster.
+
+    EncounterMonster carries no AC, so derive it with the same house
+    formula the deterministic fallbacks use (12 + level) plus the
+    encounter template's AC modifier (elite +2, weak -2). A flat AC for
+    every creature made low-level foes too hard to hit and high-level
+    ones too easy.
+    """
+    from app.agents.encounter_builder import TEMPLATE_MODIFIERS
+
+    key = (template or "normal").lower()
+    modifier = int(TEMPLATE_MODIFIERS.get(key, {}).get("ac", 0))
+    return 12 + int(level or 1) + modifier
+
+
 class TurnQuestUpdate(BaseModel):
     quest_name: str = Field(..., min_length=1, max_length=120)
     objective: str = Field(..., min_length=1, max_length=500)
@@ -425,7 +441,9 @@ class SoloLoop:
         if not self.repo.campaign_exists(campaign_id):
             raise ValueError(f"no campaign {campaign_id}")
         state = self.repo.ensure_solo_state(campaign_id)
-        turn_num = self.repo.get_next_turn_num(campaign_id)
+        # Reserve the number up front: the seed is derived from it, and the
+        # locked counter guarantees no two concurrent turns share a number.
+        turn_num = self.repo.reserve_turn_num(campaign_id)
         turn_seed = self._turn_seed(campaign_id, turn_num, seed)
         rng = random.Random(turn_seed)
 
@@ -450,22 +468,19 @@ class SoloLoop:
                 await self._run_recovery(campaign_id, active, rng, notes)
 
         # ── Deterministic resolution (never the LLM) ──
-        target_name: str | None = None
-        if kind == "attack":
-            target_name, hp_change = await self._resolve_attack(
-                campaign_id, action, party, combatants, rng, dice_rolls, notes
-            )
-            if hp_change:
-                hp_changes.append(hp_change)
-        elif kind == "skill":
-            self._resolve_skill(action, rng, dice_rolls, notes)
-        elif kind == "rest":
-            self._resolve_rest(campaign_id, combatants, rng, dice_rolls, hp_changes, notes)
-        elif kind == "move":
-            moved = self._resolve_move(campaign_id, action, locations, state)
-            if moved:
-                state = self.repo.get_solo_state(campaign_id) or state
-                notes.append(f"Moved to {moved}.")
+        target_name, state = await self._resolve_deterministic(
+            kind,
+            campaign_id,
+            action,
+            party,
+            combatants,
+            locations,
+            state,
+            rng,
+            dice_rolls,
+            hp_changes,
+            notes,
+        )
 
         # ── LLM structured outcome (proposal only) ──
         outcome, outcome_source = await self._structured_outcome(
@@ -477,7 +492,29 @@ class SoloLoop:
             # Letting the model overwrite a classified attack with "other"
             # silently dropped the whole deterministic resolution.
             if kind == "other" and outcome.kind:
-                kind = outcome.kind
+                refined = outcome.kind
+                kind = refined
+                # The classifier placed nothing, so the first resolution
+                # pass did nothing. A refinement to a resolvable kind must
+                # actually resolve — re-run it here — or the turn would be
+                # recorded and narrated as an attack/skill/rest/move that
+                # never happened (no damage rolled, no healing, no move).
+                if refined in ("attack", "skill", "rest", "move"):
+                    refined_target, state = await self._resolve_deterministic(
+                        refined,
+                        campaign_id,
+                        action,
+                        party,
+                        combatants,
+                        locations,
+                        state,
+                        rng,
+                        dice_rolls,
+                        hp_changes,
+                        notes,
+                    )
+                    if refined_target and not target_name:
+                        target_name = refined_target
             if outcome.target and not target_name:
                 target_name = outcome.target
             if outcome.quest_update is not None and outcome.quest_update.completed:
@@ -603,6 +640,47 @@ class SoloLoop:
         monsters = [c for c in combatants if c.kind == "monster"]
         return monsters[0] if monsters else None
 
+    async def _resolve_deterministic(
+        self,
+        kind: str,
+        campaign_id: int,
+        action: str,
+        party: list[dict],
+        combatants: list[Any],
+        locations: list[Any],
+        state: Any,
+        rng: random.Random,
+        dice_rolls: list[dict],
+        hp_changes: list[dict],
+        notes: list[str],
+    ) -> tuple[str | None, Any]:
+        """Run the deterministic resolver for one action kind.
+
+        Returns (target_name, state). Only attack produces a target; only
+        move can change state (the current location). Talk and other have
+        no deterministic effect — they are narration only. take_turn calls
+        this once for the classifier's kind and again when the LLM refines
+        an unplaced ("other") turn into a resolvable kind, so a refined
+        attack actually rolls damage instead of only changing the label.
+        """
+        target_name: str | None = None
+        if kind == "attack":
+            target_name, hp_change = await self._resolve_attack(
+                campaign_id, action, party, combatants, rng, dice_rolls, notes
+            )
+            if hp_change:
+                hp_changes.append(hp_change)
+        elif kind == "skill":
+            self._resolve_skill(action, rng, dice_rolls, notes)
+        elif kind == "rest":
+            self._resolve_rest(campaign_id, rng, dice_rolls, hp_changes, notes)
+        elif kind == "move":
+            moved = self._resolve_move(campaign_id, action, locations, state)
+            if moved:
+                state = self.repo.get_solo_state(campaign_id) or state
+                notes.append(f"Moved to {moved}.")
+        return target_name, state
+
     async def _resolve_attack(
         self,
         campaign_id: int,
@@ -676,7 +754,6 @@ class SoloLoop:
     def _resolve_rest(
         self,
         campaign_id: int,
-        combatants: list[Any],
         rng: random.Random,
         dice_rolls: list[dict],
         hp_changes: list[dict],
@@ -686,13 +763,34 @@ class SoloLoop:
         dice_rolls.append(
             {"notation": REST_HEAL_DICE, "rolls": heal_rolls, "total": heal_total}
         )
-        for c in combatants:
-            if c.kind != "hero" or c.hp >= c.max_hp:
+        # Heal every hero row, active or not. Resting used to read only the
+        # active combatants, and heroes are inactive outside combat — so a
+        # rest in exploration healed nothing while still reporting HP
+        # recovered. Before the first combat there are no hero rows at all;
+        # create them from the party at full HP so the rest has state.
+        heroes = [c for c in self.repo.get_combatants(campaign_id) if c.kind == "hero"]
+        if not heroes:
+            ids = self._ensure_hero_combatants(campaign_id, rng)
+            heroes = [
+                c
+                for c in (self.repo.get_combatant(campaign_id, i) for i in ids)
+                if c is not None
+            ]
+        healed_total = 0
+        for c in heroes:
+            if c.hp >= c.max_hp:
                 continue
             new_hp = min(c.max_hp, c.hp + heal_total)
             self.repo.update_combatant(c.id, hp=new_hp)
-            hp_changes.append({"name": c.name, "hp": new_hp, "max_hp": c.max_hp, "healed": new_hp - c.hp})
-        notes.append(f"Rested: recovered {heal_total} HP.")
+            healed = new_hp - c.hp
+            healed_total += healed
+            hp_changes.append(
+                {"name": c.name, "hp": new_hp, "max_hp": c.max_hp, "healed": healed}
+            )
+        if healed_total > 0:
+            notes.append(f"Rested: recovered {healed_total} HP.")
+        else:
+            notes.append("Rested: no wounds to heal.")
 
     def _resolve_move(
         self, campaign_id: int, text: str, locations: list[Any], state: Any
@@ -762,6 +860,9 @@ class SoloLoop:
         # Re-read the order: deaths may have removed combatants.
         order = [c.id for c in combatants if c.id in order]
         if not order:
+            # Nobody left standing: combat is over, so the roster goes
+            # inactive with the phase change, not just the initiative.
+            self.repo.deactivate_combatants(campaign_id)
             return self.repo.update_solo_state(
                 campaign_id, phase="exploration", round_num=1, clear_active=True, turn_order=[]
             )
@@ -874,25 +975,17 @@ class SoloLoop:
 
     # ── Combat lifecycle ──────────────────────────────────────
 
-    async def start_combat(
-        self,
-        campaign_id: int,
-        monster_names: list[str] | None = None,
-        theme: str | None = None,
-        threat: str = "moderate",
-        party_level: int = 1,
-        seed: int | None = None,
-    ) -> CombatStartResult:
-        """Build combatants from party + monsters, roll initiative, open round 1."""
-        if not self.repo.campaign_exists(campaign_id):
-            raise ValueError(f"no campaign {campaign_id}")
-        state = self.repo.ensure_solo_state(campaign_id)
-        rng = random.Random(
-            seed if seed is not None else zlib.crc32(f"combat:{campaign_id}".encode())
-        )
-        self.repo.clear_combatants(campaign_id)
+    def _ensure_hero_combatants(
+        self, campaign_id: int, rng: random.Random, party_level: int = 1
+    ) -> list[int]:
+        """Create (or refresh) one hero combatant row per party member.
 
-        # Heroes first, in party order.
+        Heroes are unique by name, so upsert is safe here. Rows start at
+        full HP: the party table stores no current HP, so a hero with no
+        combatant row yet is assumed unwounded. start_combat calls this to
+        build the roster; resting in exploration calls it so a rest before
+        the first combat still has rows to heal.
+        """
         party = self.repo.get_party(campaign_id)
         hero_ids: list[int] = []
         for member in party:
@@ -927,6 +1020,28 @@ class SoloLoop:
                     initiative=rng.randint(1, 20) + HERO_INITIATIVE_BONUS,
                 )
             )
+        return hero_ids
+
+    async def start_combat(
+        self,
+        campaign_id: int,
+        monster_names: list[str] | None = None,
+        theme: str | None = None,
+        threat: str = "moderate",
+        party_level: int = 1,
+        seed: int | None = None,
+    ) -> CombatStartResult:
+        """Build combatants from party + monsters, roll initiative, open round 1."""
+        if not self.repo.campaign_exists(campaign_id):
+            raise ValueError(f"no campaign {campaign_id}")
+        state = self.repo.ensure_solo_state(campaign_id)
+        rng = random.Random(
+            seed if seed is not None else zlib.crc32(f"combat:{campaign_id}".encode())
+        )
+        self.repo.clear_combatants(campaign_id)
+
+        # Heroes first, in party order.
+        hero_ids = self._ensure_hero_combatants(campaign_id, rng, party_level)
 
         # Monsters: named builds via the monster builder, theme via the
         # encounter builder, deterministic fallback when the LLM is down.
@@ -936,7 +1051,7 @@ class SoloLoop:
                 monster_specs.append(await self._build_monster_spec(name, party_level))
         elif theme:
             monster_specs = await self._build_encounter_specs(
-                theme, threat, party_level, len(party)
+                theme, threat, party_level, len(hero_ids)
             )
         if not monster_specs:
             monster_specs = [
@@ -950,8 +1065,10 @@ class SoloLoop:
 
         monster_ids: list[int] = []
         for spec in monster_specs:
+            # add_combatant, not upsert: an encounter may field several
+            # creatures with the same name, and each needs its own row.
             monster_ids.append(
-                self.repo.upsert_combatant(
+                self.repo.add_combatant(
                     campaign_id=campaign_id,
                     name=spec["name"],
                     kind="monster",
@@ -1043,7 +1160,11 @@ class SoloLoop:
                             "name": monster.name,
                             "level": monster.level,
                             "hp": max(1, monster.hp or 10),
-                            "ac": 15,
+                            # EncounterMonster carries no AC, so derive it the
+                            # same way the deterministic fallbacks do (12 +
+                            # level) plus the encounter template's AC modifier
+                            # — never a flat 15 for every creature.
+                            "ac": _encounter_monster_ac(monster.level, monster.template),
                         }
                     )
             return specs
@@ -1053,6 +1174,8 @@ class SoloLoop:
 
     async def end_turn(self, campaign_id: int) -> dict:
         """Advance initiative by one combatant without a player action."""
+        if not self.repo.campaign_exists(campaign_id):
+            raise ValueError(f"no campaign {campaign_id}")
         state = self.repo.ensure_solo_state(campaign_id)
         if state.phase != "combat":
             return {"phase": state.phase, "round": state.round_num, "active_combatant": None}
@@ -1067,9 +1190,14 @@ class SoloLoop:
 
     async def end_combat(self, campaign_id: int) -> dict:
         """Close combat: back to exploration, initiative cleared."""
+        if not self.repo.campaign_exists(campaign_id):
+            raise ValueError(f"no campaign {campaign_id}")
         self.repo.update_solo_state(
             campaign_id, phase="exploration", round_num=1, clear_active=True, turn_order=[]
         )
+        # The roster must go inactive too: leaving combatants active after
+        # the phase flip meant exploration turns still saw live foes.
+        self.repo.deactivate_combatants(campaign_id)
         self.repo.mirror_combat_json(campaign_id)
         return {"phase": "exploration", "round": 1, "active_combatant": None}
 

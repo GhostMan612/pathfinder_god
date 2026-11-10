@@ -138,6 +138,7 @@ class SoloState:
     current_location_id: int | None = None
     active_combatant_id: int | None = None
     turn_order: list[int] | None = None
+    next_turn_num: int = 1
 
 
 @dataclass
@@ -207,6 +208,74 @@ class CampaignRepository:
                     pass
                 try:
                     conn.execute("ALTER TABLE campaigns ADD COLUMN combat_json TEXT")
+                except sqlite3.OperationalError:
+                    pass
+                # Older solo_state rows predate next_turn_num (the locked turn
+                # counter). Add it and backfill from the highest recorded
+                # turn, so existing campaigns resume numbering without
+                # colliding with turns they already have.
+                try:
+                    conn.execute(
+                        "ALTER TABLE solo_state ADD COLUMN next_turn_num "
+                        "INTEGER NOT NULL DEFAULT 1"
+                    )
+                    conn.execute(
+                        """
+                        UPDATE solo_state SET next_turn_num = (
+                            SELECT COALESCE(MAX(turn_num), 0) + 1
+                            FROM campaign_turns
+                            WHERE campaign_turns.campaign_id = solo_state.campaign_id
+                        )
+                        """
+                    )
+                except sqlite3.OperationalError:
+                    pass
+                # Older campaign.db files carry UNIQUE(campaign_id, name) on
+                # combatants, which collapsed duplicate monsters into one row:
+                # upserting a second "Goblin" overwrote the first one's HP/AC.
+                # Rebuild the table without that constraint, preserving rows.
+                try:
+                    row = conn.execute(
+                        "SELECT sql FROM sqlite_master "
+                        "WHERE type = 'table' AND name = 'combatants'"
+                    ).fetchone()
+                    if row and row[0] and "UNIQUE(campaign_id, name)" in row[0]:
+                        conn.execute(
+                            "ALTER TABLE combatants RENAME TO combatants_legacy"
+                        )
+                        conn.execute(
+                            """
+                            CREATE TABLE combatants (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+                                name TEXT NOT NULL,
+                                kind TEXT CHECK(kind IN ('hero','npc','monster')) DEFAULT 'monster',
+                                hp INTEGER NOT NULL DEFAULT 1,
+                                max_hp INTEGER NOT NULL DEFAULT 1,
+                                temp_hp INTEGER NOT NULL DEFAULT 0,
+                                ac INTEGER NOT NULL DEFAULT 10,
+                                initiative INTEGER NOT NULL DEFAULT 0,
+                                conditions_json TEXT NOT NULL DEFAULT '[]',
+                                is_active INTEGER NOT NULL DEFAULT 1,
+                                turn_order INTEGER NOT NULL DEFAULT 0,
+                                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                            )
+                            """
+                        )
+                        conn.execute(
+                            """
+                            INSERT INTO combatants
+                                (id, campaign_id, name, kind, hp, max_hp, temp_hp, ac,
+                                 initiative, conditions_json, is_active, turn_order,
+                                 created_at, updated_at)
+                            SELECT id, campaign_id, name, kind, hp, max_hp, temp_hp, ac,
+                                   initiative, conditions_json, is_active, turn_order,
+                                   created_at, updated_at
+                            FROM combatants_legacy
+                            """
+                        )
+                        conn.execute("DROP TABLE combatants_legacy")
                 except sqlite3.OperationalError:
                     pass
                 # Index any already-saved sessions into the recall FTS table so
@@ -1317,37 +1386,130 @@ class CampaignRepository:
         turn_order: int = 0,
         is_active: bool = True,
     ) -> int:
+        """Insert or refresh the single combatant row for (campaign_id, name).
+
+        Heroes are unique by name, so re-adding a hero refreshes its row.
+        Monsters must NOT use this: several monsters may share a name, so
+        start_combat inserts them with add_combatant instead. (The old
+        UNIQUE(campaign_id, name) + ON CONFLICT upsert silently overwrote
+        the first monster whenever a duplicate name was added.)
+        """
         with self._conn() as conn:
             self._ensure_campaign(conn, campaign_id)
-            cur = conn.execute(
-                """
-                INSERT INTO combatants (campaign_id, name, kind, hp, max_hp, temp_hp,
-                                       ac, initiative, conditions_json, is_active, turn_order)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(campaign_id, name) DO UPDATE SET
-                    kind = excluded.kind, hp = excluded.hp, max_hp = excluded.max_hp,
-                    temp_hp = excluded.temp_hp, ac = excluded.ac,
-                    initiative = excluded.initiative,
-                    conditions_json = excluded.conditions_json,
-                    is_active = excluded.is_active, turn_order = excluded.turn_order,
-                    updated_at = datetime('now')
-                RETURNING id
-                """,
-                (
-                    campaign_id,
-                    name,
-                    kind,
-                    max(0, hp),
-                    max(1, max_hp),
-                    max(0, temp_hp),
-                    ac,
-                    initiative,
-                    json.dumps(conditions or []),
-                    1 if is_active else 0,
-                    turn_order,
-                ),
+            existing = conn.execute(
+                "SELECT id FROM combatants WHERE campaign_id = ? AND name = ? "
+                "ORDER BY id LIMIT 1",
+                (campaign_id, name),
+            ).fetchone()
+            if existing is not None:
+                conn.execute(
+                    """
+                    UPDATE combatants SET kind = ?, hp = ?, max_hp = ?, temp_hp = ?,
+                        ac = ?, initiative = ?, conditions_json = ?,
+                        is_active = ?, turn_order = ?, updated_at = datetime('now')
+                    WHERE id = ?
+                    """,
+                    (
+                        kind,
+                        max(0, hp),
+                        max(1, max_hp),
+                        max(0, temp_hp),
+                        ac,
+                        initiative,
+                        json.dumps(conditions or []),
+                        1 if is_active else 0,
+                        turn_order,
+                        existing[0],
+                    ),
+                )
+                return existing[0]
+            return self._insert_combatant(
+                conn,
+                campaign_id,
+                name,
+                kind,
+                hp,
+                max_hp,
+                temp_hp,
+                ac,
+                initiative,
+                conditions,
+                turn_order,
+                is_active,
             )
-            return cur.fetchone()[0]
+
+    def add_combatant(
+        self,
+        campaign_id: int,
+        name: str,
+        kind: str = "monster",
+        hp: int = 1,
+        max_hp: int = 1,
+        temp_hp: int = 0,
+        ac: int = 10,
+        initiative: int = 0,
+        conditions: list[dict] | None = None,
+        turn_order: int = 0,
+        is_active: bool = True,
+    ) -> int:
+        """Always insert a new combatant row, even if the name already exists.
+
+        Use for monsters: an encounter may field several creatures with the
+        same name, and each one needs its own HP/AC/initiative row.
+        """
+        with self._conn() as conn:
+            self._ensure_campaign(conn, campaign_id)
+            return self._insert_combatant(
+                conn,
+                campaign_id,
+                name,
+                kind,
+                hp,
+                max_hp,
+                temp_hp,
+                ac,
+                initiative,
+                conditions,
+                turn_order,
+                is_active,
+            )
+
+    @staticmethod
+    def _insert_combatant(
+        conn,
+        campaign_id: int,
+        name: str,
+        kind: str,
+        hp: int,
+        max_hp: int,
+        temp_hp: int,
+        ac: int,
+        initiative: int,
+        conditions: list[dict] | None,
+        turn_order: int,
+        is_active: bool,
+    ) -> int:
+        cur = conn.execute(
+            """
+            INSERT INTO combatants (campaign_id, name, kind, hp, max_hp, temp_hp,
+                                   ac, initiative, conditions_json, is_active, turn_order)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                campaign_id,
+                name,
+                kind,
+                max(0, hp),
+                max(1, max_hp),
+                max(0, temp_hp),
+                ac,
+                initiative,
+                json.dumps(conditions or []),
+                1 if is_active else 0,
+                turn_order,
+            ),
+        )
+        return cur.lastrowid
 
     def get_combatants(self, campaign_id: int, active_only: bool = False) -> list[Combatant]:
         with self._conn() as conn:
@@ -1435,6 +1597,19 @@ class CampaignRepository:
                 "DELETE FROM combatants WHERE campaign_id = ?", (campaign_id,)
             )
 
+    def deactivate_combatants(self, campaign_id: int) -> int:
+        """Mark every combatant in the campaign inactive; returns how many
+        changed. Ending combat must do this: flipping solo_state to
+        exploration alone left a live combat roster behind, so the next
+        exploration turn still saw active foes."""
+        with self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE combatants SET is_active = 0 "
+                "WHERE campaign_id = ? AND is_active = 1",
+                (campaign_id,),
+            )
+            return cur.rowcount
+
     def get_next_turn_num(self, campaign_id: int) -> int:
         with self._conn() as conn:
             row = conn.execute(
@@ -1442,6 +1617,48 @@ class CampaignRepository:
                 (campaign_id,),
             ).fetchone()
             return (row[0] if row else 0) + 1
+
+    def reserve_turn_num(self, campaign_id: int) -> int:
+        """Atomically reserve the next turn number for a campaign.
+
+        The old path computed MAX(turn_num)+1 in one connection and inserted
+        the turn in another, so two concurrent turns could reserve the same
+        number and the second insert then failed on
+        UNIQUE(campaign_id, turn_num). This holds BEGIN IMMEDIATE across the
+        read and the counter increment on the solo_state row, so each caller
+        gets a distinct number. A reserved number is consumed even if the
+        turn later fails — turn numbers may skip, never collide.
+        """
+        with self._conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._ensure_campaign(conn, campaign_id)
+            conn.execute(
+                """
+                INSERT INTO solo_state (campaign_id)
+                VALUES (?)
+                ON CONFLICT(campaign_id) DO NOTHING
+                """,
+                (campaign_id,),
+            )
+            row = conn.execute(
+                "SELECT next_turn_num FROM solo_state WHERE campaign_id = ?",
+                (campaign_id,),
+            ).fetchone()
+            turn_num = int(row[0]) if row else 1
+            # Belt and braces: if the counter is ever stale (a solo_state
+            # row created after turns were already recorded), never hand
+            # out a number a recorded turn already holds.
+            max_row = conn.execute(
+                "SELECT COALESCE(MAX(turn_num), 0) FROM campaign_turns "
+                "WHERE campaign_id = ?",
+                (campaign_id,),
+            ).fetchone()
+            turn_num = max(turn_num, int(max_row[0]) + 1 if max_row else 1)
+            conn.execute(
+                "UPDATE solo_state SET next_turn_num = ? WHERE campaign_id = ?",
+                (turn_num + 1, campaign_id),
+            )
+            return turn_num
 
     def record_turn(
         self,
