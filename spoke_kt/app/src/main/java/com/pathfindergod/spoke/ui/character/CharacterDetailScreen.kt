@@ -75,7 +75,16 @@ private fun flatEntries(raw: String?): List<Pair<String, String>> {
 
 private fun renderValue(element: JsonElement): String = when (element) {
     is JsonPrimitive -> element.intOrNull?.toString() ?: element.content
-    else -> element.toString()
+    is JsonArray -> element.joinToString(", ") { renderValue(it) }
+    is JsonObject -> element.entries.joinToString(", ") { (key, value) ->
+        "${prettyKey(key)}: ${renderValue(value)}"
+    }
+}
+
+private fun prettyKey(key: String): String {
+    val spaced = key.replace('_', ' ')
+        .replace(Regex("([a-z0-9])([A-Z])"), "$1 $2")
+    return spaced.replaceFirstChar { it.uppercase() }
 }
 
 private fun abilityModifier(score: Int): Int = Math.floorDiv(score - 10, 2)
@@ -90,6 +99,7 @@ fun CharacterDetailScreen(
     val abilities = remember(entity.abilities) { flatEntries(entity.abilities).toMap() }
     val proficiencies = remember(entity.proficiencies) { flatEntries(entity.proficiencies) }
     val feats = remember(entity.feats) { flatEntries(entity.feats) }
+    val equipment = remember(entity.equipment) { CharacterEquipmentParser.parse(entity.equipment) }
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(Spacing.lg),
         verticalArrangement = Arrangement.spacedBy(Spacing.md),
@@ -227,6 +237,129 @@ fun CharacterDetailScreen(
             title = stringResource(R.string.character_feats),
             entries = feats,
         )
+        CharacterEquipmentCard(summary = equipment)
+        if (!entity.spellcasting.isNullOrBlank()) {
+            SheetSection(
+                title = stringResource(R.string.character_spellcasting),
+                entries = flatEntries(entity.spellcasting),
+            )
+        }
+        if (!entity.conditions.isNullOrBlank()) {
+            SheetSection(
+                title = stringResource(R.string.character_conditions),
+                entries = flatEntries(entity.conditions),
+            )
+        }
+        if (!entity.notes.isNullOrBlank()) {
+            GodCard(
+                title = {
+                    Text(
+                        text = stringResource(R.string.character_notes),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = GoldAccent,
+                    )
+                },
+            ) {
+                Text(
+                    text = entity.notes,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextPrimary,
+                    modifier = Modifier.padding(top = Spacing.xs),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CharacterEquipmentCard(summary: EquipmentSummary?) {
+    GodCard(
+        modifier = Modifier.testTag(GodTags.HERO_EQUIPMENT),
+        title = {
+            Text(
+                text = stringResource(R.string.character_equipment),
+                style = MaterialTheme.typography.titleMedium,
+                color = GoldAccent,
+            )
+        },
+    ) {
+        if (summary == null || summary.isEmpty) {
+            Text(
+                text = stringResource(R.string.value_not_set),
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextSecondary,
+                modifier = Modifier.padding(top = Spacing.xs),
+            )
+        } else {
+            EquipmentGroup(
+                title = stringResource(R.string.character_weapons),
+                lines = summary.weapons,
+            )
+            EquipmentGroup(
+                title = stringResource(R.string.character_armor),
+                lines = summary.armor,
+            )
+            EquipmentGroup(
+                title = stringResource(R.string.character_shield),
+                lines = summary.shield,
+            )
+            EquipmentGroup(
+                title = stringResource(R.string.character_gear),
+                lines = summary.gear,
+            )
+            if (summary.coins.isNotEmpty()) {
+                Text(
+                    text = stringResource(
+                        R.string.character_entry_pattern,
+                        stringResource(R.string.character_coins),
+                        summary.coins.joinToString(" · ") { "${it.first} ${it.second}" },
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextPrimary,
+                    modifier = Modifier.padding(top = Spacing.sm),
+                )
+            }
+            EquipmentGroup(
+                title = null,
+                lines = summary.other,
+            )
+        }
+    }
+}
+
+@Composable
+private fun EquipmentGroup(
+    title: String?,
+    lines: List<EquipmentLine>,
+) {
+    if (lines.isEmpty()) return
+    if (title != null) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            color = GoldAccent,
+            modifier = Modifier.padding(top = Spacing.md),
+        )
+    }
+    lines.forEach { line ->
+        Column(modifier = Modifier.padding(top = Spacing.sm)) {
+            Text(
+                text = line.name,
+                style = MaterialTheme.typography.bodyLarge,
+                color = TextPrimary,
+            )
+            line.details.forEach { (key, value) ->
+                Text(
+                    text = if (key == "value") {
+                        value
+                    } else {
+                        stringResource(R.string.character_entry_pattern, key, value)
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextSecondary,
+                )
+            }
+        }
     }
 }
 

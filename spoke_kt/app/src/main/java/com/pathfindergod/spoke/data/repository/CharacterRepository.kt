@@ -7,6 +7,8 @@ package com.pathfindergod.spoke.data.repository
 
 import com.pathfindergod.spoke.data.local.AppDatabase
 import com.pathfindergod.spoke.data.local.CharacterEntity
+import com.pathfindergod.spoke.data.network.BuildCharacterRequest
+import com.pathfindergod.spoke.data.network.BuildCharacterResponse
 import com.pathfindergod.spoke.data.network.HubApi
 import kotlinx.coroutines.flow.Flow
 
@@ -22,6 +24,9 @@ class CharacterRepository(
 
     suspend fun saveCharacter(entity: CharacterEntity): Long =
         db.characterDao().upsert(entity)
+
+    suspend fun forgeCharacter(prompt: String): BuildCharacterResponse =
+        api.generateCharacter(BuildCharacterRequest(prompt))
 
     suspend fun deleteCharacter(id: Long) {
         db.characterDao().delete(id)
