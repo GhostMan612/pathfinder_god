@@ -76,6 +76,10 @@ object GodTags {
     const val MAP_SHARE = "pg:map:viewer:share"
     const val MAP_LAYER_GM = "pg:map:viewer:layer:gm"
     const val MAP_LAYER_PLAYER = "pg:map:viewer:layer:player"
+    const val MAP_MODE_FLAT = "pg:map:viewer:mode:flat"
+    const val MAP_MODE_CUBED = "pg:map:viewer:mode:cubed"
+    const val MAP_DIORAMA = "pg:map:viewer:diorama"
+    const val MAP_DIORAMA_RESET = "pg:map:viewer:diorama:reset"
 
     fun encounter(id: String): String = "pg:encounter:vault:$id"
     fun encounterDelete(id: String): String = "pg:encounter:vault:$id:delete"

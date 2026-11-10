@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.pathfindergod.spoke.R
 import com.pathfindergod.spoke.data.local.MapEntity
 import com.pathfindergod.spoke.data.network.MapRequest
+import com.pathfindergod.spoke.data.network.MapSceneCodec
 import com.pathfindergod.spoke.data.network.HubApi
 import com.pathfindergod.spoke.data.repository.MapRepository
 import com.pathfindergod.spoke.ui.strings.UiText
@@ -48,6 +49,9 @@ class MapViewModel(
                 val response = api.generateMap(MapRequest(prompt))
                 val gm = response.gmBase64Png.orEmpty()
                 if (response.valid && gm.isNotBlank()) {
+                    val sceneJson = response.scene?.let { scene ->
+                        runCatching { MapSceneCodec.encode(scene) }.getOrNull()
+                    }
                     repository.saveMap(
                         id = UUID.randomUUID().toString(),
                         prompt = prompt,
@@ -55,6 +59,7 @@ class MapViewModel(
                         playerBase64Png = response.playerBase64Png?.takeIf { it.isNotBlank() } ?: gm,
                         width = response.width ?: 0,
                         height = response.height ?: 0,
+                        sceneJson = sceneJson,
                     )
                 } else {
                     _state.value = _state.value.copy(

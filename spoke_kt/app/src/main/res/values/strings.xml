@@ -231,6 +231,19 @@
     <string name="map_unresolved">Image would not resolve.</string>
     <string name="map_forge_empty">The forge returned no map.</string>
     <string name="map_conjure_failed">Map conjuring failed — is the hub awake?</string>
+    <string name="map_mode_flat">Flat</string>
+    <string name="map_mode_cubed">Cubed</string>
+    <string name="map_mode_flat_announcement">Flat map</string>
+    <string name="map_mode_cubed_announcement">Cubed map</string>
+    <string name="map_3d_building">Raising the diorama…</string>
+    <string name="map_3d_failed">3D view unavailable — showing the flat map.</string>
+    <string name="map_3d_description">Cubed map of %1$s. Drag to orbit, pinch to zoom.</string>
+    <string name="a11y_map_3d_state_building">Building 3D view</string>
+    <string name="a11y_map_3d_state_ready">3D view ready</string>
+    <string name="a11y_map_3d_state_failed">3D view unavailable</string>
+    <string name="a11y_map_3d_reset">Reset the 3D view</string>
+    <string name="a11y_map_mode_flat">Show the flat map</string>
+    <string name="a11y_map_mode_cubed">Show the cubed map</string>
 
     <string name="character_empty">No heroes yet — forge one with the God.</string>
     <string name="character_back">‹ Roster</string>

@@ -21,7 +21,7 @@ import androidx.sqlite.db.SupportSQLiteOpenHelper
         CampaignEntity::class,
         RollEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -58,12 +58,18 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `maps` ADD COLUMN `scene_json` TEXT")
+            }
+        }
+
         fun create(
             context: Context,
             factory: SupportSQLiteOpenHelper.Factory = NgaSQLiteOpenHelperFactory(),
         ): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, FILE_NAME)
-                .addMigrations(MIGRATION_2_3)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
                 .openHelperFactory(factory)
                 .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()

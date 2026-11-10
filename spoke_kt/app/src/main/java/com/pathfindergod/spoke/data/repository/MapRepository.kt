@@ -28,6 +28,7 @@ class MapRepository(
         playerBase64Png: String,
         width: Int,
         height: Int,
+        sceneJson: String? = null,
     ) {
         db.mapDao().upsert(
             MapEntity(
@@ -37,6 +38,7 @@ class MapRepository(
                 playerBase64Png = playerBase64Png,
                 width = width,
                 height = height,
+                sceneJson = sceneJson,
                 createdAt = Instant.now().toString(),
             ),
         )

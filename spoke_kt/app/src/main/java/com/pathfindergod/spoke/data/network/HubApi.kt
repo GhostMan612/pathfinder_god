@@ -79,6 +79,7 @@ data class MapGenerateResponse(
     @SerialName("player_base64_png") val playerBase64Png: String? = null,
     val width: Int? = null,
     val height: Int? = null,
+    val scene: MapSceneDto? = null,
     val error: String? = null,
 )
 

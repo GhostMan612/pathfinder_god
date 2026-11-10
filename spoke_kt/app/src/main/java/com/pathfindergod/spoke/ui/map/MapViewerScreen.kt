@@ -5,6 +5,7 @@
 
 package com.pathfindergod.spoke.ui.map
 
+import android.app.ActivityManager
 import android.content.Context
 import androidx.compose.animation.core.FloatExponentialDecaySpec
 import androidx.compose.animation.core.animateDecay
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -27,11 +29,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
@@ -56,6 +58,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Velocity
 import com.pathfindergod.spoke.R
+import com.pathfindergod.spoke.data.network.MapSceneCodec
 import com.pathfindergod.spoke.service.ExportService
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pathfindergod.spoke.data.local.MapEntity
@@ -73,8 +76,6 @@ import com.pathfindergod.spoke.ui.theme.GoldAccent
 import com.pathfindergod.spoke.ui.theme.TextPrimary
 import com.pathfindergod.spoke.ui.theme.TextSecondary
 import com.pathfindergod.spoke.ui.viewmodel.MapViewModel
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.launch
 
 const val MIN_ZOOM = 0.5f
 const val MAX_ZOOM = 6f
@@ -113,8 +114,17 @@ private fun MapCanvas(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     var gmLayer by rememberSaveable { mutableStateOf(true) }
+    var cubed by rememberSaveable { mutableStateOf(false) }
+    val scene = remember(map.sceneJson) { map.sceneJson?.let(MapSceneCodec::decode) }
+    val lowRam = remember {
+        (context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager)
+            ?.isLowRamDevice == true
+    }
+    val canCube = scene != null && !lowRam
+    LaunchedEffect(canCube) {
+        if (!canCube) cubed = false
+    }
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     val zoomInLabel = stringResource(R.string.a11y_map_zoom_in)
@@ -147,7 +157,11 @@ private fun MapCanvas(
             true
         },
     )
-    val decoded by produceState<ImageBitmap?>(initialValue = null, map.id, gmLayer) {
+    val decoded by produceState<ImageBitmap?>(initialValue = null, map.id, gmLayer, cubed) {
+        if (cubed) {
+            value = null
+            return@produceState
+        }
         value = MapImageDecoder.decode(
             if (gmLayer) map.gmBase64Png else map.playerBase64Png,
             VIEWER_PX,
@@ -165,20 +179,6 @@ private fun MapCanvas(
                 onClick = onBack,
                 testTag = GodTags.MAP_BACK,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
-                GodChip(
-                    label = stringResource(R.string.map_layer_gm),
-                    selected = gmLayer,
-                    onClick = { gmLayer = true },
-                    testTag = GodTags.MAP_LAYER_GM,
-                )
-                GodChip(
-                    label = stringResource(R.string.map_layer_player),
-                    selected = !gmLayer,
-                    onClick = { gmLayer = false },
-                    testTag = GodTags.MAP_LAYER_PLAYER,
-                )
-            }
             Icon(
                 imageVector = Icons.Filled.Share,
                 contentDescription = stringResource(R.string.map_share),
@@ -199,6 +199,50 @@ private fun MapCanvas(
                     .padding(Spacing.xs),
             )
         }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = Spacing.xs),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (canCube) {
+                GodChip(
+                    label = stringResource(R.string.map_mode_flat),
+                    selected = !cubed,
+                    onClick = {
+                        cubed = false
+                        announcement = context.getString(R.string.map_mode_flat_announcement)
+                    },
+                    testTag = GodTags.MAP_MODE_FLAT,
+                    contentDescription = stringResource(R.string.a11y_map_mode_flat),
+                )
+                Spacer(Modifier.size(Spacing.md))
+                GodChip(
+                    label = stringResource(R.string.map_mode_cubed),
+                    selected = cubed,
+                    onClick = {
+                        cubed = true
+                        announcement = context.getString(R.string.map_mode_cubed_announcement)
+                    },
+                    testTag = GodTags.MAP_MODE_CUBED,
+                    contentDescription = stringResource(R.string.a11y_map_mode_cubed),
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            if (!cubed) {
+                GodChip(
+                    label = stringResource(R.string.map_layer_gm),
+                    selected = gmLayer,
+                    onClick = { gmLayer = true },
+                    testTag = GodTags.MAP_LAYER_GM,
+                )
+                Spacer(Modifier.size(Spacing.md))
+                GodChip(
+                    label = stringResource(R.string.map_layer_player),
+                    selected = !gmLayer,
+                    onClick = { gmLayer = false },
+                    testTag = GodTags.MAP_LAYER_PLAYER,
+                )
+            }
+        }
         Text(
             text = map.prompt,
             style = MaterialTheme.typography.titleMedium,
@@ -209,6 +253,17 @@ private fun MapCanvas(
             modifier = Modifier.fillMaxWidth().weight(1f).padding(top = Spacing.md),
             contentPadding = PaddingValues(Dimens.gridSpacing),
         ) {
+            if (cubed && scene != null) {
+                MapDiorama(
+                    scene = scene,
+                    prompt = map.prompt,
+                    modifier = Modifier.fillMaxSize().testTag(GodTags.MAP_DIORAMA),
+                    onFailed = {
+                        cubed = false
+                        announcement = context.getString(R.string.map_3d_failed)
+                    },
+                )
+            } else {
             BoxWithConstraints(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,
@@ -270,6 +325,7 @@ private fun MapCanvas(
                 } else {
                     GodStatusText(text = stringResource(R.string.map_unresolved))
                 }
+            }
             }
         }
         // Replaces view.announceForAccessibility(). The zero height keeps it out

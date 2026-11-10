@@ -17,5 +17,6 @@ data class MapEntity(
     @ColumnInfo(name = "player_base64_png") val playerBase64Png: String,
     val width: Int,
     val height: Int,
+    @ColumnInfo(name = "scene_json") val sceneJson: String? = null,
     @ColumnInfo(name = "created_at") val createdAt: String,
 )

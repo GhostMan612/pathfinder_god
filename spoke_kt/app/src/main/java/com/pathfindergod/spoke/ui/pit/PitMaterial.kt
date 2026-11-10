@@ -12,7 +12,8 @@ import java.io.File
 
 object PitMaterial {
 
-    const val VERSION = "1.76.0"
+    // Bump when the runtime material program changes; the file name is the cache key.
+    const val VERSION = "1.76.0-r2"
     const val CACHE_DIR = "filament"
     const val ASSET_DIR = "pit"
     const val NAME = "DieFace"
@@ -27,40 +28,31 @@ object PitMaterial {
 
     fun assetPath(kind: Kind): String = "$ASSET_DIR/${fileName(kind)}"
 
-    fun definition(kind: Kind): String = when (kind) {
+    /**
+     * MaterialBuilder in filamat-android compiles a fragment function, not a `.mat`
+     * source file. Keep the uniforms and UV requirement explicit here.
+     */
+    fun fragmentShader(kind: Kind): String = when (kind) {
         Kind.DIE -> """
-            material {
-                name : $NAME,
-                shadingModel : lit,
-            }
-            fragment {
-                void material(inout MaterialInputs material) {
-                    material.baseColor = vec3(0.8, 0.8, 0.8);
-                }
+            void material(inout MaterialInputs material) {
+                prepareMaterial(material);
+                material.baseColor = texture(materialParams_baseColorMap, getUV0());
+                material.roughness = materialParams.roughness;
+                material.metallic = materialParams.metallic;
             }
         """.trimIndent()
         Kind.FELT -> """
-            material {
-                name : FeltTable,
-                shadingModel : lit,
-            }
-            fragment {
-                void material(inout MaterialInputs material) {
-                    material.baseColor = vec3(0.5, 0.5, 0.5);
-                }
+            void material(inout MaterialInputs material) {
+                prepareMaterial(material);
+                material.baseColor = texture(materialParams_baseColorMap, getUV0());
+                material.roughness = $FELT_ROUGHNESS;
+                material.metallic = 0.0;
             }
         """.trimIndent()
         Kind.SHADOW -> """
-            material {
-                name : ContactShadow,
-                shadingModel : lit,
-                blending : transparent,
-                culling : none,
-            }
-            fragment {
-                void material(inout MaterialInputs material) {
-                    material.baseColor = vec3(0.0, 0.0, 0.0, 0.5);
-                }
+            void material(inout MaterialInputs material) {
+                prepareMaterial(material);
+                material.baseColor = texture(materialParams_baseColorMap, getUV0());
             }
         """.trimIndent()
     }
@@ -135,8 +127,28 @@ object PitMaterial {
 
     private fun compileOne(kind: Kind): ByteArray? = try {
         val builder = MaterialBuilder()
-        builder.name(nameOf(kind))
-        builder.material(definition(kind))
+            .platform(MaterialBuilder.Platform.MOBILE)
+            .name(nameOf(kind))
+            .shading(MaterialBuilder.Shading.LIT)
+            .require(MaterialBuilder.VertexAttribute.UV0)
+            .samplerParameter(
+                MaterialBuilder.SamplerType.SAMPLER_2D,
+                MaterialBuilder.SamplerFormat.FLOAT,
+                MaterialBuilder.ParameterPrecision.DEFAULT,
+                "baseColorMap",
+            )
+            .material(fragmentShader(kind))
+            .optimization(MaterialBuilder.Optimization.NONE)
+        when (kind) {
+            Kind.DIE -> builder
+                .uniformParameter(MaterialBuilder.UniformType.FLOAT, "roughness")
+                .uniformParameter(MaterialBuilder.UniformType.FLOAT, "metallic")
+            Kind.SHADOW -> builder
+                .blending(MaterialBuilder.BlendingMode.TRANSPARENT)
+                .culling(MaterialBuilder.CullingMode.NONE)
+                .depthWrite(false)
+            Kind.FELT -> builder
+        }
         val pack = builder.build()
         if (!pack.isValid) {
             null
