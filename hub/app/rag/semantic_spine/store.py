@@ -96,7 +96,6 @@ class SemanticStore:
         parent_count = 0
         chunk_count = 0
         last_rowid = 0
-        digest = hashlib.sha256()
 
         with closing(sqlite3.connect(staging)) as dst:
             dst.execute("PRAGMA synchronous=NORMAL")
@@ -130,6 +129,12 @@ class SemanticStore:
             if can_resume:
                 rowid_row = dst.execute("SELECT COALESCE(MAX(source_rowid), 0) FROM entries").fetchone()
                 last_rowid = int(rowid_row[0]) if rowid_row else 0
+                if last_rowid > 0:
+                    # A parent's chunks can straddle a batch flush. That parent was
+                    # committed partially, so rebuild it whole instead of skipping
+                    # the chunks that never reached the staging database.
+                    dst.execute("DELETE FROM entries WHERE source_rowid = ?", (last_rowid,))
+                    dst.commit()
                 count_row = dst.execute("SELECT COUNT(DISTINCT parent_id), COUNT(*) FROM entries").fetchone()
                 if count_row:
                     parent_count = int(count_row[0])
@@ -157,7 +162,7 @@ class SemanticStore:
                 src.row_factory = sqlite3.Row
                 cursor = src.execute(
                     "SELECT rowid, system, category, name, source_book, raw_content "
-                    "FROM rules WHERE rowid > ? ORDER BY rowid",
+                    "FROM rules WHERE rowid >= ? ORDER BY rowid",
                     (last_rowid,),
                 )
 
@@ -176,7 +181,6 @@ class SemanticStore:
                     for (src_rowid, chunk), vector in zip(pending_chunks, vectors):
                         packed = struct.pack(f"<{dimensions}f", *normalize_vector(vector, dimensions))
                         identifier = chunk.chunk_id()
-                        digest.update(identifier.encode("ascii"))
                         batch_rows.append(
                             (
                                 identifier,
@@ -233,6 +237,10 @@ class SemanticStore:
                 if _source_stamp(self.source_path) != source_stamp:
                     raise SemanticSpineError("Rules database changed during index construction")
 
+                row_digest = hashlib.sha256()
+                for (entry_id,) in dst.execute("SELECT id FROM entries ORDER BY id"):
+                    row_digest.update(entry_id.encode("ascii"))
+
                 final_manifest = {
                     "schema_version": self.schema_version,
                     "model_identity": model_identity,
@@ -241,7 +249,7 @@ class SemanticStore:
                     "source_path": str(self.source_path),
                     "rows": str(total_parents),
                     "chunks": str(total_chunks),
-                    "row_digest": digest.hexdigest(),
+                    "row_digest": row_digest.hexdigest(),
                 }
                 dst.execute("DELETE FROM manifest")
                 dst.executemany("INSERT INTO manifest VALUES (?,?)", final_manifest.items())
@@ -282,50 +290,127 @@ class SemanticStore:
         results: list[RankedRule] = []
         with closing(self._readonly(self.index_path)) as conn:
             for system in preferred:
-                best_by_parent: dict[str, tuple[float, RuleRecord, int, int, str]] = {}
-                cursor = conn.execute(
-                    "SELECT parent_id, system, category, name, source_book, chunk_index, total_chunks, content, embedding "
-                    "FROM entries WHERE system=?",
-                    (system,),
-                )
-                for row in cursor:
-                    parent_id = row[0]
-                    packed = row[8]
-                    if len(packed) != 4 * dimensions:
-                        raise SemanticSpineError("Index vector length mismatch")
-                    vector_values = struct.unpack(f"<{dimensions}f", packed)
-                    score = cosine(needle, vector_values)
-
-                    if parent_id not in best_by_parent or score > best_by_parent[parent_id][0]:
-                        record = RuleRecord(
-                            system=row[1],
-                            category=row[2],
-                            name=row[3],
-                            source_book=row[4],
-                            content=row[7],
-                        )
-                        best_by_parent[parent_id] = (score, record, row[5], row[6], row[7])
-
-                candidates = [
-                    RankedRule(
-                        record=rec,
-                        score=sc,
-                        chunk_index=c_idx,
-                        total_chunks=c_tot,
-                        chunk_text=c_text,
-                    )
-                    for sc, rec, c_idx, c_tot, c_text in best_by_parent.values()
-                ]
-
-                selected = heapq.nlargest(
-                    limit - len(results),
-                    candidates,
-                    key=lambda item: (item.score, item.record.source_book != "Unknown Source", item.record.name.casefold()),
-                )
-                results.extend(selected)
-                if len(results) >= limit:
+                remaining = limit - len(results)
+                if remaining <= 0:
                     break
+                results.extend(
+                    self._system_candidates(conn, system, needle, dimensions, remaining)
+                )
         return results[:limit]
+
+    @staticmethod
+    def _system_candidates(
+        conn: sqlite3.Connection,
+        system: str,
+        needle: tuple[float, ...],
+        dimensions: int,
+        limit: int,
+    ) -> list[RankedRule]:
+        """Best chunk per parent for one edition, highest score first.
+
+        At full corpus (~24k chunks per edition) a Python cosine per row costs
+        seconds per query. Embeddings are stored as little-endian float32, so
+        the whole edition is one memcpy into a matrix and one BLAS matmul.
+        The pure-Python path stays as the fallback when numpy is unavailable.
+        """
+        try:
+            import numpy as np
+        except ImportError:
+            np = None
+
+        if np is None:
+            best_by_parent: dict[str, tuple[float, sqlite3.Row]] = {}
+            cursor = conn.execute(
+                "SELECT parent_id, system, category, name, source_book, chunk_index, total_chunks, content, embedding "
+                "FROM entries WHERE system=?",
+                (system,),
+            )
+            for row in cursor:
+                packed = row[8]
+                if len(packed) != 4 * dimensions:
+                    raise SemanticSpineError("Index vector length mismatch")
+                score = cosine(needle, struct.unpack(f"<{dimensions}f", packed))
+                parent_id = row[0]
+                if parent_id not in best_by_parent or score > best_by_parent[parent_id][0]:
+                    best_by_parent[parent_id] = (score, row)
+            ranked = heapq.nlargest(
+                limit,
+                best_by_parent.values(),
+                key=lambda item: (
+                    item[0],
+                    item[1][4] != "Unknown Source",
+                    item[1][3].casefold(),
+                ),
+            )
+            return [
+                RankedRule(
+                    record=RuleRecord(
+                        system=row[1],
+                        category=row[2],
+                        name=row[3],
+                        source_book=row[4],
+                        content=row[7],
+                    ),
+                    score=score,
+                    chunk_index=row[5],
+                    total_chunks=row[6],
+                    chunk_text=row[7],
+                )
+                for score, row in ranked
+            ]
+
+        rows = conn.execute(
+            "SELECT rowid, parent_id, system, category, name, source_book, chunk_index, total_chunks, embedding "
+            "FROM entries WHERE system=?",
+            (system,),
+        ).fetchall()
+        if not rows:
+            return []
+        blobs = [row[8] for row in rows]
+        if any(len(blob) != 4 * dimensions for blob in blobs):
+            raise SemanticSpineError("Index vector length mismatch")
+        matrix = np.frombuffer(b"".join(blobs), dtype="<f4").reshape(len(rows), dimensions)
+        scores = matrix @ np.asarray(needle, dtype="<f4")
+
+        best_index: dict[str, int] = {}
+        for index, row in enumerate(rows):
+            parent_id = row[1]
+            previous = best_index.get(parent_id)
+            if previous is None or scores[index] > scores[previous]:
+                best_index[parent_id] = index
+
+        ranked = heapq.nlargest(
+            limit,
+            best_index.values(),
+            key=lambda index: (
+                float(scores[index]),
+                rows[index][5] != "Unknown Source",
+                rows[index][4].casefold(),
+            ),
+        )
+        results: list[RankedRule] = []
+        for index in ranked:
+            row = rows[index]
+            content_row = conn.execute(
+                "SELECT content FROM entries WHERE rowid=?", (row[0],)
+            ).fetchone()
+            content = str(content_row[0]) if content_row else ""
+            results.append(
+                RankedRule(
+                    record=RuleRecord(
+                        system=row[2],
+                        category=row[3],
+                        name=row[4],
+                        source_book=row[5],
+                        content=content,
+                    ),
+                    score=float(scores[index]),
+                    chunk_index=row[6],
+                    total_chunks=row[7],
+                    chunk_text=content,
+                )
+            )
+        return results
 
     def search(self, query: str, edition: str, embedder: Embedder, limit: int = 10) -> list[RankedRule]:
         status = self.status()

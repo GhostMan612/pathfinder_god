@@ -253,3 +253,35 @@ def test_concurrent_thread_boundary_search(standalone_store):
     for res in results:
         assert isinstance(res, list)
         assert len(res) > 0
+
+
+def test_resume_rebuilds_parent_straddling_batch_flush(tmp_path):
+    """A crash mid-parent must not leave that parent permanently truncated.
+
+    With batch_size=1 the first chunk of the long record is committed before
+    the provider fails. A naive MAX(source_rowid) resume skips the rest of the
+    parent; the store must instead rebuild the boundary parent whole.
+    """
+    db = tmp_path / "rules.db"
+    with closing(sqlite3.connect(db)) as conn:
+        conn.execute("CREATE VIRTUAL TABLE rules USING fts5(system, category, name, source_book, raw_content)")
+        conn.executemany(
+            "INSERT INTO rules(system,category,name,source_book,raw_content) VALUES(?,?,?,?,?)",
+            [
+                ("2E", "lore", "Long Record", "Player Core", "A" * 4000),
+                ("2E", "action", "Flanking", "Player Core", "Off guard melee ally opposite side."),
+            ],
+        )
+        conn.commit()
+    store = SemanticStore(tmp_path / "semantic.sqlite3", db)
+
+    with pytest.raises(SemanticSpineError, match="Synthetic provider failure"):
+        store.build(FakeEmbedder(fail_after=2), batch_size=1)
+
+    result = store.build(FakeEmbedder(), batch_size=1)
+    assert result["state"] == "ready"
+    assert result["rows"] == "2"
+    assert int(result["chunks"]) == 4
+    with closing(sqlite3.connect(store.index_path)) as conn:
+        counts = dict(conn.execute("SELECT parent_id, COUNT(*) FROM entries GROUP BY parent_id"))
+    assert sorted(counts.values()) == [1, 3]
