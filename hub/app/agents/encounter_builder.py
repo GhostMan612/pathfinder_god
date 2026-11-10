@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.agents.dice_utils import roll_dice
+from app.agents.json_builder import generate_validated_json
 from app.config import get_settings
 from app.llm.ollama_client import OllamaClient
 from app.rag.retriever import Retriever
@@ -124,6 +125,8 @@ class BuildResult:
     party_size: int
     threat: str
     theme: str
+    attempts: int = 1
+    source: str = "llm"  # "llm" | "greedy-fallback"
 
 
 SYSTEM_PROMPT = """You are a Pathfinder 2e encounter designer.
@@ -250,24 +253,134 @@ class EncounterBuilderAgent:
         if not candidates:
             raise ValueError(f"No valid creatures found for theme '{theme}' at PL {party_level}")
 
-        # 3. LLM selects exact budget match
+        # 3. LLM selects exact budget match, retried with the error fed back.
+        #    When every LLM draw is invalid or XP-mismatched, fall back to a
+        #    deterministic greedy exact-XP fill instead of a 400.
         candidate_summary = "\n".join(
             f'- {c["name"]} (Level {c["level"]}, {c["xp_each"]} XP)' for c in candidates
         )
+        validated: dict[str, list[dict[str, Any]]] = {}
+
+        def _validate_selection(data: object) -> list[str]:
+            if not isinstance(data, list):
+                return ["LLM returned a JSON value that is not an array"]
+            total = 0
+            for item in data:
+                if not isinstance(item, dict):
+                    return ["Selection entries must be objects with name and count"]
+                name = item.get("name")
+                match = next((c for c in candidates if c["name"] == name), None)
+                if match is None:
+                    return [f"LLM selected unknown monster: {name}"]
+                try:
+                    count = int(item["count"])
+                except (KeyError, TypeError, ValueError):
+                    return [f"Selection entry for {name} has no integer count"]
+                if count < 1:
+                    return [f"Selection entry for {name} has count {count} < 1"]
+                total += match["xp_each"] * count
+            if total != target_xp:
+                return [f"Selection total XP ({total}) != target ({target_xp})"]
+            validated["selection"] = data
+            return []
 
         prompt = f"{SYSTEM_PROMPT}\n\nTarget XP: {target_xp}\nAvailable monsters:\n{candidate_summary}"
-        raw = await self._llm.generate(
+        outcome = await generate_validated_json(
+            self._llm,
             prompt=prompt,
             model=self._settings.model_for("builders"),
             temperature=0.2,
             num_predict=800,
+            validate=_validate_selection,
         )
 
-        selection = self._parse_selection(raw)
-        if not selection:
-            raise ValueError("LLM returned invalid selection")
+        selection = validated.get("selection")
+        source = "llm"
+        if selection is None:
+            logger.info(
+                "Encounter LLM selection failed (%s); using greedy XP fill",
+                "; ".join(outcome.errors),
+            )
+            selection = self._greedy_xp_fill(candidates, target_xp)
+            if selection is None:
+                raise ValueError(
+                    f"LLM selection invalid ({'; '.join(outcome.errors)}) and "
+                    f"no exact XP fill exists for target {target_xp}"
+                )
+            source = "greedy-fallback"
 
         # 4. Hydrate selected monsters with full content
+        monsters, total_xp = self._hydrate(
+            selection, candidates, party_level, level_bump, template
+        )
+
+        return BuildResult(
+            target_xp=target_xp,
+            total_xp=total_xp,
+            monsters=monsters,
+            party_level=party_level,
+            party_size=party_size,
+            threat=threat,
+            theme=theme,
+            attempts=outcome.attempts,
+            source=source,
+        )
+
+    def _greedy_xp_fill(
+        self, candidates: list[dict[str, Any]], target_xp: int
+    ) -> list[dict[str, Any]] | None:
+        """Deterministic exact-XP fill: largest-first greedy, then DP.
+
+        Greedy alone can strand a remainder no denomination covers (e.g.
+        denominations 30/40 against a 60 XP target: 40 leaves 20). The DP
+        pass is an unbounded exact-fill search over the same XP values, so
+        an exact fill is returned whenever one exists at all.
+        """
+        ordered = sorted(candidates, key=lambda c: c["xp_each"], reverse=True)
+        remaining = target_xp
+        selection: list[dict[str, Any]] = []
+        for cand in ordered:
+            count = remaining // cand["xp_each"]
+            if count:
+                selection.append({"name": cand["name"], "count": count})
+                remaining -= count * cand["xp_each"]
+        if remaining == 0:
+            return selection
+
+        # DP exact fill: prev[amount] = denomination used to reach it.
+        by_xp: dict[int, dict[str, Any]] = {}
+        for cand in candidates:
+            by_xp.setdefault(cand["xp_each"], cand)
+        denoms = sorted(by_xp)
+        prev: list[int | None] = [None] * (target_xp + 1)
+        prev[0] = 0
+        for amount in range(1, target_xp + 1):
+            for denom in denoms:
+                if denom > amount or prev[amount - denom] is None:
+                    continue
+                prev[amount] = denom
+                break
+        if prev[target_xp] is None:
+            return None
+        counts: dict[str, int] = {}
+        amount = target_xp
+        while amount > 0:
+            denom = prev[amount]
+            if denom is None:  # pragma: no cover - guarded by the check above
+                return None
+            name = by_xp[denom]["name"]
+            counts[name] = counts.get(name, 0) + 1
+            amount -= denom
+        return [{"name": name, "count": count} for name, count in counts.items()]
+
+    def _hydrate(
+        self,
+        selection: list[dict[str, Any]],
+        candidates: list[dict[str, Any]],
+        party_level: int,
+        level_bump: int,
+        template: str,
+    ) -> tuple[list[EncounterMonster], int]:
         monsters: list[EncounterMonster] = []
         total_xp = 0
         template_key = (template or "normal").lower()
@@ -275,7 +388,7 @@ class EncounterBuilderAgent:
             name = item["name"]
             count = int(item["count"])
             match = next((c for c in candidates if c["name"] == name), None)
-            if not match:
+            if not match:  # pragma: no cover - validated before hydration
                 raise ValueError(f"LLM selected unknown monster: {name}")
             xp = self.creature_xp(party_level, match["level"] + level_bump)
             base_hp = self.roll_hp(match["content"]) or 0
@@ -296,19 +409,7 @@ class EncounterBuilderAgent:
                 template=template_key,
             ))
             total_xp += xp * count
-
-        if total_xp != target_xp:
-            raise ValueError(f"Selection total XP ({total_xp}) != target ({target_xp})")
-
-        return BuildResult(
-            target_xp=target_xp,
-            total_xp=total_xp,
-            monsters=monsters,
-            party_level=party_level,
-            party_size=party_size,
-            threat=threat,
-            theme=theme,
-        )
+        return monsters, total_xp
 
     def _extract_level(self, content: str) -> int | None:
         # Try to find "Level X" in content

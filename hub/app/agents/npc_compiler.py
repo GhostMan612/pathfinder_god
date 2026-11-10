@@ -12,12 +12,29 @@ Tools (exact from design chat):
 - level_up(character_id)
 
 Outputs JSON importable by Foundry VTT / Pathbuilder.
+
+Pipeline (same pattern as CharacterBuilderAgent):
+1. LLM generates an NPC JSON blueprint with format="json", retried up to
+   3 times by app.agents.json_builder with the validation error fed back.
+2. NPCModel (Pydantic) validates the blueprint: level 1-20, ability scores
+   8-18, skill ranks, feat levels/types.
+3. Only a fully-valid NPC reaches the caller. When the LLM is unavailable
+   or every retry is rejected, the deterministic template
+   (_build_from_concept) is used as a clearly-marked fallback
+   (source="fallback"), never silently passed off as LLM-generated.
 """
+
+from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
+from typing import Literal
 
+from pydantic import BaseModel, Field
+
+from app.agents.json_builder import generate_validated_json
 from app.config import get_settings
 from app.db.repository import CampaignRepository
 from app.llm.ollama_client import OllamaClient
@@ -99,6 +116,67 @@ NPC_SCHEMA = {
 }
 
 
+# ──────────────────────────────────────────────────────────────
+# Validated NPC model (mirrors NPC_SCHEMA)
+# ──────────────────────────────────────────────────────────────
+
+_SKILL_RANKS = ("untrained", "trained", "expert", "master", "legendary")
+_FEAT_TYPES = ("ancestry", "skill", "class", "general")
+
+
+class NPCAbilityScores(BaseModel):
+    # "int" cannot be a field name under `from __future__ import annotations`
+    # (the annotation `int` then resolves to the field itself); same
+    # int_/alias pattern as rules_lawyer.AbilityScoresModel.
+    model_config = {"populate_by_name": True}
+
+    str: int = Field(..., ge=8, le=18)
+    dex: int = Field(..., ge=8, le=18)
+    con: int = Field(..., ge=8, le=18)
+    int_: int = Field(..., ge=8, le=18, alias="int")
+    wis: int = Field(..., ge=8, le=18)
+    cha: int = Field(..., ge=8, le=18)
+
+
+class NPCSkill(BaseModel):
+    name: str = Field(..., min_length=1, max_length=60)
+    rank: Literal["untrained", "trained", "expert", "master", "legendary"]
+    modifier: int = Field(..., ge=-10, le=50)
+
+
+class NPCFeat(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    level: int = Field(..., ge=1, le=20)
+    type: Literal["ancestry", "skill", "class", "general"]
+
+
+class NPCEquipment(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    quantity: int = Field(default=1, ge=1, le=999)
+    bulk: str = Field(default="1", max_length=10)
+
+
+class NPCModel(BaseModel):
+    """Validated NPC blueprint, matching NPC_SCHEMA exactly."""
+
+    model_config = {"populate_by_name": True}
+
+    name: str = Field(..., min_length=1, max_length=120)
+    level: int = Field(..., ge=1, le=20)
+    ancestry: str = Field(..., min_length=1, max_length=60)
+    heritage: str | None = Field(default=None, max_length=60)
+    background: str = Field(..., min_length=1, max_length=120)
+    class_: str = Field(..., alias="class", min_length=1, max_length=60)
+    key_ability: Literal["str", "dex", "con", "int", "wis", "cha"]
+    ability_scores: NPCAbilityScores
+    skills: list[NPCSkill] = Field(default_factory=list, max_length=30)
+    feats: list[NPCFeat] = Field(default_factory=list, max_length=30)
+    formulas: list[str] = Field(default_factory=list, max_length=30)
+    equipment: list[NPCEquipment] = Field(default_factory=list, max_length=30)
+    personality: str = Field(default="", max_length=1000)
+    hooks: list[str] = Field(default_factory=list, max_length=10)
+
+
 @dataclass
 class NPCStatBlock:
     name: str
@@ -115,6 +193,11 @@ class NPCStatBlock:
     equipment: list[dict]
     personality: str
     hooks: list[str]
+    # Provenance: "llm" when the blueprint came from the model, "fallback"
+    # when every LLM attempt failed and the deterministic template was used.
+    source: str = "llm"
+    attempts: int = 1
+    errors: list[str] = field(default_factory=list)
 
     def to_foundry_json(self) -> dict:
         """Convert to Foundry VTT Actor import format."""
@@ -138,17 +221,89 @@ class NPCStatBlock:
         }
 
 
+@dataclass
+class NPCBuildResult:
+    valid: bool
+    npc: NPCStatBlock | None
+    source: str  # "llm" | "fallback"
+    attempts: int
+    errors: list[str] = field(default_factory=list)
+
+
 class NPCCompilerAgent:
-    def __init__(self, repo: CampaignRepository):
+    def __init__(self, repo: CampaignRepository, llm: OllamaClient | None = None):
         self.repo = repo
         self.settings = get_settings()
-        self.ollama = OllamaClient(self.settings.ollama_host)
+        self.ollama = llm or OllamaClient(self.settings.ollama_host)
+
+    async def build(self, concept: str) -> NPCBuildResult:
+        """Generate an NPC from a concept via the LLM, with template fallback.
+
+        Returns a valid NPC in all normal cases: LLM blueprint when it
+        validates, otherwise the deterministic template marked
+        source="fallback" with the LLM errors attached.
+        """
+        prompt = (
+            NPC_COMPILER_SYSTEM
+            + "\n\nSchema (exact JSON keys):\n"
+            + json.dumps(NPC_SCHEMA, indent=2)
+            + "\n\nConcept: "
+            + concept.strip()
+        )
+        validated: dict[str, NPCModel] = {}
+
+        def _validate(data: object) -> list[str]:
+            if not isinstance(data, dict):
+                return ["LLM returned a JSON value that is not an object"]
+            try:
+                validated["model"] = NPCModel.model_validate(data)
+            except Exception as exc:
+                return [f"Schema validation failed: {exc}"]
+            return []
+
+        outcome = await generate_validated_json(
+            self.ollama,
+            prompt=prompt,
+            model=self.settings.model_for("builders"),
+            temperature=0.3,
+            num_predict=1200,
+            validate=_validate,
+        )
+        if outcome.data is not None and "model" in validated:
+            npc = self._stat_block_from_model(
+                validated["model"],
+                source="llm",
+                attempts=outcome.attempts,
+                errors=outcome.errors,
+            )
+            return NPCBuildResult(True, npc, "llm", outcome.attempts, outcome.errors)
+
+        logger.warning(
+            "NPC LLM build failed after %d attempt(s) (%s); using template fallback",
+            outcome.attempts,
+            "; ".join(outcome.errors),
+        )
+        try:
+            fallback = self._build_from_concept(concept)
+        except Exception as exc:  # pragma: no cover - template is deterministic
+            logger.error("NPC template fallback failed: %s", exc)
+            return NPCBuildResult(
+                False, None, "fallback", outcome.attempts, [*outcome.errors, f"Fallback failed: {exc}"]
+            )
+        fallback.source = "fallback"
+        fallback.attempts = outcome.attempts
+        fallback.errors = [
+            *outcome.errors,
+            "LLM generation failed after retries; used deterministic template fallback",
+        ]
+        return NPCBuildResult(True, fallback, "fallback", outcome.attempts, fallback.errors)
 
     async def create_npc(self, concept: str) -> NPCStatBlock:
         """Generate NPC from concept using Ollama with structured output."""
-        # In production, use Ollama with JSON mode / structured output
-        # For now, return a template
-        return self._build_from_concept(concept)
+        result = await self.build(concept)
+        if result.npc is None:
+            raise RuntimeError(f"NPC build failed: {'; '.join(result.errors)}")
+        return result.npc
 
     async def save_npc_to_db(self, npc_json: dict, campaign_id: int = 1) -> dict:
         return await save_npc_to_db_tool(npc_json, self.repo, campaign_id)
@@ -156,24 +311,59 @@ class NPCCompilerAgent:
     async def level_up(self, character_id: int, campaign_id: int = 1) -> dict:
         return await level_up_tool(character_id, self.repo, campaign_id)
 
+    @staticmethod
+    def _stat_block_from_model(
+        model: NPCModel,
+        *,
+        source: str,
+        attempts: int,
+        errors: list[str],
+    ) -> NPCStatBlock:
+        return NPCStatBlock(
+            name=model.name,
+            level=model.level,
+            ancestry=model.ancestry,
+            heritage=model.heritage,
+            background=model.background,
+            class_=model.class_,
+            key_ability=model.key_ability,
+            ability_scores=model.ability_scores.model_dump(by_alias=True),
+            skills=[s.model_dump() for s in model.skills],
+            feats=[f.model_dump() for f in model.feats],
+            formulas=list(model.formulas) if model.formulas else None,
+            equipment=[e.model_dump() for e in model.equipment],
+            personality=model.personality,
+            hooks=list(model.hooks),
+            source=source,
+            attempts=attempts,
+            errors=list(errors),
+        )
+
     def _build_from_concept(self, concept: str) -> NPCStatBlock:
-        """Parse concept and build legal ABC stat block."""
+        """Parse concept and build legal ABC stat block.
+
+        Deterministic template. Used ONLY as the fallback when the LLM is
+        unavailable or every retry is rejected; callers mark it as such.
+        """
         # Parse level from concept
-        import re
         level_match = re.search(r"level\s+(\d+)", concept, re.IGNORECASE)
         level = int(level_match.group(1)) if level_match else 1
+        level = max(1, min(level, 20))
 
         # Parse ancestry/class from concept (simplified)
         concept_lower = concept.lower()
+        ancestry = "Human"
         # Match on stems. The previous equality-free substring test looked correct but
         # "dwarf" is not a substring of "dwarven" (d-w-a-r-f vs d-w-a-r-v), nor is
         # "elf" of "elven". Every adjectival form therefore fell through to Human,
         # so a "Dwarven alchemist" got Human feats.
         for stem, name in (
             ("halfling", "Halfling"),
+            ("dwarv", "Dwarf"),  # adjectival "Dwarven" (see note above)
             ("dwarf", "Dwarf"),
             ("gnome", "Gnome"),
             ("goblin", "Goblin"),
+            ("elv", "Elf"),  # adjectival "Elven"
             ("elf", "Elf"),
             ("half-orc", "Half-Orc"),
             ("orc", "Orc"),
@@ -209,7 +399,8 @@ class NPCCompilerAgent:
             formulas=self._formulas_for_class(class_),
             equipment=self._equipment_for_class(class_),
             personality="Gruff, suspicious of the Pathfinder Society, secretly proud of his craft",
-            hooks=["Needs rare reagent from Pathfinder lodge", "Hides a Pathfinder star in his cellar"]
+            hooks=["Needs rare reagent from Pathfinder lodge", "Hides a Pathfinder star in his cellar"],
+            source="fallback",
         )
 
     def _generate_name(self, ancestry: str, class_: str) -> str:
@@ -292,10 +483,17 @@ class NPCCompilerAgent:
 # ──────────────────────────────────────────────────────────────
 
 async def create_npc_tool(concept: str, repo: CampaignRepository) -> dict:
-    """Tool: create_npc(concept) -> full stat block JSON"""
+    """Tool: create_npc(concept) -> full stat block JSON.
+
+    The returned dict carries both ``"class"`` (the JSON-schema key) and
+    ``"class_"`` (the dataclass field), so the create -> save flow can read
+    either spelling, plus ``source``/``attempts`` provenance.
+    """
     agent = NPCCompilerAgent(repo)
     npc = await agent.create_npc(concept)
-    return npc.__dict__
+    result = dict(npc.__dict__)
+    result["class"] = npc.class_
+    return result
 
 
 async def save_npc_to_db_tool(npc_json: dict, repo: CampaignRepository, campaign_id: int = 1) -> dict:

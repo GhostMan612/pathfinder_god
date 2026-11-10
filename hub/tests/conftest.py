@@ -20,7 +20,6 @@ from fastapi.testclient import TestClient
 from app import main
 from app.config import Settings
 from app.service import GodService
-from app.state.campaign import CampaignStore
 
 TEST_API_KEY = "pfg_test_key_12345"
 
@@ -147,7 +146,10 @@ def _create_test_client(rules_db_dir: Path) -> TestClient:
 
     main.settings = test_settings
     main.service = svc
-    main.campaign = CampaignStore(test_settings.campaign_state_path)
+    # Do NOT assign main.campaign here: main.py imports the campaign *router*
+    # module under that name, and rebinding it to a CampaignStore made every
+    # later create_app() fail with "'CampaignStore' object has no attribute
+    # 'router'". Nothing reads main.campaign; the store is test-local.
 
     return TestClient(main.app)
 

@@ -288,3 +288,82 @@ class TestBuildTemplateWiring:
         assert monster.xp_each == 60
         assert result.total_xp == 60
         assert result.total_xp == result.target_xp
+
+class _GarbageLlm:
+    async def generate(self, **kwargs):
+        return "Behold! No JSON here."
+
+
+def _hit(name, level, hp_dice="HP 1d1+5"):
+    return {
+        "name": name,
+        "system": "2e",
+        "content": f"{name} Creature {level}, {hp_dice}, AC 15.",
+        "source_book": "Bestiary",
+    }
+
+
+class TestGreedyXpFallback:
+    @pytest.mark.asyncio
+    async def test_bad_llm_selection_falls_back_to_greedy_fill(self):
+        """A bad LLM draw no longer 400s: the greedy fill hits the budget."""
+        from app.agents.encounter_builder import EncounterBuilderAgent
+
+        agent = EncounterBuilderAgent(
+            _GarbageLlm(),
+            _FakeRetriever([_hit("Goblin Warrior", 1), _hit("Sample Ogre", 2)]),
+        )
+        result = await agent.build(
+            party_level=1, party_size=4, threat="low", theme="goblin"
+        )
+        assert result.total_xp == result.target_xp == 60
+        assert result.source == "greedy-fallback"
+        assert result.attempts == 3
+        assert [m.name for m in result.monsters] == ["Sample Ogre"]
+
+    @pytest.mark.asyncio
+    async def test_greedy_dp_finds_fill_greedy_misses(self):
+        """Denominations 30/40 vs target 60: largest-first strands 20, DP finds 30+30."""
+        from app.agents.encounter_builder import EncounterBuilderAgent
+
+        agent = EncounterBuilderAgent(
+            _GarbageLlm(),
+            _FakeRetriever([_hit("Sample Scout", 4), _hit("Sample Guard", 5)]),
+        )
+        result = await agent.build(
+            party_level=5, party_size=4, threat="low", theme="scout"
+        )
+        assert result.total_xp == result.target_xp == 60
+        assert result.source == "greedy-fallback"
+        assert len(result.monsters) == 1
+        assert result.monsters[0].name == "Sample Scout"
+        assert result.monsters[0].count == 2
+
+    @pytest.mark.asyncio
+    async def test_no_exact_fill_still_raises(self):
+        """When no exact fill exists at all, the build still raises ValueError."""
+        from app.agents.encounter_builder import EncounterBuilderAgent
+
+        agent = EncounterBuilderAgent(
+            _GarbageLlm(),
+            _FakeRetriever([_hit("Goblin Warrior", 1)]),
+        )
+        with pytest.raises(ValueError, match="no exact XP fill"):
+            await agent.build(
+                party_level=1, party_size=4, threat="low", theme="goblin"
+            )
+
+    @pytest.mark.asyncio
+    async def test_xp_mismatched_selection_falls_back(self):
+        """An LLM selection that parses but misses the budget also falls back."""
+        from app.agents.encounter_builder import EncounterBuilderAgent
+
+        agent = EncounterBuilderAgent(
+            _FakeLlm('[{"name": "Goblin Warrior", "count": 1}]'),
+            _FakeRetriever([_hit("Goblin Warrior", 1), _hit("Sample Ogre", 2)]),
+        )
+        result = await agent.build(
+            party_level=1, party_size=4, threat="low", theme="goblin"
+        )
+        assert result.total_xp == 60
+        assert result.source == "greedy-fallback"

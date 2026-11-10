@@ -42,6 +42,8 @@ class EncounterResponse(BaseModel):
     threat: str
     theme: str
     monsters: list[EncounterMonsterResponse]
+    attempts: int = 1
+    source: str = "llm"  # "llm" | "greedy-fallback"
 
 
 @router.post("/generate", response_model=EncounterResponse)
@@ -84,4 +86,6 @@ async def generate_encounter(
             )
             for m in result.monsters
         ],
+        attempts=result.attempts,
+        source=result.source,
     )

@@ -28,6 +28,7 @@ class LootResponse(BaseModel):
     item: dict | None = None
     craft_dc: int | None = None
     errors: list[str] = []
+    attempts: int = 1
 
 
 @router.post("/loot", response_model=LootResponse)
@@ -51,4 +52,5 @@ async def generate_loot(
         item=result.item.model_dump(mode="python") if result.item else None,
         craft_dc=result.craft_dc,
         errors=result.errors,
+        attempts=result.attempts,
     )
