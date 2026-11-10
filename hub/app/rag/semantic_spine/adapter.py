@@ -11,6 +11,7 @@ from pathlib import Path
 import anyio
 
 import app.config
+
 from .fusion import reciprocal_rank_fusion
 from .ollama import OllamaEmbedder
 from .store import Embedder, RankedRule, SemanticStore
@@ -57,7 +58,7 @@ async def hybrid_search(
 
     try:
         store = SemanticStore(index_path, resolved_source)
-        status = store.status()
+        status = store.status(deep=False)
         if status.get("state") != "ready":
             logger.warning("Semantic sidecar not ready (%s), using lexical fallback", status.get("state"))
             return lexical_rows
