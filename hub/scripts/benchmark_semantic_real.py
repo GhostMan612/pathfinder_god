@@ -74,7 +74,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--paraphrases", action="store_true", help="generate held-out paraphrases with Ollama")
     parser.add_argument("--cache", type=Path, default=REPO_ROOT / "data" / "semantic_eval_paraphrases.json")
     parser.add_argument("--out", type=Path, default=None)
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.out is not None and not args.out.is_absolute():
+        args.out = REPO_ROOT / args.out
+    return args
 
 
 def sample_rules(db: Path, edition: str, count: int, seed: int) -> list[sqlite3.Row]:

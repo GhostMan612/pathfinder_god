@@ -42,6 +42,7 @@ _archive/
 
 # Campaign save files (runtime state, per-user)
 data/campaign_state*.json
+data/semantic_eval*.json
 # Append-only runtime miss log written by POST /rules/missed and /rules/fetch.
 data/misses.jsonl
 
