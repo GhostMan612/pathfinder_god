@@ -2,8 +2,9 @@
   "name": "pathfinder-god-opencode",
   "private": true,
   "version": "1.0.0",
-  "description": "Agent layer for Pathfinder God. The pg-* tools in ./tools import @opencode-ai/plugin; this pin is what makes a fresh clone able to run them. Do not add dependencies here without a blueprint gate.",
+  "description": "Agent layer for Pathfinder God. The pg-* tools in ./tools use @opencode-ai/plugin; the pf-local-grunt plugin in ./plugins uses @opencode/plugin. Keep both SDK pins exact so a fresh clone runs the same toolchain.",
   "dependencies": {
-    "@opencode-ai/plugin": "1.18.24"
+    "@opencode-ai/plugin": "1.18.24",
+    "@opencode/plugin": "2.0.23"
   }
 }

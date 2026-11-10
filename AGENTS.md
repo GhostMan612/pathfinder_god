@@ -36,6 +36,7 @@ $env:JAVA_HOME='C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1
 - Android SDK: `C:\android\sdk` (Gradle 9.3.1 cached)
 - Native JDK: Temurin 17 at `C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1` (`$env:JAVA_HOME` per command) — the lane JDK, pinned via `kotlin.jvmToolchain(17)`. Studio's bundled JBR (`C:\android\Android Studio\jbr`) is a working OpenJDK 25, not a stripped/broken one, but it is deliberately not the lane JDK
 - Native agents: `.opencode/agent/native-dev.md` owns `spoke_kt/` (AGP 9.0.1 + KSP + Room 2.7, compileSdk 37 / targetSdk 34)
+- Local grunt: `local_grunt` ships as an OpenCode plugin (`.opencode/plugins/pf-local-grunt.ts`) plus a stdlib-only CLI/MCP pair (`tools/local_grunt.py`, `tools/local_grunt_mcp.py`) that delegates 1–8 explicit files to `pf-grunt:3b` on `127.0.0.1:11450` for read/propose/apply; start it with `tools/ollama/Ensure_Local_Grunt.ps1`, details in `docs/LOCAL_GRUNT.md`
 
 ## Critical Rules (from RULES.md)
 
