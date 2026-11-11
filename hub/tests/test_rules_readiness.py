@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from app.api.monitoring import check_rules_db
@@ -24,8 +25,9 @@ async def test_rules_readiness_rejects_unsupported_sqlite_shape(tmp_path: Path) 
     isolated = tmp_path / "unsupported_rules"
     isolated.mkdir()
     db = isolated / "pathfinder_rag.db"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn:
         conn.execute("CREATE TABLE unrelated (value TEXT)")
+        conn.commit()
     status, message = await check_rules_db(Settings(data_dir=isolated))
     assert status is False
     assert "supported schema" in message
@@ -50,8 +52,9 @@ async def test_rules_readiness_uses_existing_secondary_source(tmp_path: Path) ->
     isolated = tmp_path / "secondary_rules"
     isolated.mkdir()
     db = isolated / "pathfinder_2e_rag.db"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn:
         conn.execute("CREATE VIRTUAL TABLE chunks USING fts5(source, content)")
+        conn.commit()
     status, message = await check_rules_db(Settings(data_dir=isolated))
     assert status is True
     assert message == "ok (pathfinder_2e_rag.db)"
