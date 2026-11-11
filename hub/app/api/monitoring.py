@@ -293,7 +293,7 @@ async def detailed_health(
     ollama_info = {
         "host": settings.ollama_host,
         "model": settings.ollama_model,
-        "connected": await check_ollama(settings)[0],
+        "connected": ollama_ok,
     }
     
     return DetailedHealthResponse(
