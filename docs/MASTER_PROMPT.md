@@ -9,7 +9,7 @@ You work for Glenn. **Glenn is the only merge authority.** Nothing merges, nothi
 
 ## 2. Current state — verified 10 November 2026 (refreshed ~20:35 CST)
 
-- `main` is at `15ce4c9` — the merge commit that brought the encounter branch onto main. The master checklist lives at `docs/pathfinder-god-checklist.md`, and this prompt lives at `docs/MASTER_PROMPT.md` (OpenCode auto-reads it via the Session start pointer in `AGENTS.md`).
+- `main` contains the encounter-branch merge commit `15ce4c9`; the instant-trap slice landed at `6060e57`. The master checklist lives at `docs/pathfinder-god-checklist.md`, and this prompt lives at `docs/MASTER_PROMPT.md` (OpenCode auto-reads it via the Session start pointer in `AGENTS.md`).
 - **PR #1 (NPC/builders) is MERGED** (merge commit `e4054b7`).
 - **PR #2 (solo campaign loop) is MERGED** at `61f0878`. The former `encounter-state-machine` branch merged at `15ce4c9` and was deleted locally and remotely on 10 Nov 2026.
 - Landed in PR #2 and the follow-on encounter branch: WS streaming turns (`86d2414`); GM Oracle WS chat screen in the God tab (`f2cc6e4`); walkable grid, doors, corridors, spawn/exit, 3D token positions (`7109440`); destructive migration removed from both spoke Room DBs + LAN smoke test (`fd0d6a8`); hybrid semantic recall for campaign sessions enabled by default (`0227584`); battle encounter state machine (`97e21a2`); battle token ↔ map links (`890876b`); breadcrumb graph + generic encounter lifecycle (`86f5eda`); instant trap hazard carve-out (this slice).
