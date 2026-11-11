@@ -10,5 +10,4 @@ ignore = [
     "RUF059", # Allow unused unpacked variables in tests
     "RUF022", # Allow unsorted __all__ lists
     "SIM102", # Allow nested if statements
-    "F841",   # Allow unused variables
 ]

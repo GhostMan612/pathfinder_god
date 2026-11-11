@@ -6,7 +6,7 @@
 package com.pathfindergod.spoke.data.network
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
+import org.json.JSONObject
 import org.junit.Test
 import java.net.HttpURLConnection
 import java.net.URL
@@ -14,17 +14,17 @@ import java.net.URL
 class LanHubSmokeTest {
 
     @Test
-    fun hubAtLaptopLanIpIsReachableOverCleartextHttp() {
-        val laptopLanIp = "10.1.10.64"
-        val url = URL("http://$laptopLanIp:8000/health")
+    fun configuredHubHealthEndpointResponds() {
+        val url = URL("${TestHubUrl.resolve()}/health")
         val conn = url.openConnection() as HttpURLConnection
         conn.connectTimeout = 5000
         conn.readTimeout = 5000
+        conn.instanceFollowRedirects = false
         try {
             val code = conn.responseCode
             assertEquals(200, code)
             val body = conn.inputStream.bufferedReader().use { it.readText() }
-            assertTrue(body.contains("\"status\":\"ok\""))
+            assertEquals("ok", JSONObject(body).optString("status"))
         } finally {
             conn.disconnect()
         }

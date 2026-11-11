@@ -195,6 +195,48 @@ def test_ollama_embedder_dimension_mismatch_raises(monkeypatch):
         embedder.embed(["test query"])
 
 
+def test_ollama_embedder_connection_refused_fails_fast(monkeypatch):
+    """A refused connection means Ollama is down — no 3s of retry sleeps."""
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        "app.rag.semantic_spine.ollama.time.sleep", lambda s: sleeps.append(s)
+    )
+    embedder = OllamaEmbedder(endpoint="http://127.0.0.1:1")
+    with pytest.raises(SemanticSpineError, match="failed"):
+        embedder.identity()
+    assert sleeps == []
+
+
+def test_ollama_embedder_timeout_still_retries(monkeypatch):
+    """Timeouts are worth retrying — only connection-refused fails fast."""
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        "app.rag.semantic_spine.ollama.time.sleep", lambda s: sleeps.append(s)
+    )
+    calls = {"n": 0}
+
+    class _FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return b'{"models": [{"name": "embeddinggemma-2:270m", "digest": "' + b"a" * 64 + b'"}]}'
+
+    def _flaky_urlopen(request, timeout=None):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise TimeoutError("timed out")
+        return _FakeResponse()
+
+    monkeypatch.setattr("app.rag.semantic_spine.ollama.urlopen", _flaky_urlopen)
+    embedder = OllamaEmbedder(model="embeddinggemma-2:270m")
+    assert embedder.identity().startswith("ollama:embeddinggemma-2:270m@")
+    assert sleeps == [1.0, 2.0]
+
+
 def test_large_record_is_chunked_and_indexed_successfully(tmp_path):
     source_db = tmp_path / "large_rules.db"
     with closing(sqlite3.connect(source_db)) as conn:

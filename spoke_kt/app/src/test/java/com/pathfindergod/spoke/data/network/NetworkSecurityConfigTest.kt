@@ -30,4 +30,22 @@ class NetworkSecurityConfigTest {
     fun mainBuildKeepsCleartextLockedByDefault() {
         assertEquals("false", baseConfig("main").getAttribute("cleartextTrafficPermitted"))
     }
+
+    @Test
+    fun releaseCleartextExceptionMatchesOnlyEmulatorHost() {
+        val file = File("src/main/res/xml/network_security_config.xml")
+        val doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(file)
+        val domains = doc.getElementsByTagName("domain")
+        assertEquals(1, domains.length)
+        val only = domains.item(0) as Element
+        assertEquals("10.0.2.2", only.textContent.trim())
+        assertEquals("false", only.getAttribute("includeSubdomains"))
+        val domainConfigs = doc.getElementsByTagName("domain-config")
+        assertEquals(1, domainConfigs.length)
+        assertEquals(
+            "true",
+            (domainConfigs.item(0) as Element).getAttribute("cleartextTrafficPermitted"),
+        )
+    }
+
 }

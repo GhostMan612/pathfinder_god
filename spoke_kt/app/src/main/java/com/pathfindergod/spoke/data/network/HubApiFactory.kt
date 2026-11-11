@@ -62,15 +62,13 @@ object HubApiFactory {
         .connectTimeout(CONNECT_SECONDS, TimeUnit.SECONDS)
         .readTimeout(READ_SECONDS, TimeUnit.SECONDS)
         .writeTimeout(WRITE_SECONDS, TimeUnit.SECONDS)
+        // An HTTPS Hub must not silently downgrade to HTTP via redirect.
+        .followSslRedirects(false)
         .connectionPool(
             ConnectionPool(MAX_IDLE_CONNECTIONS, KEEP_ALIVE_MINUTES, TimeUnit.MINUTES),
         )
         .build()
         .also { client = it }
 
-    private fun normalize(baseUrl: String): String {
-        val trimmed = baseUrl.trim().trimEnd('/')
-        val rooted = if (trimmed.isEmpty()) "http://10.0.2.2:8000" else trimmed
-        return "$rooted/"
-    }
+    private fun normalize(baseUrl: String): String = HubEndpoint.normalize(baseUrl)
 }
