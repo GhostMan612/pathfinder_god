@@ -53,17 +53,21 @@ C:\venv-hub\venv\Scripts\python.exe -m app.main   # http://0.0.0.0:8000
 ```
 
 Open <http://localhost:8000/docs> to try the API. `GET /health` shows the model
-and which databases were found. On startup the hub also announces itself over
-mDNS (`_pathfindergod._tcp`) so the phone finds it automatically.
+and which databases were found. On startup the hub advertises mDNS (`_pathfindergod._tcp`), but
+the current Kotlin **Setup → Tether** UI does not have a discovery-picker
+control; use the manual Hub URL field.
 
 ## 4. Let the phone reach it
 
 - Same Wi-Fi **or** the laptop's own hotspot both work.
 - Windows Firewall must allow inbound **TCP 8000** (and 11450 only matters
   laptop-internally — the phone never talks to Ollama directly).
-- You do **not** need to find your LAN IP by hand: the app's
-  **Setup → Find hub automatically** lists the laptop. Manual fallback is
-  `http://<laptop-lan-ip>:8000`.
+- The current app requires a manual Hub URL in **Setup → Tether**.
+  On an emulator use `http://10.0.2.2:8000`; on a physical debug
+  device use `http://<current-laptop-LAN-IP>:8000`.
+- Release builds require a trusted **HTTPS** Hub endpoint for a real
+  phone; debug builds permit cleartext LAN HTTP while developing.
+  See [native Spoke setup](setup-spoke-android.md).
 
 ## Troubleshooting
 
