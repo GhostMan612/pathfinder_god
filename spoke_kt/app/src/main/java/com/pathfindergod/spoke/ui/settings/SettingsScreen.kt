@@ -8,6 +8,7 @@ package com.pathfindergod.spoke.ui.settings
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -125,6 +126,17 @@ fun SettingsScreen(onOpenCredits: () -> Unit) {
                         HubEndpoint.normalize(url)
                     } catch (_: IllegalArgumentException) {
                         hubUrlError = R.string.settings_hub_url_invalid
+                        return@GodPrimaryButton
+                    }
+                    // 10.0.2.2 is the Android-emulator host bridge, not a
+                    // routable laptop address from a physical phone.
+                    val hardware = Build.HARDWARE.lowercase()
+                    val model = Build.MODEL.lowercase()
+                    val emulator = hardware.contains("ranchu") ||
+                        hardware.contains("goldfish") ||
+                        model.contains("emulator")
+                    if (HubEndpoint.isEmulatorOnlyAddress(endpoint) && !emulator) {
+                        hubUrlError = R.string.settings_hub_url_emulator_only
                         return@GodPrimaryButton
                     }
                     val debugBuild = context.applicationInfo.flags and
