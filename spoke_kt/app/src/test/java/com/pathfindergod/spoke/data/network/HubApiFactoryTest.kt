@@ -53,5 +53,8 @@ class HubApiFactoryTest {
         assertTrue(HubEndpoint.requiresHttpsInRelease("192.168.1.5:8000"))
         assertFalse(HubEndpoint.requiresHttpsInRelease("https://example.com:443"))
         assertFalse(HubEndpoint.requiresHttpsInRelease("http://10.0.2.2:8000"))
+        assertTrue(HubEndpoint.isEmulatorOnlyAddress("10.0.2.2:8000"))
+        assertFalse(HubEndpoint.isEmulatorOnlyAddress("10.0.2.20:8000"))
+        assertFalse(HubEndpoint.isEmulatorOnlyAddress("http://192.168.1.7:8000"))
     }
 }
