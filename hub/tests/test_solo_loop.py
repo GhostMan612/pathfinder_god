@@ -269,6 +269,96 @@ async def test_end_turn_advances_and_end_combat_returns_to_exploration(tmp_path:
     assert state.phase == "exploration" and state.active_combatant_id is None
 
 
+def test_repository_transaction_rolls_back_and_nests(tmp_path: Path) -> None:
+    repo = CampaignRepository(str(tmp_path / "campaign.db"))
+    campaign = repo.create_campaign("SAMPLE CAMPAIGN")
+    # A failure inside rolls the whole unit back.
+    with pytest.raises(RuntimeError, match="boom"), repo.transaction():
+        repo.upsert_location(campaign.id, "SAMPLE TOWN", type_="settlement")
+        raise RuntimeError("boom")
+    assert repo.get_locations(campaign.id) == []
+    # Success commits.
+    with repo.transaction():
+        repo.upsert_location(campaign.id, "SAMPLE TOWN", type_="settlement")
+    assert [loc.name for loc in repo.get_locations(campaign.id)] == [
+        "SAMPLE TOWN"
+    ]
+    # A nested transaction is a no-op: the outer rollback covers it.
+    with pytest.raises(RuntimeError, match="boom"), repo.transaction():
+        repo.upsert_location(campaign.id, "SAMPLE CAVE", type_="dungeon")
+        with repo.transaction():
+            repo.upsert_location(campaign.id, "SAMPLE KEEP", type_="settlement")
+        raise RuntimeError("boom")
+    assert [loc.name for loc in repo.get_locations(campaign.id)] == [
+        "SAMPLE TOWN"
+    ]
+
+
+async def test_start_combat_rolls_back_on_mid_setup_failure(
+    tmp_path: Path,
+) -> None:
+    loop = _make_loop(tmp_path / "campaign.db")
+    created = await loop.create_campaign(
+        "SAMPLE CAMPAIGN", premise="A quiet valley.", hero_prompt="a brave human fighter"
+    )
+    cid = created["campaign_id"]
+    first = await loop.start_combat(cid, monster_names=["SAMPLE GOBLIN"], seed=3)
+    assert first.phase == "combat"
+    first_encounter = loop.repo.get_active_encounter(cid)
+    assert first_encounter is not None
+    first_names = [c.name for c in loop.repo.get_combatants(cid, active_only=True)]
+
+    # Fail the second start_combat after its writes have begun (the
+    # abandon + new encounter + roster clear all happen before the
+    # monster add). The whole unit must roll back: the first combat's
+    # encounter, roster, and phase must be untouched.
+    original_add = loop.repo.add_combatant
+
+    def _failing_add(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    loop.repo.add_combatant = _failing_add
+    try:
+        with pytest.raises(RuntimeError, match="boom"):
+            await loop.start_combat(cid, monster_names=["SAMPLE ORC"], seed=4)
+    finally:
+        loop.repo.add_combatant = original_add
+
+    assert loop.repo.get_solo_state(cid).phase == "combat"
+    active = loop.repo.get_active_encounter(cid)
+    assert active is not None and active.id == first_encounter.id
+    assert [c.name for c in loop.repo.get_combatants(cid, active_only=True)] == first_names
+
+
+async def test_end_combat_rolls_back_on_failure(tmp_path: Path) -> None:
+    loop = _make_loop(tmp_path / "campaign.db")
+    created = await loop.create_campaign(
+        "SAMPLE CAMPAIGN", premise="A quiet valley.", hero_prompt="a brave human fighter"
+    )
+    cid = created["campaign_id"]
+    await loop.start_combat(cid, monster_names=["SAMPLE GOBLIN"], seed=3)
+    first_encounter = loop.repo.get_active_encounter(cid)
+    assert first_encounter is not None
+
+    original_deactivate = loop.repo.deactivate_combatants
+
+    def _failing_deactivate(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    loop.repo.deactivate_combatants = _failing_deactivate
+    try:
+        with pytest.raises(RuntimeError, match="boom"):
+            await loop.end_combat(cid)
+    finally:
+        loop.repo.deactivate_combatants = original_deactivate
+
+    # The resolve + phase flip happened before the failure, so they must
+    # have rolled back too: still in combat, encounter still active.
+    assert loop.repo.get_solo_state(cid).phase == "combat"
+    active = loop.repo.get_active_encounter(cid)
+    assert active is not None and active.id == first_encounter.id
+
+
 async def test_dying_combatant_recovers_on_their_turn(tmp_path: Path) -> None:
     loop = _make_loop(tmp_path / "campaign.db")
     created = await loop.create_campaign(

@@ -13,6 +13,7 @@ import logging
 import sqlite3
 import struct
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
@@ -247,6 +248,14 @@ class CampaignTurn:
     dice: list[dict]
 
 
+# Set while a unit-of-work transaction is active in this task. Repo methods
+# called inside one share that single connection instead of opening their
+# own, so a multi-write operation commits once or rolls back as a whole.
+_active_tx: ContextVar[sqlite3.Connection | None] = ContextVar(
+    "pathfinder_active_tx", default=None
+)
+
+
 class CampaignRepository:
     def __init__(self, db_path: str | None = None):
         self.db_path = db_path or str(settings.data_dir / "campaign.db")
@@ -254,6 +263,12 @@ class CampaignRepository:
 
     @contextmanager
     def _conn(self):
+        active = _active_tx.get()
+        if active is not None:
+            # Inside a transaction(): share the connection. The outer
+            # transaction owns commit/rollback/close, so yield it bare.
+            yield active
+            return
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         # SQLite ignores ON DELETE CASCADE unless foreign keys are enabled per
@@ -267,6 +282,36 @@ class CampaignRepository:
             conn.rollback()
             raise
         finally:
+            conn.close()
+
+    @contextmanager
+    def transaction(self):
+        """Run several repo calls as one atomic unit of work.
+
+        Every repo method called inside shares a single connection and a
+        single commit; any exception rolls the whole unit back. The write
+        lock is taken up front (BEGIN IMMEDIATE) so a concurrent writer
+        waits instead of failing mid-unit. Nested use is a no-op — the
+        outer transaction owns the commit. Do not hold a transaction
+        across an LLM call: the write lock would block every other
+        writer for the duration of the call.
+        """
+        if _active_tx.get() is not None:
+            yield
+            return
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("BEGIN IMMEDIATE")
+        token = _active_tx.set(conn)
+        try:
+            yield
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            _active_tx.reset(token)
             conn.close()
 
     @staticmethod
