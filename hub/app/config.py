@@ -106,6 +106,11 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
 
+    # --- TLS (Release HTTPS for LAN Spoke connections) ---
+    tls_enabled: bool = False
+    tls_certfile: Path | None = None
+    tls_keyfile: Path | None = None
+
     # Referenced by monitoring.py /version and /health/detailed. It was missing
     # from this model, so both endpoints raised AttributeError and returned 500.
     environment: str = "local"

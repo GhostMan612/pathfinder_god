@@ -80,6 +80,22 @@ class HubApiFactoryTest {
     }
 
     @Test
+    fun getReturnsApiBackedByPinnedClient() {
+        val api = HubApiFactory.get("https://192.168.1.5:8000")
+        assertNotNull(api)
+        val okHttpClient = HubApiFactory.okHttpClient
+        assertNotNull(okHttpClient)
+        val pinner = okHttpClient.certificatePinner
+        assertNotNull(pinner)
+        val pins = pinner.pins
+        assertTrue("Certificate pinner must contain pins", pins.isNotEmpty())
+        assertTrue(
+            "Certificate pinner must contain HUB_CERT_PIN",
+            pins.any { it.toString().contains(HubTlsClient.HUB_CERT_PIN) },
+        )
+    }
+
+    @Test
     fun productionCleartextPolicyMatchesBundledNetworkConfig() {
         assertTrue(HubEndpoint.requiresHttpsInRelease("192.168.1.5:8000"))
         assertFalse(HubEndpoint.requiresHttpsInRelease("https://example.com:443"))

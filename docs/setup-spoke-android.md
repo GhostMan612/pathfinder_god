@@ -21,10 +21,16 @@ current Settings screen does not consume that discovery feed.
 5. Verify the connection status. Test `http://<current-laptop-LAN-IP>:8000/health`
    in the phone's browser if the app cannot connect.
 
-The debug variant permits cleartext LAN HTTP for development. **Release
-builds do not**: they require a trusted HTTPS endpoint for an actual LAN or
-remote Hub (with only the emulator-specific `10.0.2.2` exception in the network
-configuration). Do not disable release network security to make a phone connect.
+The debug variant permits cleartext LAN HTTP for development (`http://<current-laptop-LAN-IP>:8000`).
+**Release builds require HTTPS**: they enforce release TLS pinned to the Hub's self-signed
+certificate (`https://<current-laptop-LAN-IP>:8000`), with `10.0.2.2` as the sole cleartext
+exception for emulator testing. To connect a release build:
+1. Ensure the Hub is running with TLS enabled (`PFGOD_TLS_ENABLED=true` in `hub/.env`, with
+   `hub-cert.pem` and `hub-key.pem` generated via `python hub/scripts/make_hub_cert.py`).
+2. Verify that the app's `HUB_CERT_PIN` in `HubTlsClient.kt` matches the SHA-256 SPKI pin
+   printed by `make_hub_cert.py`.
+3. Enter `https://<current-laptop-LAN-IP>:8000` in **Setup → Tether** and connect.
+Do not disable release network security to make a phone connect.
 
 ## Device smoke tests
 

@@ -38,6 +38,27 @@ announces `_pathfindergod._tcp` over mDNS so the phone finds it automatically
 
 Settings live in `hub/.env` (see `.env.example`, `PFGOD_*` keys) — never commit it.
 
+### Running with Release HTTPS (TLS)
+
+Release Android builds enforce HTTPS with public key pinning. To serve TLS from the Hub:
+
+1. Generate the self-signed 10-year certificate (RSA 2048):
+   ```powershell
+   C:\venv-hub\venv\Scripts\python.exe hub/scripts/make_hub_cert.py
+   ```
+   This generates `data/tls/hub-cert.pem` and `data/tls/hub-key.pem` (git-ignored) and prints the OkHttp SHA-256 SPKI pin string (e.g. `HUB_CERT_PIN = "sha256/..."`).
+
+2. Configure TLS in `hub/.env`:
+   ```ini
+   PFGOD_TLS_ENABLED=true
+   PFGOD_TLS_CERTFILE=../data/tls/hub-cert.pem
+   PFGOD_TLS_KEYFILE=../data/tls/hub-key.pem
+   ```
+
+3. Ensure the printed pin matches `HUB_CERT_PIN` in `spoke_kt/app/src/main/java/com/pathfindergod/spoke/data/network/HubTlsClient.kt`.
+
+4. Start the hub normally (`python -m app.main`). Uvicorn will bind HTTPS on port 8000 and mDNS will advertise `tls=1`. Plain HTTP development remains available by omitting or disabling `PFGOD_TLS_ENABLED`.
+
 ## CLI (no phone / no server needed)
 
 ```powershell

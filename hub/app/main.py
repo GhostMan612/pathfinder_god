@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
             settings.port,
         )
     from app.discovery import start_advertisement, stop_advertisement
-    start_advertisement(settings.port, settings.version, settings.ollama_model)
+    start_advertisement(settings.port, settings.version, settings.ollama_model, tls=settings.tls_enabled)
     yield
     stop_advertisement()
 
@@ -147,5 +147,24 @@ def create_app() -> FastAPI:
 app = create_app()
 
 if __name__ == "__main__":
+    import logging
+
     import uvicorn
-    uvicorn.run(app, host=settings.host, port=settings.port)
+
+    if settings.tls_enabled:
+        if not settings.tls_certfile or not settings.tls_certfile.is_file():
+            logging.getLogger(__name__).error("TLS enabled but tls_certfile not found: %s", settings.tls_certfile)
+            raise FileNotFoundError(f"TLS certfile not found: {settings.tls_certfile}")
+        if not settings.tls_keyfile or not settings.tls_keyfile.is_file():
+            logging.getLogger(__name__).error("TLS enabled but tls_keyfile not found: %s", settings.tls_keyfile)
+            raise FileNotFoundError(f"TLS keyfile not found: {settings.tls_keyfile}")
+
+        uvicorn.run(
+            app,
+            host=settings.host,
+            port=settings.port,
+            ssl_certfile=str(settings.tls_certfile),
+            ssl_keyfile=str(settings.tls_keyfile),
+        )
+    else:
+        uvicorn.run(app, host=settings.host, port=settings.port)
