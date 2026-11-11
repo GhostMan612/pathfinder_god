@@ -40,6 +40,7 @@ def start_advertisement(port: int, version: str, model: str, tls: bool = False) 
         logger.info("zeroconf not installed — LAN auto-discovery disabled (manual IP still works)")
         return False
 
+    zc = None
     try:
         zc = Zeroconf()
         addresses = _local_ipv4_addresses()
@@ -66,7 +67,12 @@ def start_advertisement(port: int, version: str, model: str, tls: bool = False) 
         logger.info(f"mDNS advertising {_service_name()} on :{port} ({len(addresses)} addr)")
         return True
     except Exception as e:
-        logger.warning(f"mDNS advertisement failed (hub still runs): {e}")
+        if zc is not None:
+            try:
+                zc.close()
+            except Exception:
+                logger.debug("Failed to close mDNS advertiser after registration error", exc_info=True)
+        logger.warning("mDNS advertisement failed (hub still runs): %s", e)
         return False
 
 
