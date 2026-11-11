@@ -98,7 +98,7 @@ def test_registration_failure_closes_socket_and_allows_retry(monkeypatch):
 
 def test_missing_lan_address_closes_zeroconf(monkeypatch):
     monkeypatch.setattr(discovery, "_advertiser", None)
-    monkeypatch.setattr(discovery, "_local_ipv4_addresses", lambda: [])
+    monkeypatch.setattr(discovery, "_local_ipv4_addresses", list)
 
     instances = []
 
