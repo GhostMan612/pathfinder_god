@@ -262,3 +262,68 @@ not use orchestrator tools. So a plain campaign turn like "I open the door"
 creates no encounter yet. If you want automatic turn-action triggers, that is a
 separate `SoloLoop` wiring decision (deterministic regex + the same service
 calls), not another REST route.
+
+### Muse — Encounter system: full build blueprint — 2026-11-10
+
+Verified by Phoenix on `main` at `f5289f4` (local clone, 10 Nov 2026 evening): hub 441 passed, Ruff clean. Glenn's direction: fill in the spines and flesh them out — pull in out-of-scope items as needed so all ends are tied up, stubs named where a build waits for its trigger. Phoenix writes the instructions and blueprints; DeepSeek does the code, commits, and pushes. This entry is the blueprint. The research behind it is the code as it stands on `main`: `solo_loop.py` (`classify_action`, `_take_turn_locked`, `_resolve_deterministic`), `orchestrator.py` (`SOLO_LOOP_TOOLS`, `_trigger_encounter_tool`, `_transition_encounter_tool`), `encounter_state.py` (the transition matrix + instant carve-out), `repository.py` (`create_encounter`, `transition_encounter`), and `map_maker.py` (`MapDoor`, secret features).
+
+**The answer to the boundary question: yes — build deterministic action detection in `SoloLoop`.** The LLM narrates; code decides. A plain turn like "I open the door" must create the encounter from the words, using the same repository methods the GM tools use. No new REST routes, no hub self-HTTP, no LLM-owned state transitions.
+
+#### Slice 1 — Deterministic turn-action detection in `SoloLoop` (build this next)
+
+**Where it hooks.** `hub/app/agents/solo_loop.py`, in `_take_turn_locked`, right after `kind = classify_action(action)` and before `_resolve_deterministic`. New pure function `detect_encounter_action(action) -> (kind, target) | None`, regex-based, same style as the existing `_ATTACK_RE` / `_TALK_RE` patterns (word-boundary, `IGNORECASE`). Detection is additive: it creates the encounter record; the turn's normal deterministic resolution still runs. It never fails the turn for lack of an entity.
+
+**Patterns (v1, verb-first).**
+- `door`: open / unlock / knock on / push / enter … door / gate / portal → kind `door`.
+- `npc`: talk / speak / greet / ask / hail … (a name, or "the merchant" / "the guard") → kind `npc`. Reuse the `_TALK_RE` verbs; match the name against NPC combatants present at the location when one is named.
+- `loot`: search / loot / open / pry … chest / coffer / cache / pile / satchel → kind `loot`. Note "search" also reads as a skill — check the encounter patterns before the generic skill path, or run detection first and let the skill resolution still roll.
+- `trap`: disarm / trigger / step on / avoid … trap / snare / tripwire → kind `trap`. A one-roll attempt (disarm, trigger) resolves instantly via the carve-out; a multi-turn disarm creates an active trap instead.
+
+**Entity matching is a refinement, not a requirement.** If the current location's map scene has doors (`MapScene.doors` in `map_maker.py`), or an NPC combatant is present by name, attach it in the encounter's state JSON. If nothing matches, create from the words — `summary` is the action text. A turn must never come back empty because no entity was found.
+
+**Flow.**
+1. Detection runs on the raw action. On a match: `repo.create_encounter(campaign_id, kind, summary=action, location_id=current)` — the location defaults to the party's current location, so the encounter lands on the breadcrumb trail, and an `encounter_created` event is logged at the current tick.
+2. Instant trap: if the action is a one-roll attempt, roll the check with the seeded `rng` through the existing skill-check path (so the roll lands in `dice_rolls` like any skill check), then `repo.transition_encounter(..., "resolved"/"failed", instant=True)`. The DC comes from the trap's state if the encounter carries one, otherwise the existing skill-check DC. Never takes the active slot; logs `hazard_resolved`.
+3. Otherwise: try `repo.transition_encounter(..., "active")`. Slot free → active. Another encounter active → stays `pending` and the reason goes in `notes`.
+4. The turn then proceeds with its normal deterministic resolution (the skill/attack/move still happens — same seeded `rng`, same roll stream).
+
+**LLM refinement interaction.** The LLM outcome can refine an `"other"` turn into a resolvable kind and `_take_turn_locked` re-runs `_resolve_deterministic` (the existing pattern). Detection must re-run after a refinement too, when the first pass found nothing. The LLM may propose an encounter in narration; only detection (code) creates one.
+
+**Surfacing.** Append encounter notes to `notes` (they reach `_narrate_turn` and the decision consequences). Add an `encounter` field (dict or `None`) to `TurnResult` so the API/WS surface it, and emit a WS event `{"type": "encounter", ...}` alongside the dice/hp events.
+
+**Tests.** New `hub/tests/test_solo_encounter_detection.py`: each verb maps to its kind; no-match leaves the turn unchanged; active-slot conflict leaves it pending with a note; instant trap resolves without taking the slot; a trap needing multi-turn disarm goes active; LLM refinement re-runs detection; narration includes the encounter note. Expect 441 + 8 or more.
+
+**Verification.** Hub tests green, Ruff clean on `app/ tests/`. No REST/OpenAPI changes (no new routes). No Spoke changes.
+
+#### Slice 2 — Per-kind lifecycle flesh-out (after Slice 1)
+
+The transition matrix does not change — all five kinds already share it. This slice is the state shapes and the resolvers that use them.
+
+- `door`: state `{locked, key, barred}`. pending → active (working the door) → resolved (open) / failed (stuck, jammed) / abandoned (walk away). A locked door needs the key or a skill check; the check is deterministic (seeded rng, DC in state).
+- `trap`: state `{dc, damage, armed}`. Instant (one roll, pending → resolved/failed, never active) vs active (multi-turn disarm, active → resolved/failed/abandoned).
+- `npc`: state `{disposition, topic, npc_id}`. pending → active (conversation) → resolved (helped, agreed) / failed (hostile, refused) / abandoned. NPCs come from the NPC builder (validated JSON); the encounter's state holds the NPC id/summary.
+- `loot`: state `{items, claimed}`. pending → active (searching) → resolved (claimed) / abandoned. Items come from `generate_loot` (validated).
+- `battle`: already done — it is the template.
+
+Tests per kind, following `test_encounter_gm_tools.py` and `test_instant_hazards.py`.
+
+#### Slice 3 — Encounter ↔ map links for the remaining kinds
+
+The battle slice (`890876b`) is the template: `/map/generate` with `campaign_id` links tokens by `(kind, name)` + FIFO; the linked scene persists on the encounter's `state.map`. Extend the same linking to loot / npc / door / trap tokens (chests, NPCs, doors, traps on the grid). The map scene already carries doors (`MapDoor`) and secret features (`trap`, `secret door`, `hidden treasure`) — link those to their encounters by location + kind.
+
+#### Slice 4 — The 3D stage switch (encounter side only)
+
+When an encounter activates, attach the deterministic 3D scene JSON (already emitted with map PNGs) to the encounter (`state.map` / `state.scene`) and emit a WS event so the client can switch to the 3D stage. The browser client that renders it (htmx + small Three.js island, viewport from the current square only) is its own slice — do not build the client here; the encounter side just emits the scene and the event.
+
+#### Stubs — named, not built now (each with its trigger)
+
+- Character / campaign `.db` portability (export, import, carry between games). Trigger: Slices 1–4 green.
+- LLM gateway / queue (one resident model, priority queue, concurrency cap, caching). Trigger: turns and background generation contend — measure first.
+- 3D encounter stage in the browser client (htmx + Three.js island). Trigger: Slice 4 emits the scene.
+- Android P0: real-device LAN run (smoke test landed, on-device run unconfirmed). Trigger: Glenn's device in hand.
+- Shared world (split parties, multi-party, GM arbitration). Foundations are in (event log, `world_tick`, per-character positions). Trigger: single-party encounters complete and played.
+- System Packs (extract the PF2e hardcoding into the first pack). Trigger: the PF2e loop complete and stable.
+- Brain port / federation / installable app. Trigger: Glenn's call, per the checklist.
+- World clock tick: HELD — Glenn has an idea; do not design the tick. The clock advances by edge `travel_ticks` today; leave it alone until he says otherwise.
+
+**House rules (unchanged).** Main only, no new branches. Hub lane ends at pytest green. Ruff on `app/ tests/`. Genesis header on every `.py`/`.kt` file. Explicit `git add` paths only. Synthetic data only. Never claim CI green without seeing the CI result. The repo is the source of truth.
