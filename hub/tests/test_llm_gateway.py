@@ -171,6 +171,52 @@ async def test_cache_expires_after_ttl():
 
 
 @pytest.mark.asyncio
+async def test_cancel_after_dispatch_does_not_deadlock_gateway():
+    """A waiter cancelled after the dispatcher hands it a slot must not leak
+    the semaphore permit. Without the fix, the next generation hangs forever
+    (max_inflight=1), because the cancelled waiter never reaches the yield
+    whose finally releases the permit."""
+    client = _FakeClient(block_prompt="held")
+    gateway = LlmGateway(_settings(), client_factory=lambda: client)
+    try:
+        held = asyncio.create_task(
+            gateway.generate("held", task="chat", priority=1)
+        )
+        await asyncio.wait_for(client.started.wait(), timeout=2)
+        queued = asyncio.create_task(
+            gateway.generate("queued", task="chat", priority=1)
+        )
+        await asyncio.sleep(0.02)
+        # The queued ticket is the only item in the gateway's queue. Wrap
+        # its set_result so the cancellation lands after the dispatcher
+        # hands it the slot but before the waiter resumes — the exact
+        # interleaving a client disconnect can produce.
+        ticket = gateway._queue._queue[0]
+        orig_set_result = ticket.future.set_result
+
+        def _set_result_and_cancel(result):
+            orig_set_result(result)
+            queued.cancel()
+
+        ticket.future.set_result = _set_result_and_cancel
+        client.release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await queued
+        await asyncio.wait_for(held, timeout=2)
+
+        # The leaked permit would hang this forever.
+        assert (
+            await asyncio.wait_for(
+                gateway.generate("after", task="chat"), timeout=2
+            )
+            == "answer:after"
+        )
+        assert gateway.stats()["cancelled"] == 1
+    finally:
+        await gateway.close()
+
+
+@pytest.mark.asyncio
 async def test_cancel_while_waiting_releases_slot():
     client = _FakeClient(block_prompt="held")
     gateway = LlmGateway(_settings(), client_factory=lambda: client)
