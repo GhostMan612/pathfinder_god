@@ -26,8 +26,12 @@ function apiKey() {
 }
 
 function setStatus(text) { statusEl.textContent = text; }
+const MAX_LOG_CHARS = 16_384;
 function log(text) {
-  logEl.textContent = text + (logEl.textContent ? '\n' + logEl.textContent : '');
+  // Long streamed turns otherwise prepend forever and eventually freeze the
+  // page. Keep the newest 16 KiB and avoid inserting markup from model text.
+  const next = String(text ?? '') + (logEl.textContent ? '\n' + logEl.textContent : '');
+  logEl.textContent = next.slice(0, MAX_LOG_CHARS);
 }
 
 function tokenColor(token) {
@@ -258,22 +262,29 @@ function setScene(scene) {
 // ── transport ────────────────────────────────────────────────────────
 function connectStage() {
   const cid = campaignId();
-  if (ws) { try { ws.close(); } catch (_) {} }
+  // Invalidate the previous socket *before* closing it. Old close/message
+  // events can arrive asynchronously after a new socket is established.
+  const previous = ws;
+  ws = null;
+  if (previous) { try { previous.close(); } catch (_) {} }
   const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
   const key = apiKey();
   const url = `${scheme}://${location.host}/stream` +
     (key ? '?api_key=' + encodeURIComponent(key) : '');
-  ws = new WebSocket(url);
-  ws.onopen = () => {
+  const socket = new WebSocket(url);
+  ws = socket;
+  socket.onopen = () => {
+    if (ws !== socket) return;
     setStatus('Connected. Asking the GM for a turn…');
-    ws.send(JSON.stringify({
+    socket.send(JSON.stringify({
       type: 'turn',
       campaign_id: cid,
       action: 'look around the current encounter',
       actor: 'player'
     }));
   };
-  ws.onmessage = (event) => {
+  socket.onmessage = (event) => {
+    if (ws !== socket) return;
     let data;
     try { data = JSON.parse(event.data); } catch (_) { return; }
     if (data.type === 'encounter_stage' && data.scene) {
@@ -286,9 +297,12 @@ function connectStage() {
       setStatus('Turn complete.');
     }
   };
-  ws.onerror = () => setStatus('WebSocket error.');
-  ws.onclose = () => {
-    if (ws) setStatus('Disconnected.');
+  socket.onerror = () => {
+    if (ws === socket) setStatus('WebSocket error.');
+  };
+  socket.onclose = () => {
+    if (ws !== socket) return;
+    setStatus('Disconnected.');
     ws = null;
   };
 }
