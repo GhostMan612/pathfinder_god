@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import time
 from urllib.error import HTTPError, URLError
@@ -12,6 +13,26 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from .model import SemanticSpineError, normalize_vector
+
+
+def _is_connection_refused(exc: BaseException) -> bool:
+    """True when the failure is a refused connection — Ollama is down.
+
+    Retrying a refused connection a second later inside one request never
+    helps; the caller falls back to lexical recall instead. Timeouts and
+    HTTP 5xx are different — those are worth retrying.
+    """
+    if isinstance(exc, ConnectionRefusedError):
+        return True
+    if isinstance(exc, OSError) and exc.errno == errno.ECONNREFUSED:
+        return True
+    if isinstance(exc, URLError):
+        reason = exc.reason
+        if isinstance(reason, ConnectionRefusedError):
+            return True
+        if isinstance(reason, OSError) and reason.errno == errno.ECONNREFUSED:
+            return True
+    return False
 
 
 class OllamaEmbedder:
@@ -61,6 +82,10 @@ class OllamaEmbedder:
                 return result
             except (HTTPError, URLError, ValueError, TimeoutError, OSError) as exc:
                 last_exc = exc
+                if _is_connection_refused(exc):
+                    raise SemanticSpineError(
+                        f"Local Ollama request failed: {type(exc).__name__}"
+                    ) from exc
                 if attempt < max_retries - 1:
                     time.sleep(1.0 * (attempt + 1))
                     continue

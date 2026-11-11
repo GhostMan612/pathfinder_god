@@ -43,7 +43,7 @@ $env:JAVA_HOME='C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1
 1. **Native lane ends at `assembleDebug`** — green debug compile required before commit. No release builds, no committed APKs. Human runs in Android Studio.
 2. **Hub lane ends at `pytest`** — `pytest hub/tests/` green before commit.
 3. **READ-ONLY external dirs** — never touch: `C:\sovereign_tagger_bak`, `C:\Recovery for All`, `C:\Sovereign Nodes`, `C:\sovereign_mantle`, `C:\sovereign_tagger_2`
-4. **Git: explicit paths only** — `git add <path>`, never `git add .` / `-A`
+4. **Git: PR-first integration** — branch per change, explicit paths only (`git add <path>`), open/update the same PR until owner-authorized merge; no direct pushes to `main` (canonical: `RULES.md` §1.3; procedure: `docs/PR_WORKFLOW.md`).
 5. **Synthetic data only** — no real names in code/tests
 6. **Every .py/.kt file needs Genesis header**:
    ```dart
@@ -102,4 +102,4 @@ $env:JAVA_HOME='C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1
 ## Session start (OpenCode / any agent)
 - Before doing anything else, read `docs/MASTER_PROMPT.md` — it is the current mission brief: verified repo state, architecture facts, house rules, toolchain routing, and the prioritized task list.
 - Then read `docs/pathfinder-god-checklist.md` — the living tracker of what is done, decided, and next.
-- Glenn is the only merge authority; nothing merges or pushes to `main` without his explicit say-so.
+- The repository owner is the only merge authority. Work on a scoped branch and keep its PR open through review/patch/CI; never push directly to `main`. `RULES.md` §1.3 overrides any older main-only instructions in `docs/MASTER_PROMPT.md` or dated `docs/FOR_MUSE.md` entries.

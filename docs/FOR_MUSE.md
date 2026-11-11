@@ -529,7 +529,7 @@ Items 1–7 landed on `main`; Phase 2 remains named-only. Commits: `48c2092` (it
 
 ### Verification summary
 
-- Full hub suite: **518 passed, 0 failed** (`pytest tests/ -q`, 265.35s). Ruff clean over `app/ tests/`.
+- Full hub suite: **518 passed, 0 failed** (`pytest tests/ -q`). Ruff clean over `app/ tests/`.
 - Native: `assembleDebug` green; `connectedDebugAndroidTest` LanHubSmokeTest green on the real B160V; network-config unit test green.
 - CI was not checked in this sweep; do not claim a CI result.
 - No device UI gameplay flow beyond install/launch and the LAN smoke test was run.

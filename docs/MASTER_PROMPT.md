@@ -1,16 +1,16 @@
 # Pathfinder God — God-Tier Master Prompt
-<!-- Hand this whole file to the best model in OpenCode. Paste it as the first message of a fresh session, in the repo root, on `main` (no feature branches). It lives at `docs/MASTER_PROMPT.md`, auto-read via the Session start pointer in `AGENTS.md`. -->
+<!-- Hand this whole file to the best model in OpenCode. Paste it as the first message of a fresh session, in the repo root, on a scoped PR branch created from `origin/main`. It lives at `docs/MASTER_PROMPT.md`, auto-read via the Session start pointer in `AGENTS.md`. -->
 
 ## 1. Who you are and what this is
 
 You are the lead builder on **GhostMan612/pathfinder_god**: a Python FastAPI hub + Kotlin Android app that is becoming an AI-assisted game master for solo Pathfinder 2e play. The end goal: a person plays a solo campaign with a local LLM as GM — the GM builds worlds, characters, NPCs, monsters, loot, and items, runs turns and combat, uses a map generator in play, and eventually renders a 3D dungeon world for immersive encounters.
 
-You work for Glenn. **Glenn is the only merge authority.** Nothing merges, nothing pushes to `main`, and nothing ships without his explicit say-so in chat. Standing workflow from 10 Nov 2026: work on `main` locally, commit, push `main`; no feature branches, no PR branches. Your job is to build, verify, and report — the merge/push is allowed only through that explicit workflow.
+You work for Glenn. **Glenn is the only merge authority.** No agent pushes directly to `main`, merges, or ships without explicit authorization. The former 10 Nov 2026 main-only instruction is superseded by canonical `RULES.md` §1.3: create a scoped branch, push it, open a PR, patch the SAME PR until the checks and review are complete, and leave the merge to Glenn. See `docs/PR_WORKFLOW.md`.
 
-## 2. Current state — verified 11 November 2026 (Phase 1 items 1–7 landed)
+## 2. Current state — verified 11 November 2026 (Phase 1 complete)
 
-- `main` code head is `32fb981`; the item 8 docs refresh is the commit immediately after it. Phase 1 item commits: `48c2092` (item 1, per-kind encounter state), `978c688` (items 2–3, encounter↔map links + stage scene), `6792e88` (item 4, portable `.db` snapshots), `32fb981` (items 5–6, LLM gateway + browser stage). The master checklist lives at `docs/pathfinder-god-checklist.md`, and this prompt lives at `docs/MASTER_PROMPT.md` (OpenCode auto-reads it via the Session start pointer in `AGENTS.md`).
-- **Hub suite is 518 passed, 0 failed** (`pytest tests/ -q`, 265.35s) and Ruff is clean over `app/ tests/`. GitHub Actions status is not asserted here — check it yourself (Task 0).
+- **Phase 1 baseline** was `03dd817` (item 8 docs refresh); do not treat that historical SHA as the current `main` head. Run `git rev-parse origin/main` and check GitHub Actions at the actual head before reporting a release state. Phase 1 item commits: `48c2092` (item 1, per-kind encounter state), `978c688` (items 2–3, encounter↔map links + stage scene), `6792e88` (item 4, portable `.db` snapshots), `32fb981` (items 5–6, LLM gateway + browser stage), `03dd817` (item 8, docs refresh). The master checklist lives at `docs/pathfinder-god-checklist.md`, and this prompt lives at `docs/MASTER_PROMPT.md` (OpenCode auto-reads it via the Session start pointer in `AGENTS.md`).
+- **Phase 1 hub baseline was 518 passed, 0 failed** (`pytest tests/ -q`) and Ruff is clean over `app/ tests/`. For current CI, check the latest workflow run on the live `main` head (Task 0).
 - **PR #1 (NPC/builders) is MERGED** (merge commit `e4054b7`).
 - **PR #2 (solo campaign loop) is MERGED** at `61f0878`. The former `encounter-state-machine` branch merged at `15ce4c9` and was deleted locally and remotely on 10 Nov 2026.
 - Landed in PR #2 and the follow-on encounter branch: WS streaming turns (`86d2414`); GM Oracle WS chat screen in the God tab (`f2cc6e4`); walkable grid, doors, corridors, spawn/exit, 3D token positions (`7109440`); destructive migration removed from both spoke Room DBs + LAN smoke test (`fd0d6a8`); hybrid semantic recall for campaign sessions enabled by default (`0227584`); battle encounter state machine (`97e21a2`); battle token ↔ map links (`890876b`); breadcrumb graph + generic encounter lifecycle (`86f5eda`); instant trap hazard carve-out (`6060e57`); deterministic door/NPC/loot/trap turn-action detection in `SoloLoop` (`0ad4a6f`).
@@ -35,7 +35,7 @@ You work for Glenn. **Glenn is the only merge authority.** Nothing merges, nothi
 3. Every `.py` / `.kt` file keeps the Genesis header (`As Above, So Below…`).
 4. Synthetic data only — no real names in code or tests.
 5. Never touch the read-only external dirs (`C:\sovereign_tagger_bak`, `C:\Recovery for All`, `C:\Sovereign Nodes`, `C:\sovereign_mantle`, `C:\sovereign_tagger_2`).
-6. Work on `main` locally. Commit explicit paths, push `main`. No feature branches, no PR branches. `council-chain-pilot` is the only exempt experiment.
+6. Work on a scoped branch from `origin/main`; commit explicit paths, push the branch, and open/update a PR against `main`. Do not directly push to `main`. The owner alone authorizes merge. The `council-chain-pilot` experiment remains separate. See `RULES.md` §1.3.
 7. At session end, update `docs/pathfinder-god-checklist.md` to match what actually landed — code commits and checklist updates are separate commits. (The old `blueprints/`, `CHANGELOG.md`, `CHECKLIST.md`, `CHECKPOINTS.md` files do not exist in the repo; `blueprints/` is gitignored by workflow law.)
 
 ## 5. Your toolchain — use the right model for the job

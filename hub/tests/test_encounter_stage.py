@@ -118,6 +118,75 @@ async def test_existing_location_scene_is_reused(tmp_path: Path) -> None:
     assert result.encounter["state"]["scene"] == existing
 
 
+async def test_active_encounter_scene_wins_over_newer_resolved(
+    tmp_path: Path,
+) -> None:
+    repo, campaign, town, _loop = _setup(tmp_path)
+    active_scene = {
+        "grid": {"w": 3, "h": 3, "tile_m": 1.0},
+        "marker": "active",
+    }
+    resolved_scene = {
+        "grid": {"w": 9, "h": 9, "tile_m": 1.0},
+        "marker": "resolved",
+    }
+    repo.create_encounter(
+        campaign.id,
+        "battle",
+        status="active",
+        summary="SAMPLE ACTIVE",
+        state={"scene": active_scene},
+        location_id=town,
+    )
+    # Newer, resolved, and at the same location — its stale scene must not
+    # win over the active encounter's scene.
+    repo.create_encounter(
+        campaign.id,
+        "loot",
+        status="resolved",
+        summary="SAMPLE RESOLVED",
+        state={"scene": resolved_scene},
+        location_id=town,
+    )
+
+    scene = stage_scene_for_location(repo, campaign.id, town)
+
+    assert scene == active_scene
+
+
+async def test_active_encounter_scene_found_past_two_hundred(
+    tmp_path: Path,
+) -> None:
+    repo, campaign, town, _loop = _setup(tmp_path)
+    active_scene = {
+        "grid": {"w": 3, "h": 3, "tile_m": 1.0},
+        "marker": "active",
+    }
+    repo.create_encounter(
+        campaign.id,
+        "battle",
+        status="active",
+        summary="SAMPLE ACTIVE",
+        state={"scene": active_scene},
+        location_id=town,
+    )
+    # 200 newer resolved encounters push the active one past the
+    # list_encounters cap; the active-first lookup must still find it.
+    for i in range(200):
+        repo.create_encounter(
+            campaign.id,
+            "loot",
+            status="resolved",
+            summary=f"SAMPLE RESOLVED {i}",
+            state={"scene": {"grid": {"w": 9, "h": 9}, "marker": "resolved"}},
+            location_id=town,
+        )
+
+    scene = stage_scene_for_location(repo, campaign.id, town)
+
+    assert scene == active_scene
+
+
 async def test_no_scene_generation_is_deterministic(tmp_path: Path) -> None:
     repo, campaign, town, _loop = _setup(tmp_path)
 
