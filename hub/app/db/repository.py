@@ -1719,6 +1719,45 @@ class CampaignRepository:
             campaign_id, active.id, "abandoned", summary=summary
         )
 
+    def attach_encounter_map(
+        self,
+        campaign_id: int,
+        encounter_id: int,
+        map_state: dict,
+    ) -> Encounter:
+        """Store the generated battle map on an encounter without changing status.
+
+        The map is part of the encounter's state (not the transient HTTP
+        response): the client can reopen the encounter and still find the grid,
+        token cells, and encounter/combatant links. Existing state keys are
+        preserved so this cannot erase round or roster metadata.
+        """
+        if not isinstance(map_state, dict):
+            raise TypeError("encounter map state must be an object")
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM encounters WHERE campaign_id = ? AND id = ?",
+                (campaign_id, encounter_id),
+            ).fetchone()
+            if row is None:
+                raise ValueError(
+                    f"no encounter {encounter_id} in campaign {campaign_id}"
+                )
+            current = self._encounter_from_row(dict(row))
+            state = dict(current.state)
+            state["map"] = map_state
+            conn.execute(
+                "UPDATE encounters SET state_json = ?, "
+                "updated_at = datetime('now') "
+                "WHERE campaign_id = ? AND id = ?",
+                (json.dumps(state), campaign_id, encounter_id),
+            )
+            row = conn.execute(
+                "SELECT * FROM encounters WHERE campaign_id = ? AND id = ?",
+                (campaign_id, encounter_id),
+            ).fetchone()
+            return self._encounter_from_row(dict(row))
+
     def upsert_combatant(
         self,
         campaign_id: int,

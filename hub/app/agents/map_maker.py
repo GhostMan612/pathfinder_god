@@ -73,6 +73,11 @@ class MapToken:
     y: int
     z: float = 0.5
     color: str = "#d4af37"
+    # Populated when a map is generated for an active battle. The token keeps
+    # its own grid cell; the IDs make the token addressable from the encounter
+    # and combat state instead of matching by display name later.
+    encounter_id: int | None = None
+    combatant_id: int | None = None
 
 
 @dataclass
@@ -822,6 +827,42 @@ class MapMakerAgent:
                 if desc and desc not in loot:
                     loot.append(str(desc))
         return heroes, monsters, npcs, loot
+
+    @staticmethod
+    def link_tokens_to_combatants(
+        scene: MapScene,
+        encounter_id: int,
+        combatants: list[Any],
+    ) -> int:
+        """Attach encounter/combatant IDs to matching scene tokens.
+
+        The map generator emits tokens in the same kind/name order as the
+        campaign entity lists. Matching on ``(kind, name)`` with a FIFO queue
+        therefore assigns distinct IDs to duplicate monster names instead of
+        collapsing every copy onto the first combatant row. Tokens without an
+        active combatant (loot, scenery NPCs) keep ``combatant_id=None``.
+        Returns the number of linked tokens.
+        """
+        available: dict[tuple[str, str], deque[int]] = {}
+        for combatant in combatants:
+            kind = getattr(combatant, "kind", None)
+            name = getattr(combatant, "name", None)
+            combatant_id = getattr(combatant, "id", None)
+            if kind not in TOKEN_KINDS or name is None or combatant_id is None:
+                continue
+            available.setdefault((str(kind), str(name)), deque()).append(
+                int(combatant_id)
+            )
+
+        linked = 0
+        for token in scene.tokens:
+            queue = available.get((token.kind, token.name))
+            if not queue:
+                continue
+            token.encounter_id = encounter_id
+            token.combatant_id = queue.popleft()
+            linked += 1
+        return linked
 
     async def build(
         self,

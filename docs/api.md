@@ -16,7 +16,7 @@ Interactive playground (hub running): `http://localhost:8000/docs`.
 | POST | `/combat/resolve-strike` | `{attack_roll, target_ac, damage_roll, target_hp, target_temp_hp?}` | `{outcome, damage_dealt, new_hp, new_temp_hp, notes}` |
 | POST | `/combat/end-turn` | `{conditions[], current_hp?}` | `{conditions[], notes, damage_taken}` — persistent damage + flat checks |
 | POST | `/encounter/generate` | `{party_level, party_size, threat, theme}` | `{target_xp, total_xp, monsters[]}` — XP-budget exact |
-| POST | `/map/generate` | `{prompt, grid_enabled=true}` | `{valid, gm_base64_png, player_base64_png, width, height, rooms[], secret_features[]}` |
+| POST | `/map/generate` | `{prompt, grid_enabled=true, campaign_id?}` | `{valid, gm_base64_png, player_base64_png, width, height, rooms[], secret_features[], scene, encounter_id?}` — active-battle maps carry linked tokens |
 | GET | `/rules/search` | `?q=&edition=both&limit=5` | `{query, edition, results: RuleHit[]}` — exact-name first |
 | GET | `/campaign?campaign_id=` | — | `{party[], notes[]}` |
 | POST | `/campaign/note` | `{prompt, response}` | Updated state (+ background continuity) |
@@ -58,6 +58,31 @@ once the roster is built, and returns its `encounter_id`. `POST /combat/end`
 resolves it; wiping out the last active monster resolves it as `resolved`, while
 losing the last hero resolves it as `failed`. A new battle abandons the previous
 active encounter. `GET /state` includes the current `active_encounter`.
+
+### Encounter map links
+
+When `/map/generate` is called with `campaign_id` and that campaign has an
+active `battle`, the generator links hero/monster/npc tokens to the active
+combatants by `(kind, name)` and FIFO order. Each linked token carries
+`encounter_id` and `combatant_id` alongside its grid cell `x`/`y`/`z`; the
+response also exposes the top-level `encounter_id`. Unmatched map dressing
+(loot, extra NPCs) keeps `combatant_id = null`.
+
+The linked scene is persisted on the encounter's `state.map` so reopening the
+encounter does not regenerate it:
+
+```
+state.map = {
+  encounter_id,
+  grid: {w, h, tile_m},
+  scene: Scene,                 # full scene, tokens include the IDs
+  linked_token_count,
+  linked_tokens: [Token]        # only tokens with a combatant_id
+}
+```
+
+The GM `generate_map` tool performs the same linking and persistence when used
+during an active battle. Other encounter kinds do not claim map tokens yet.
 
 ## WebSocket `/stream` (alias of `/ask/stream`)
 

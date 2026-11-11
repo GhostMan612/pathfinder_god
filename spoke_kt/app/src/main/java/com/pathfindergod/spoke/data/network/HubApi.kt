@@ -70,6 +70,7 @@ data class GenerateResponse(
 data class MapRequest(
     val prompt: String,
     @SerialName("grid_enabled") val gridEnabled: Boolean = true,
+    @SerialName("campaign_id") val campaignId: Int? = null,
 )
 
 @Serializable
@@ -83,6 +84,7 @@ data class MapGenerateResponse(
     val height: Int? = null,
     val scene: MapSceneDto? = null,
     val error: String? = null,
+    @SerialName("encounter_id") val encounterId: Int? = null,
 )
 
 @Serializable

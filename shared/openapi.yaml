@@ -2586,6 +2586,11 @@ components:
           type: integer
           title: Attempts
           default: 1
+        encounter_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Encounter Id
       type: object
       required:
       - valid
@@ -3188,6 +3193,16 @@ components:
           type: string
           title: Color
           default: '#d4af37'
+        encounter_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Encounter Id
+        combatant_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Combatant Id
       type: object
       required:
       - id
