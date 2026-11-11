@@ -63,7 +63,7 @@ def test_discovery_advertisement_with_tls(monkeypatch):
 
 def test_registration_failure_closes_socket_and_allows_retry(monkeypatch):
     monkeypatch.setattr(discovery, "_advertiser", None)
-    monkeypatch.setattr(discovery, "_local_ipv4_addresses", lambda: [b"\\x7f\\x00\\x00\\x01"])
+    monkeypatch.setattr(discovery, "_local_ipv4_addresses", lambda: [b"\x7f\x00\x00\x01"])
 
     state = {"fail": True, "instances": []}
 
