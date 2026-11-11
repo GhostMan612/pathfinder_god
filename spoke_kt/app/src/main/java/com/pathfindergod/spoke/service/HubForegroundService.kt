@@ -10,13 +10,16 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.ServiceInfo
 import android.os.Binder
+import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.pathfindergod.spoke.R
 import com.pathfindergod.spoke.data.local.AppPreferences
+import com.pathfindergod.spoke.data.network.HubEndpoint
 import com.pathfindergod.spoke.data.network.HubWebSocketClient
 import com.pathfindergod.spoke.data.network.StreamEvent
 import kotlinx.coroutines.CoroutineScope
@@ -88,8 +91,24 @@ class HubForegroundService : Service() {
                 // service came back with a stale "idle" notification and never
                 // re-established the link. With a dataSync foreground type
                 // Android 12+ kills it after ~6h and this path always ran.
-                streamUrl = intent?.getStringExtra(EXTRA_URL)
+                val requestedUrl = intent?.getStringExtra(EXTRA_URL)
                     ?: AppPreferences(this).streamUrl()
+                val debugBuild = applicationInfo.flags and
+                    ApplicationInfo.FLAG_DEBUGGABLE != 0
+                val hardware = Build.HARDWARE.lowercase()
+                val model = Build.MODEL.lowercase()
+                val emulator = hardware.contains("ranchu") ||
+                    hardware.contains("goldfish") ||
+                    model.contains("emulator")
+                // Settings rejects bad endpoints on Connect, but START_STICKY
+                // restores saved URLs without going through Settings.
+                // Do not retry insecure/invalid streams indefinitely.
+                if (!HubEndpoint.isStreamPermitted(requestedUrl, debugBuild, emulator)) {
+                    dropLink()
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+                streamUrl = requestedUrl
                 maintainLink()
             }
         }
