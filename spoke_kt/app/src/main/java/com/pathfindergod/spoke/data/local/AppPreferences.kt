@@ -15,8 +15,16 @@ class AppPreferences(context: Context) {
         Context.MODE_PRIVATE,
     )
 
-    fun baseUrl(): String =
-        prefs.getString(KEY_BASE_URL, DEFAULT_BASE_URL) ?: DEFAULT_BASE_URL
+    fun baseUrl(): String {
+        val saved = prefs.getString(KEY_BASE_URL, DEFAULT_BASE_URL) ?: DEFAULT_BASE_URL
+        // Old versions could save "http://" when Connect was tapped on an
+        // empty field. Recover instead of crashing every Hub client on launch.
+        return try {
+            HubEndpoint.normalize(saved).trimEnd('/')
+        } catch (_: IllegalArgumentException) {
+            DEFAULT_BASE_URL
+        }
+    }
 
     fun updateBaseUrl(raw: String) {
         // Validate before writing. A malformed URL must not poison Settings.
