@@ -14,12 +14,16 @@ than trusting the source ids.
 from __future__ import annotations
 
 import json
+import logging
+import re
 import sqlite3
 import tempfile
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = "1"
 
@@ -234,6 +238,12 @@ def _load_export(path: str) -> tuple[dict[str, Any], dict[str, list[dict[str, An
             raise PortabilityError(
                 "missing required tables: " + ", ".join(sorted(missing))
             )
+        if "meta" not in tables:
+            # `meta` is not in REQUIRED_TABLES, so the check above does not
+            # catch it — but the SELECT below would raise a raw
+            # sqlite3.OperationalError (HTTP 500) instead of a clean
+            # PortabilityError (HTTP 400).
+            raise PortabilityError("missing required table: meta")
         meta = {
             str(row["key"]): str(row["value"])
             for row in conn.execute("SELECT key, value FROM meta").fetchall()
@@ -265,13 +275,54 @@ def _load_export(path: str) -> tuple[dict[str, Any], dict[str, list[dict[str, An
         conn.close()
 
 
+def _remap_one_id(value: Any, target: dict[int, int], key: str) -> Any | None:
+    """Remap one id reference; None when the export did not include it.
+
+    A stale id is worse than a missing one: it points at a row that does
+    not exist in the new database, or at a different row entirely. The
+    column-level remaps already null unmapped refs the same way.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        if value in target:
+            return target[value]
+        logger.warning("portability: dropping unmapped %s=%s", key, value)
+        return None
+    if isinstance(value, str):
+        try:
+            num = int(value)
+        except ValueError:
+            return value
+        if num in target:
+            return str(target[num])
+        logger.warning("portability: dropping unmapped %s=%s", key, value)
+        return None
+    return value
+
+
 def _remap_json(value: Any, maps: dict[str, dict[int, int]]) -> Any:
     if isinstance(value, dict):
         remapped: dict[str, Any] = {}
         for key, item in value.items():
             target = maps.get(_JSON_ID_KEYS.get(key))
-            if target is not None and isinstance(item, int):
-                remapped[key] = target.get(item, item)
+            if target is not None and isinstance(item, (int, str)):
+                remapped[key] = _remap_one_id(item, target, key)
+            elif isinstance(item, list) and key.endswith("_ids"):
+                # A nested id list, e.g. "combatant_ids": [1, 2]. The
+                # singular key names the table, as in _JSON_ID_KEYS.
+                list_target = maps.get(_JSON_ID_KEYS.get(key[:-1]))
+                if list_target is not None:
+                    ids: list[Any] = []
+                    for elem in item:
+                        if not isinstance(elem, (int, str)):
+                            continue
+                        remapped_id = _remap_one_id(elem, list_target, key)
+                        if remapped_id is not None:
+                            ids.append(remapped_id)
+                    remapped[key] = ids
+                else:
+                    remapped[key] = _remap_json(item, maps)
             else:
                 remapped[key] = _remap_json(item, maps)
         return remapped
@@ -303,10 +354,14 @@ def _remap_id_list(
         return text
     if not isinstance(value, list):
         return text
-    remapped = [
-        mapping.get(item, item) if isinstance(item, int) else item
-        for item in value
-    ]
+    remapped: list[Any] = []
+    for item in value:
+        if isinstance(item, (int, str)) and not isinstance(item, bool):
+            remapped_id = _remap_one_id(item, mapping, "id")
+            if remapped_id is not None:
+                remapped.append(remapped_id)
+        else:
+            remapped.append(item)
     return json.dumps(remapped)
 
 
@@ -568,6 +623,19 @@ def import_campaign_db(
     }
 
 
+def _mentions_name(text: str | None, name: str) -> bool:
+    """True when `name` appears as a whole word in `text`.
+
+    A plain ``LIKE %name%`` substring match over-matches: a character named
+    ``Al`` would claim every item whose notes contain ``also`` or ``always``,
+    and every session note that merely contains those letters. Word
+    boundaries (case-insensitive) keep the match to the name itself.
+    """
+    if not text or not name:
+        return False
+    return re.search(rf"\b{re.escape(name)}\b", text, re.IGNORECASE) is not None
+
+
 def export_character_db(repo: Any, campaign_id: int, name: str) -> bytes:
     """Build a standalone file for one hero, party row, items, and decisions."""
     with closing(sqlite3.connect(repo.db_path)) as source:
@@ -592,19 +660,32 @@ def export_character_db(repo: Any, campaign_id: int, name: str) -> bytes:
             "SELECT id FROM npcs WHERE campaign_id = ? AND name = ?",
             (campaign_id, name),
         ).fetchone()
-        item_rows = source.execute(
+        npc_id = npc["id"] if npc else -1
+        raw_item_rows = source.execute(
             "SELECT * FROM items WHERE campaign_id = ? AND ("
             "holder_id = ? OR notes LIKE ?)",
-            (campaign_id, npc["id"] if npc else -1, f"%{name}%"),
+            (campaign_id, npc_id, f"%{name}%"),
         ).fetchall()
+        # The LIKE is only a coarse pre-filter; the holder_id match is
+        # structural, and a notes mention must be a whole word (see
+        # _mentions_name) so "Al" does not claim "also" or "always".
+        item_rows = [
+            row
+            for row in raw_item_rows
+            if row["holder_id"] == npc_id or _mentions_name(row["notes"], name)
+        ]
         decision_rows = source.execute(
             "SELECT * FROM player_decisions WHERE campaign_id = ? AND made_by = ?",
             (campaign_id, name),
         ).fetchall()
-        note_rows = source.execute(
-            "SELECT * FROM session_notes WHERE campaign_id = ? AND content LIKE ?",
-            (campaign_id, f"%{name}%"),
-        ).fetchall()
+        note_rows = [
+            row
+            for row in source.execute(
+                "SELECT * FROM session_notes WHERE campaign_id = ? AND content LIKE ?",
+                (campaign_id, f"%{name}%"),
+            ).fetchall()
+            if _mentions_name(row["content"], name)
+        ]
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as handle:
         temp_path = handle.name

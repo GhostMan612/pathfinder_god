@@ -19,6 +19,8 @@ import pytest
 
 from app.db.portability import (
     PortabilityError,
+    _remap_id_list,
+    _remap_json,
     export_campaign_db,
     export_character_db,
     import_campaign_db,
@@ -264,6 +266,72 @@ def test_campaign_db_import_rejects_corrupt_file(tmp_path: Path) -> None:
 
     with pytest.raises(PortabilityError):
         import_campaign_db(repo, str(bad), replace_existing=False)
+
+
+def test_campaign_db_import_rejects_meta_less_file(tmp_path: Path) -> None:
+    repo = CampaignRepository(str(tmp_path / "campaign.db"))
+    seeded = _seed_campaign(repo)
+    export_path = tmp_path / "campaign_export.db"
+    export_path.write_bytes(export_campaign_db(repo, seeded["campaign"].id))
+    with closing(sqlite3.connect(export_path)) as conn:
+        conn.execute("DROP TABLE meta")
+        conn.commit()
+
+    # A missing meta table must be a clean PortabilityError, not a raw
+    # sqlite3.OperationalError from the SELECT.
+    with pytest.raises(PortabilityError, match="meta"):
+        import_campaign_db(repo, str(export_path), replace_existing=False)
+
+
+def test_character_export_matches_name_as_whole_word(tmp_path: Path) -> None:
+    repo = CampaignRepository(str(tmp_path / "campaign.db"))
+    campaign = repo.create_campaign("SAMPLE CAMPAIGN")
+    repo.upsert_party_member(campaign.id, "Al")
+    repo.upsert_item(
+        campaign.id, "SAMPLE ALWAYS BLADE", notes="also carried always"
+    )
+    repo.upsert_item(
+        campaign.id, "SAMPLE AL BLADE", notes="claimed by Al after the fight"
+    )
+    repo.insert_session_notes(
+        campaign.id,
+        [
+            (1, "gm", "Al was here"),
+            (1, "gm", "also ran the whole way"),
+        ],
+    )
+
+    payload = export_character_db(repo, campaign.id, "Al")
+    character_path = tmp_path / "al.db"
+    character_path.write_bytes(payload)
+
+    with closing(sqlite3.connect(character_path)) as conn:
+        item_names = [
+            row[0] for row in conn.execute("SELECT name FROM items").fetchall()
+        ]
+        note_contents = [
+            row[0]
+            for row in conn.execute("SELECT content FROM session_notes").fetchall()
+        ]
+    # "Al" as a whole word matches; "also" / "always" must not.
+    assert item_names == ["SAMPLE AL BLADE"]
+    assert note_contents == ["Al was here"]
+
+
+def test_remap_json_nulls_unmapped_refs() -> None:
+    maps = {"npcs": {5: 9}, "combatants": {1: 10, 2: 20}}
+    assert _remap_json({"npc_id": 5}, maps) == {"npc_id": 9}
+    assert _remap_json({"npc_id": 99}, maps) == {"npc_id": None}
+    assert _remap_json({"npc_id": "5"}, maps) == {"npc_id": "9"}
+    assert _remap_json({"npc_id": "99"}, maps) == {"npc_id": None}
+    assert _remap_json({"combatant_ids": [1, 2, 99]}, maps) == {
+        "combatant_ids": [10, 20]
+    }
+    assert _remap_json({"note": "nothing to remap"}, maps) == {
+        "note": "nothing to remap"
+    }
+    assert _remap_id_list("[1, 2, 99]", maps["combatants"]) == "[10, 20]"
+    assert _remap_id_list(None, maps["combatants"]) is None
 
 
 def test_character_db_round_trip_and_conflict_rejection(tmp_path: Path) -> None:
