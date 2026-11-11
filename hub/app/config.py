@@ -117,6 +117,7 @@ class Settings(BaseSettings):
 
     # --- Semantic Sidecar (SS-001) ---
     semantic_enabled: bool = False
+    semantic_recall_enabled: bool = True
     semantic_model: str = "embeddinggemma-2:270m"
     semantic_dimensions: int = 256
     semantic_index_path: Path = DEFAULT_DATA_DIR / "semantic_rules.sqlite3"

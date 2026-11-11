@@ -7,14 +7,19 @@
 Campaign Repository — SQLite CRUD + queries for Campaign & Continuity data.
 """
 
+import hashlib
 import json
+import logging
 import sqlite3
+import struct
 from contextlib import contextmanager
 from dataclasses import dataclass, fields
 from pathlib import Path
 
 from app.config import settings
 from app.rag._fts import build_match_query
+
+logger = logging.getLogger(__name__)
 
 # Ceiling on sessions.raw_log, applied in SQL on every turn append. Without it
 # the transcript grows without bound, SQLite rewrites the whole TEXT value on
@@ -490,19 +495,8 @@ class CampaignRepository:
             ).fetchone()
             return row[0] if row else 1
 
-    def search_sessions(self, query: str, campaign_id: int = 1, limit: int = 5) -> list[dict]:
-        """Full-text search across saved session summaries/facts/logs.
-
-        This is the long-campaign recall primitive: instead of dumping every
-        historical turn into the LLM prompt, the GM retrieves the few sessions
-        that match its current question. The FTS5 table mirrors `sessions` and
-        is kept in sync by triggers declared in schema.sql.
-
-        The query is sanitised with build_match_query before it reaches MATCH.
-        It used to be interpolated raw, so an unbalanced quote, a bare
-        AND/OR/NOT, or a stray operator in the GM's own search phrasing raised
-        sqlite3.OperationalError, which propagated out of the tool handler.
-        """
+    def search_sessions_lexical(self, query: str, campaign_id: int = 1, limit: int = 5) -> list[dict]:
+        """Full-text search across saved session summaries/facts/logs."""
         if not query or not query.strip():
             return []
         match = build_match_query(query)
@@ -535,6 +529,145 @@ class CampaignRepository:
                 d["facts_json"] = []
             out.append(d)
         return out
+
+    def search_sessions_hybrid(
+        self,
+        query: str,
+        campaign_id: int = 1,
+        limit: int = 5,
+        embedder: object | None = None,
+    ) -> list[dict]:
+        bounded_query = (query or "").strip()[:200]
+        if not bounded_query or limit <= 0:
+            return []
+        if not build_match_query(bounded_query):
+            return []
+
+        lexical = self.search_sessions_lexical(query, campaign_id=campaign_id, limit=limit)
+
+        try:
+            with self._conn() as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS session_embeddings (
+                        campaign_id INTEGER NOT NULL,
+                        session_num INTEGER NOT NULL,
+                        content_hash TEXT NOT NULL,
+                        vector_blob BLOB NOT NULL,
+                        PRIMARY KEY (campaign_id, session_num)
+                    )
+                    """
+                )
+                sessions_rows = conn.execute(
+                    """
+                    SELECT session_num, summary, facts_json, substr(raw_log, 1, 1200) AS excerpt
+                    FROM sessions
+                    WHERE campaign_id = ?
+                    ORDER BY session_num ASC
+                    """,
+                    (campaign_id,),
+                ).fetchall()
+                if not sessions_rows:
+                    return lexical
+
+                cached_rows = conn.execute(
+                    "SELECT session_num, content_hash, vector_blob FROM session_embeddings WHERE campaign_id = ?",
+                    (campaign_id,),
+                ).fetchall()
+                cached_embeddings = {r["session_num"]: (r["content_hash"], r["vector_blob"]) for r in cached_rows}
+
+                active_embedder = embedder
+                if active_embedder is None:
+                    from app.rag.semantic_spine.ollama import OllamaEmbedder
+                    active_embedder = OllamaEmbedder(
+                        endpoint=settings.ollama_host,
+                        model=settings.semantic_model,
+                        dimensions=settings.semantic_dimensions,
+                        timeout_s=min(getattr(settings, "semantic_timeout_s", 15.0), 10.0),
+                        num_ctx=4096,
+                    )
+
+                dim = getattr(active_embedder, "dimensions", settings.semantic_dimensions)
+                session_vectors: dict[int, tuple[float, ...]] = {}
+                to_embed: list[tuple[int, str, str]] = []
+
+                for row in sessions_rows:
+                    s_num = row["session_num"]
+                    summary = row["summary"] or ""
+                    facts = row["facts_json"] or "[]"
+                    excerpt = row["excerpt"] or ""
+                    doc_text = f"Session {s_num}: {summary}\nKey facts: {facts}\nEvents: {excerpt}"[:1800]
+                    h = hashlib.sha256(doc_text.encode("utf-8")).hexdigest()
+
+                    if s_num in cached_embeddings and cached_embeddings[s_num][0] == h:
+                        blob = cached_embeddings[s_num][1]
+                        if len(blob) == dim * 4:
+                            session_vectors[s_num] = struct.unpack(f"{dim}f", blob)
+                            continue
+
+                    to_embed.append((s_num, h, doc_text))
+
+                if to_embed:
+                    texts = [t[2] for t in to_embed]
+                    vectors = active_embedder.embed(texts, query=False)
+                    for (s_num, h, _), vec in zip(to_embed, vectors):
+                        session_vectors[s_num] = vec
+                        blob = struct.pack(f"{len(vec)}f", *vec)
+                        conn.execute(
+                            """
+                            INSERT INTO session_embeddings (campaign_id, session_num, content_hash, vector_blob)
+                            VALUES (?, ?, ?, ?)
+                            ON CONFLICT(campaign_id, session_num) DO UPDATE SET
+                                content_hash = excluded.content_hash,
+                                vector_blob = excluded.vector_blob
+                            """,
+                            (campaign_id, s_num, h, blob),
+                        )
+                    conn.commit()
+
+                query_vec = active_embedder.embed([bounded_query], query=True)[0]
+                scored: list[tuple[int, float]] = []
+                for s_num, s_vec in session_vectors.items():
+                    dot = sum(a * b for a, b in zip(query_vec, s_vec))
+                    scored.append((s_num, dot))
+                scored.sort(key=lambda x: -x[1])
+
+                session_dict = {}
+                for row in sessions_rows:
+                    d = dict(row)
+                    d["campaign_id"] = campaign_id
+                    try:
+                        d["facts_json"] = json.loads(d.get("facts_json") or "[]")
+                    except Exception:
+                        d["facts_json"] = []
+                    session_dict[row["session_num"]] = d
+
+                rrf_scores: dict[int, float] = {}
+                rrf_k = 60
+                for rank, hit in enumerate(lexical, 1):
+                    s_num = hit["session_num"]
+                    rrf_scores[s_num] = rrf_scores.get(s_num, 0.0) + 1.0 / (rrf_k + rank)
+
+                for rank, (s_num, _) in enumerate(scored, 1):
+                    rrf_scores[s_num] = rrf_scores.get(s_num, 0.0) + 0.8 / (rrf_k + rank)
+
+                fused_order = sorted(rrf_scores.keys(), key=lambda s: -rrf_scores[s])
+                return [session_dict[s_num] for s_num in fused_order if s_num in session_dict][:limit]
+        except Exception:
+            logger.warning("Semantic campaign recall failed, falling back to lexical FTS5", exc_info=True)
+            return lexical
+
+    def search_sessions(
+        self,
+        query: str,
+        campaign_id: int = 1,
+        limit: int = 5,
+        embedder: object | None = None,
+    ) -> list[dict]:
+        """Recall past sessions. Uses semantic hybrid search when enabled, with lexical fallback."""
+        if getattr(settings, "semantic_recall_enabled", False) or getattr(settings, "semantic_enabled", False):
+            return self.search_sessions_hybrid(query, campaign_id=campaign_id, limit=limit, embedder=embedder)
+        return self.search_sessions_lexical(query, campaign_id=campaign_id, limit=limit)
 
     # ──────────────────────────────────────────────────────────────
     # NPCs
