@@ -5,12 +5,12 @@
 ```
 C:\pathfinder_god\
 ├── hub/                 # Python FastAPI service (WORKING: /health /ask /stream /rules/search /generate)
-├── spoke_kt/            # Native Kotlin app, 9 tabs (see Native Lane)
+├── spoke_kt/            # Native Kotlin app, 9 destinations (4 bottom tabs + navigation)
 ├── shared/openapi.yaml  # API contract (source of truth)
 ├── data/                # SQLite DBs (pathfinder_rag.db 58MB / 44,620 rows, gitignored, laptop only)
 ├── docs/                # Setup + architecture guides
 ├── blueprints/          # Session docs + phased blueprints
-├── tools/               # gen_audio.py (sound synth), command_center/ (PySide6 standalone exe)
+├── tools/               # Command Center + local-grunt tooling (PySide6/Python)
 └── assets/              # Images, audio
 ```
 
@@ -66,15 +66,16 @@ $env:JAVA_HOME='C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1
 
 ## Native Lane (`spoke_kt/`)
 - **Separation**: every micro-agent (GM, encounter, loot, continuity, maps) runs on the Python Hub. Kotlin is strictly state-management (`ViewModel`/`StateFlow`) + rendering (Compose) — no LLM, no rules logic on-device beyond the bundled FTS5 read path.
-- **Contract is law**: `shared/openapi.yaml` (26 paths) — Retrofit endpoints and WS frames must match it byte-for-byte. Emulator → `http://10.0.2.2:8000`; real device → laptop LAN IP.
-- **Local-only**: Hub LLM is Ollama (`127.0.0.1:11450`) → raw FTS5 excerpts. No cloud tiers, no API keys anywhere in the lane.
+- **Contract is law**: `shared/openapi.yaml` (verify live path count) — Retrofit endpoints and WS frames must match it byte-for-byte. Emulator → `http://10.0.2.2:8000`; real device → laptop LAN IP.
+- **Local-only LLM**: Hub Ollama (`127.0.0.1:11450`) → raw FTS5 excerpts. No cloud model dependency.
+- **Auth integration gap**: `HubApiFactory` and `HubWebSocketClient` currently do not attach `X-API-Key` or Bearer credentials, while many Hub campaign routes require `require_auth` when `PFGOD_API_KEY_SHA256` is configured. Do not claim the protected Android→Hub flow is integrated; design client credential storage, TLS and tests before enabling strict Hub authentication for a physical Spoke.
 - **Owner**: `.opencode/agent/native-dev.md` (AGP 9.0.1 + KSP 2.3.4 + Room 2.7.0, NGA sqlite-android for FTS5, Filament 1.76, compile 37 / target 34, min 26).
 - **Rendering**: Jetpack Compose for UI plus a real Filament 1.76 render surface for the 3D dice pit (`ui/pit/FilamentPit.kt`). No Unity/Godot. Game-feel comes from Compose canvas animation + SoundPool audio.
 
 ## Current State
-- **Spoke**: 9-tab native app (Dice, God/loot, Hero, Rules, Combat, Encounter, Map, Campaign, Setup); `assembleDebug` green
+- **Spoke**: 9 destinations (Dice, God/loot, Hero, Rules, Combat, Encounter, Map, Campaign, Setup) using a 4-item bottom bar, dashboard and More navigation; CI verifies `assembleDebug`.
 - **Offline Spoke**: rulebook asset bundled (19MB gz → FTS5 extract on first launch), dice engine + haptics/SFX, Room vaults — works with laptop off
-- **Hub**: Working service on :8000 (Ollama `phi4-mini`, FTS5 rules); `pytest hub/tests/` 107/107 green (hermetic harness)
+- **Hub**: FastAPI on configured host/port (default `:8000`), with Ollama + FTS5; see the current GitHub Actions `Hub - Tests` and `Hub - Lint` jobs for the live test count instead of relying on a historical 107-test snapshot.
 - **Native spoke_kt**: the client — Room 2.7/KSP + NGA FTS5 + Retrofit + Compose BOM 2024.10.01; FileProvider export; vault→tracker bridge
 - **Android identity**: applicationId/namespace `com.pathfindergod.spoke`, label "Pathfinder God", circular branded icons
 - **Command Center**: **Standalone exe** at `tools/command_center/dist/PathfinderGodCommandCenter.exe` (~48MB) — launches via `Start_CommandCenter.bat`, no venv required
@@ -92,7 +93,7 @@ $env:JAVA_HOME='C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1
 
 ## Gotchas
 - Android emulator → hub at `http://10.0.2.2:8000` (not localhost)
-- Real device → hub at laptop's LAN IP (e.g., `http://192.168.4.144:8000`)
+- Real device debug build → hub at the current laptop LAN IP (`http://<laptop-LAN-IP>:8000`); a release build requires trusted HTTPS to a real phone
 - WebSocket drops on sleep → SOLVED: backoff reconnect lives in `HubForegroundService`
 - Re-bundling the rules DB → bump `DatabaseAssetManager.BUNDLE_VERSION` or devices keep the stale extract
 - Android SQLite has no FTS5 → always query via the NGA bridge (`NgaSQLiteOpenHelperFactory`)
