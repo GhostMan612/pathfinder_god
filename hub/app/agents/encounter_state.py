@@ -6,11 +6,10 @@
 """Deterministic encounter lifecycle shared by the repository and SoloLoop.
 
 An encounter is a campaign-scoped lifecycle record, not another combat
-calculator. The first concrete type is ``battle``: ``start_combat`` creates a
-pending battle, activates it once the roster is built, and resolves or abandons
-it when the fight ends. The remaining kinds are reserved so the door/trap/NPC
-slices can attach to the same transition rules instead of inventing a second
-state model later.
+calculator. All five kinds — ``battle``, ``loot``, ``door``, ``trap``, and
+``npc`` — share the same transition rules, and each has a deterministic
+resolver in SoloLoop (battle through the combat tracker, the rest through
+their per-kind resolvers).
 
 The invariant is deliberately small: at most one encounter per campaign may be
 ``active`` (the database enforces this with a partial unique index), and only
