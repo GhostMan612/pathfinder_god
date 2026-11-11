@@ -1,7 +1,7 @@
 # Pathfinder God — Master Checklist
 
 Living tracker for the Pathfinder God / Intelligent Virtual Table Top Engine plan.
-Updated 10 Nov 2026, ~21:30 CST. Glenn is the only merge authority — nothing
+Updated 10 Nov 2026, ~22:00 CST. Glenn is the only merge authority — nothing
 is pushed, committed, or PR'd without his explicit approval.
 
 ## Done — landed
@@ -24,6 +24,13 @@ is pushed, committed, or PR'd without his explicit approval.
       Moto G still unverified (not attached).
 - [x] Council chain pilot pushed (`council-chain-pilot` @ `05989d5`); watcher
       cron live every 30 min; master prompt in `docs/MASTER_PROMPT.md`.
+- [x] **Encounter lifecycle foundation** (battle-first, `97e21a2` on
+      `encounter-state-machine`): pure transition matrix for all five kinds
+      (`battle loot door trap npc`) and five statuses, SQLite-backed
+      `encounters` table, partial unique index enforcing one active encounter
+      per campaign, battle start/end/victory/defeat wiring, `active_encounter`
+      in solo state, list/detail REST routes, regenerated `openapi.yaml`.
+      Hub **417 tests pass**, Ruff clean.
 
 ## Decisions made — locked in
 
@@ -70,10 +77,12 @@ is pushed, committed, or PR'd without his explicit approval.
 ## Next up — make the local-only GM genuinely great (the priority)
 
 - [x] PR #2 merge decision — Glenn approved; merged and pushed `61f0878`.
-- [ ] Encounter state machine: types + transitions (battle, loot, door, trap,
-      NPC, …). **In progress on `encounter-state-machine`; battle is the first
-      concrete type, reusing the existing combat loop.**
-- [ ] Link encounters to map positions.
+- [x] Encounter state machine: types + transitions (battle, loot, door, trap,
+      NPC, …). **Battle-first slice landed on `encounter-state-machine` at
+      `97e21a2`; the remaining kinds reuse the same lifecycle and are next
+      wired as their content lands.**
+- [ ] Link encounters to map positions — next slice; start with battle tokens
+      carrying encounter/combatant IDs and map cell coordinates.
 - [ ] Breadcrumb graph model in the campaign DB.
 - [ ] Character / campaign .db portability (export, import, carry between games).
 - [ ] LLM gateway / queue: one resident model, priority queue (turns first,
