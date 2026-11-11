@@ -1228,7 +1228,11 @@ class CampaignRepository:
                     level = excluded.level,
                     ancestry = excluded.ancestry,
                     background = excluded.background,
-                    stats_json = excluded.stats_json,
+                    -- Omitting stats during a metadata/level update must not
+                    -- erase a previously supplied sheet AC/HP block. Passing
+                    -- an explicit empty dict intentionally clears the sheet.
+                    stats_json = CASE WHEN ? = 1
+                        THEN excluded.stats_json ELSE party_members.stats_json END,
                     updated_at = datetime('now')
                 RETURNING id
                 """,
@@ -1240,7 +1244,8 @@ class CampaignRepository:
                     level,
                     ancestry,
                     background,
-                    json.dumps(stats or {}),
+                    json.dumps(stats if stats is not None else {}),
+                    1 if stats is not None else 0,
                 ),
             )
             return cur.fetchone()[0]
@@ -2575,6 +2580,7 @@ class CampaignRepository:
         temp_hp: int | None = None,
         conditions: list[dict] | None = None,
         initiative: int | None = None,
+        ac: int | None = None,
         turn_order: int | None = None,
         is_active: bool | None = None,
     ) -> Combatant | None:
@@ -2588,19 +2594,23 @@ class CampaignRepository:
             new_hp = max(0, hp) if hp is not None else current.hp
             new_temp = max(0, temp_hp) if temp_hp is not None else current.temp_hp
             new_conds = conditions if conditions is not None else (current.conditions or [])
+            if ac is not None and (type(ac) is not int or ac <= 0):
+                raise ValueError("combatant AC must be a positive integer")
+            new_ac = ac if ac is not None else current.ac
             new_init = initiative if initiative is not None else current.initiative
             new_order = turn_order if turn_order is not None else current.turn_order
             new_active = is_active if is_active is not None else current.is_active
             conn.execute(
                 """
                 UPDATE combatants SET hp = ?, temp_hp = ?, conditions_json = ?,
-                    initiative = ?, turn_order = ?, is_active = ?
+                    ac = ?, initiative = ?, turn_order = ?, is_active = ?
                 WHERE id = ?
                 """,
                 (
                     new_hp,
                     new_temp,
                     json.dumps(new_conds),
+                    new_ac,
                     new_init,
                     new_order,
                     1 if new_active else 0,
@@ -2615,7 +2625,7 @@ class CampaignRepository:
                 hp=new_hp,
                 max_hp=current.max_hp,
                 temp_hp=new_temp,
-                ac=current.ac,
+                ac=new_ac,
                 initiative=new_init,
                 conditions=new_conds,
                 is_active=new_active,

@@ -87,10 +87,11 @@ def _narration_chunks(text: str) -> list[str]:
 # ──────────────────────────────────────────────────────────────
 # Deterministic play constants (documented, not hidden in prompts)
 #
-# A solo hero has no character sheet on the server yet — the spoke syncs
-# sheets into party_members.stats_json, but its shape is not a contract
-# the loop can rely on. Until a sheet parser lands, hero strikes use these
-# fixed, recorded values so every turn is reproducible from its seed.
+# Character sheets in Android Room are NOT automatically synchronized to
+# party_members.stats_json. A client must explicitly POST /campaign/party
+# with a selected server campaign_id and authorized credentials.
+# Sheet AC is read only when supplied through that endpoint or the repository;
+# these fixed strike constants remain deterministic provisional house rules.
 # ──────────────────────────────────────────────────────────────
 HERO_ATTACK_BONUS_BASE = 4
 HERO_DAMAGE_DICE = "1d8+2"
@@ -123,6 +124,48 @@ def _campaign_turn_lock(campaign_id: int) -> asyncio.Lock:
 def hero_max_hp(level: int) -> int:
     """Default hero HP when no sheet HP is stored: 20 + 5 per level past 1."""
     return 20 + 5 * max(0, int(level or 1) - 1)
+
+
+def hero_default_ac(level: int) -> int:
+    """Provisional non-rules AC for missing sheets: 14 + level, minimum 15.
+
+    This is a documented solo-play house approximation, NOT the Pathfinder
+    1e or 2e armor calculation (which depends on proficiencies, equipment,
+    Dex, status/circumstance bonuses and other effects).
+    """
+    return 14 + max(1, int(level or 1))
+
+
+def _sheet_ac_from_stats(stats: dict | None) -> int | None:
+    """Read an explicit validated AC from party stats or its derived block.
+
+    Never infer AC from class/level when a valid sheet value is available.
+    Boolean and non-integer values are not armor classes; a serialized
+    derived JSON object is supported for legacy character-sheet clients.
+    """
+    if not isinstance(stats, dict):
+        return None
+    sources = [stats]
+    derived = stats.get("derived")
+    if isinstance(derived, str):
+        try:
+            derived = json.loads(derived)
+        except (ValueError, TypeError):
+            derived = None
+    if isinstance(derived, dict):
+        sources.append(derived)
+    for source in sources:
+        for key in ("ac", "armor_class", "armorClass"):
+            value = source.get(key)
+            if type(value) is int and 0 < value <= 100:
+                return value
+    return None
+
+
+def _hero_ac_from_stats(stats: dict | None, level: int) -> int:
+    """Explicit party-sheet AC when available; otherwise provisional AC."""
+    explicit = _sheet_ac_from_stats(stats)
+    return explicit if explicit is not None else hero_default_ac(level)
 
 
 def _hero_hp_from_stats(stats: dict | None, level: int) -> int:
@@ -2041,15 +2084,6 @@ class SoloLoop:
         for member in party:
             name = member.get("name") or "Hero"
             initiative = rng.randint(1, 20) + HERO_INITIATIVE_BONUS
-            match = next((c for c in existing if c.name == name), None)
-            if match is not None:
-                existing.remove(match)
-                self.repo.update_combatant(
-                    match.id, initiative=initiative, is_active=True
-                )
-                hero_ids.append(match.id)
-                continue
-
             level = int(member.get("level") or 1)
             stats = member.get("stats_json")
             if isinstance(stats, str):
@@ -2057,7 +2091,21 @@ class SoloLoop:
                     stats = json.loads(stats)
                 except (TypeError, ValueError):
                     stats = None
-            max_hp = _hero_hp_from_stats(stats if isinstance(stats, dict) else None, level)
+            stats = stats if isinstance(stats, dict) else None
+            explicit_ac = _sheet_ac_from_stats(stats)
+            match = next((c for c in existing if c.name == name), None)
+            if match is not None:
+                existing.remove(match)
+                # A newly supplied sheet updates AC, but a missing/incomplete
+                # sheet must not overwrite a persistent hero's saved AC.
+                updates = {"initiative": initiative, "is_active": True}
+                if explicit_ac is not None:
+                    updates["ac"] = explicit_ac
+                self.repo.update_combatant(match.id, **updates)
+                hero_ids.append(match.id)
+                continue
+
+            max_hp = _hero_hp_from_stats(stats, level)
             hero_ids.append(
                 self.repo.upsert_combatant(
                     campaign_id=campaign_id,
@@ -2065,7 +2113,7 @@ class SoloLoop:
                     kind="hero",
                     hp=max_hp,
                     max_hp=max_hp,
-                    ac=15,
+                    ac=_hero_ac_from_stats(stats, level),
                     initiative=initiative,
                 )
             )
@@ -2087,7 +2135,7 @@ class SoloLoop:
                         kind="hero",
                         hp=max_hp,
                         max_hp=max_hp,
-                        ac=15,
+                        ac=hero_default_ac(party_level),
                         initiative=initiative,
                     )
                 )

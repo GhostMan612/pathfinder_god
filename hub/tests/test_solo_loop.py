@@ -16,8 +16,15 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.agents.solo_loop import SoloLoop, classify_action
+from app.agents.solo_loop import (
+    SoloLoop,
+    _hero_ac_from_stats,
+    classify_action,
+    hero_default_ac,
+)
+from app.api.deps import get_repo
 from app.db.repository import CampaignRepository
+from app.main import app
 
 TEST_API_KEY = "pfg_test_key_12345"
 
@@ -231,6 +238,109 @@ async def test_start_combat_builds_hero_and_monster_and_initiative(tmp_path: Pat
     assert state.phase == "combat"
     # The legacy mirror is kept current for the spoke.
     assert "SAMPLE GOBLIN" in loop.repo.get_combat_json(cid)
+
+
+def test_hero_ac_uses_valid_sheet_values_and_safe_fallbacks() -> None:
+    assert hero_default_ac(1) == 15
+    assert hero_default_ac(5) == 19
+    assert _hero_ac_from_stats({"ac": 21}, 5) == 21
+    assert _hero_ac_from_stats({"armor_class": 23}, 5) == 23
+    assert _hero_ac_from_stats({"derived": {"ac": 25}}, 5) == 25
+    assert _hero_ac_from_stats({"derived": '{"armorClass": 27}'}, 5) == 27
+    for invalid in (None, True, "21", 0, -1, 999):
+        assert _hero_ac_from_stats({"ac": invalid}, 5) == 19
+    assert _hero_ac_from_stats({"derived": "{not-json"}, 1) == 15
+
+
+async def test_authenticated_party_sheet_ac_reaches_combat(
+    tmp_path: Path, authenticated_client: TestClient
+) -> None:
+    loop = _make_loop(tmp_path / "campaign.db")
+    created = await loop.create_campaign(
+        "SAMPLE CAMPAIGN", premise="A quiet valley.", hero_prompt="a brave human fighter"
+    )
+    cid = created["campaign_id"]
+    app.dependency_overrides[get_repo] = lambda: loop.repo
+    try:
+        response = authenticated_client.post(
+            "/campaign/party",
+            params={"campaign_id": cid},
+            json={
+                "name": "SAMPLE SHEET HERO",
+                "level": 5,
+                "stats": {"derived": {"ac": 24}, "max_hp": 42},
+            },
+        )
+        assert response.status_code == 200, response.text
+    finally:
+        app.dependency_overrides.pop(get_repo, None)
+    started = await loop.start_combat(cid, monster_names=["SAMPLE GOBLIN"], seed=3)
+    hero = next(c for c in started.combatants if c["name"] == "SAMPLE SHEET HERO")
+    assert hero["ac"] == 24 and hero["max_hp"] == 42
+
+    # The next sheet update may correct AC while HP/conditions persist.
+    loop.repo.update_combatant(hero["id"], hp=17, conditions=[{"name": "Wounded", "value": 1}])
+    loop.repo.upsert_party_member(
+        cid, "SAMPLE SHEET HERO", level=5, stats={"derived": {"ac": 28}, "max_hp": 42}
+    )
+    await loop.end_combat(cid)
+    again = await loop.start_combat(cid, monster_names=["SAMPLE GOBLIN"], seed=4)
+    refreshed = next(c for c in again.combatants if c["name"] == "SAMPLE SHEET HERO")
+    assert refreshed["ac"] == 28 and refreshed["hp"] == 17
+    assert any(condition["name"] == "Wounded" for condition in refreshed["conditions"])
+
+
+def test_party_level_update_preserves_explicit_sheet_ac_until_cleared(
+    tmp_path: Path,
+) -> None:
+    repo = CampaignRepository(str(tmp_path / "campaign.db"))
+    campaign = repo.create_campaign("SAMPLE PARTY")
+    cid = campaign.id
+
+    repo.upsert_party_member(cid, "SAMPLE HERO", level=3, stats={"ac": 23})
+    repo.upsert_party_member(cid, "SAMPLE HERO", level=4)
+    saved = next(p for p in repo.get_party(cid) if p["name"] == "SAMPLE HERO")
+    assert saved["level"] == 4
+    assert json.loads(saved["stats_json"]) == {"ac": 23}
+
+    # Explicit {} is a real, deliberate sheet clear, unlike omitted stats.
+    repo.upsert_party_member(cid, "SAMPLE HERO", level=4, stats={})
+    cleared = next(p for p in repo.get_party(cid) if p["name"] == "SAMPLE HERO")
+    assert json.loads(cleared["stats_json"]) == {}
+
+
+def test_combatant_ac_update_is_validated_and_does_not_reset_wounds(
+    tmp_path: Path,
+) -> None:
+    repo = CampaignRepository(str(tmp_path / "campaign.db"))
+    campaign = repo.create_campaign("SAMPLE PARTY")
+    hero_id = repo.upsert_combatant(
+        campaign_id=campaign.id, name="SAMPLE HERO", kind="hero",
+        hp=11, max_hp=30, ac=20, initiative=4,
+    )
+    with pytest.raises(ValueError, match="positive integer"):
+        repo.update_combatant(hero_id, ac=True)
+    with pytest.raises(ValueError, match="positive integer"):
+        repo.update_combatant(hero_id, ac=-10)
+    updated = repo.update_combatant(hero_id, ac=26)
+    assert updated is not None
+    assert updated.ac == 26
+    assert updated.hp == 11 and updated.max_hp == 30
+    saved = repo.get_combatant_by_name(campaign.id, "SAMPLE HERO")
+    assert saved is not None and saved.ac == 26 and saved.hp == 11
+
+
+async def test_hero_ac_without_sheet_scales_as_house_default(tmp_path: Path) -> None:
+    loop = _make_loop(tmp_path / "campaign.db")
+    created = await loop.create_campaign(
+        "SAMPLE CAMPAIGN", premise="A quiet valley.", hero_prompt="a brave human fighter"
+    )
+    cid = created["campaign_id"]
+    loop.repo.upsert_party_member(cid, "SAMPLE PLAIN HERO", level=5)
+    started = await loop.start_combat(cid, monster_names=["SAMPLE GOBLIN"], seed=3)
+    heroes = {c["name"]: c for c in started.combatants if c["kind"] == "hero"}
+    assert heroes["SAMPLE PLAIN HERO"]["ac"] == 19
+    assert heroes["SAMPLE HERO"]["ac"] == 15
 
 
 async def test_attack_turn_changes_hp_deterministically(tmp_path: Path) -> None:
