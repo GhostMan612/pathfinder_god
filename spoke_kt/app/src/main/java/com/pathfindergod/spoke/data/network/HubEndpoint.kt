@@ -46,9 +46,13 @@ object HubEndpoint {
     fun streamUrl(raw: String): String =
         normalize(raw).replaceFirst("http", "ws") + "stream"
 
+    /** Return true for the emulator-only Android host bridge address. */
+    fun isEmulatorOnlyAddress(raw: String): Boolean =
+        URI(normalize(raw)).host == "10.0.2.2"
+
     /** Release network config only allows emulator cleartext at 10.0.2.2. */
     fun requiresHttpsInRelease(raw: String): Boolean {
         val uri = URI(normalize(raw))
-        return uri.scheme == "http" && uri.host != "10.0.2.2"
+        return uri.scheme == "http" && !isEmulatorOnlyAddress(raw)
     }
 }
