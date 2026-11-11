@@ -178,14 +178,14 @@ async def health(settings: Settings = Depends(get_settings)):
     Does NOT check dependencies.
     """
     uptime = time.time() - _start_time
-    
+
     return HealthResponse(
         status="ok",
         version=settings.version,
         ollama_model=settings.ollama_model,
         databases_found=[p.name for p in settings.db_paths if p.exists()],
         timestamp=datetime.now(UTC).isoformat(),
-        uptime_seconds=round(time.time() - _start_time, 1),
+        uptime_seconds=round(uptime, 1),
     )
 
 
@@ -278,7 +278,7 @@ async def detailed_health(
     system_info = {
         "platform": platform.platform(),
         "python_version": sys.version.split()[0],
-        "cpu_percent": psutil.cpu_percent(interval=0.1),
+        "cpu_percent": cpu,
         "memory_percent": psutil.virtual_memory().percent,
         "disk_percent": disk.percent,
         "process_memory_mb": round(mem.rss / 1024 / 1024, 1),
@@ -316,7 +316,6 @@ async def metrics():
     """
     Prometheus-compatible metrics endpoint.
     """
-    metrics = get_metrics()
     lines = [
         "# HELP http_requests_total Total HTTP requests",
         "# TYPE http_requests_total counter",

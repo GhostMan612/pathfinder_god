@@ -2124,7 +2124,7 @@ class SoloLoop:
     ) -> CombatStartResult:
         if not self.repo.campaign_exists(campaign_id):
             raise ValueError(f"no campaign {campaign_id}")
-        state = self.repo.ensure_solo_state(campaign_id)
+        self.repo.ensure_solo_state(campaign_id)
         combat_seed = (
             seed
             if seed is not None

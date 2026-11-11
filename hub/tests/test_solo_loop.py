@@ -258,8 +258,7 @@ async def test_end_turn_advances_and_end_combat_returns_to_exploration(tmp_path:
     loop = _make_loop(tmp_path / "campaign.db")
     created = await loop.create_campaign("SAMPLE CAMPAIGN", premise="A quiet valley.")
     cid = created["campaign_id"]
-    started = await loop.start_combat(cid, monster_names=["SAMPLE GOBLIN"], seed=3)
-    first_active = started.active_combatant
+    await loop.start_combat(cid, monster_names=["SAMPLE GOBLIN"], seed=3)
     advanced = await loop.end_turn(cid)
     assert advanced["phase"] == "combat"
     ended = await loop.end_combat(cid)

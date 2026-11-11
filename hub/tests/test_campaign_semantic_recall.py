@@ -12,7 +12,6 @@ from pathlib import Path
 
 import pytest
 
-from app.config import get_settings
 from app.db.repository import CampaignRepository
 from app.rag.semantic_spine import SemanticSpineError, normalize_vector
 
@@ -161,7 +160,6 @@ def test_context_caps_enforced(recall_repo: CampaignRepository):
 
 
 def test_benchmark_recall_quality_and_latency(recall_repo: CampaignRepository):
-    settings = get_settings()
     embedder = DeterministicRecallEmbedder()
 
     # 1. Measure lexical baseline
@@ -217,6 +215,7 @@ def test_benchmark_recall_quality_and_latency(recall_repo: CampaignRepository):
     hyb_mrr = sum(hybrid_reciprocal_ranks) / n
 
     assert lex_recall_3 == 0.0
+    assert lex_mrr == 0.0
     assert hyb_recall_3 == 1.0
     assert hyb_mrr == 1.0
 
