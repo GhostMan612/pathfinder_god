@@ -6,6 +6,7 @@
 package com.pathfindergod.spoke.data.local
 
 import android.content.Context
+import com.pathfindergod.spoke.data.network.HubEndpoint
 
 class AppPreferences(context: Context) {
 
@@ -14,17 +15,26 @@ class AppPreferences(context: Context) {
         Context.MODE_PRIVATE,
     )
 
-    fun baseUrl(): String =
-        prefs.getString(KEY_BASE_URL, DEFAULT_BASE_URL) ?: DEFAULT_BASE_URL
-
-    fun updateBaseUrl(raw: String) {
-        prefs.edit().putString(KEY_BASE_URL, normalize(raw)).apply()
+    fun baseUrl(): String {
+        val saved = prefs.getString(KEY_BASE_URL, DEFAULT_BASE_URL) ?: DEFAULT_BASE_URL
+        // Old versions could save "http://" when Connect was tapped on an
+        // empty field. Recover instead of crashing every Hub client on launch.
+        return try {
+            HubEndpoint.normalize(saved).trimEnd('/')
+        } catch (_: IllegalArgumentException) {
+            DEFAULT_BASE_URL
+        }
     }
 
-    fun restUrl(): String = baseUrl().trimEnd('/') + "/"
+    fun updateBaseUrl(raw: String) {
+        // Validate before writing. A malformed URL must not poison Settings.
+        val normalized = HubEndpoint.normalize(raw).trimEnd('/')
+        prefs.edit().putString(KEY_BASE_URL, normalized).apply()
+    }
 
-    fun streamUrl(): String =
-        baseUrl().replaceFirst("http", "ws").trimEnd('/') + "/stream"
+    fun restUrl(): String = HubEndpoint.normalize(baseUrl())
+
+    fun streamUrl(): String = HubEndpoint.streamUrl(baseUrl())
 
     fun musicEnabled(): Boolean = prefs.getBoolean(KEY_MUSIC, true)
 
@@ -57,16 +67,8 @@ class AppPreferences(context: Context) {
         prefs.edit().putBoolean(KEY_PIT, value).apply()
     }
 
-    private fun normalize(raw: String): String {
-        var value = raw.trim().trimEnd('/')
-        if (!value.startsWith("http://") && !value.startsWith("https://")) {
-            value = "http://$value"
-        }
-        return value.ifEmpty { DEFAULT_BASE_URL }
-    }
-
     companion object {
-        const val DEFAULT_BASE_URL = "http://10.0.2.2:8000"
+        const val DEFAULT_BASE_URL = HubEndpoint.DEFAULT_BASE_URL
 
         private const val DEFAULT_BGM_TRACK = "audio/bgm_tavern.mp3"
         private const val FILE_NAME = "pathfinder_network"
