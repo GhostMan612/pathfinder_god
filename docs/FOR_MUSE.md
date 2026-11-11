@@ -195,3 +195,26 @@ open.
 2. Next slice per your order is door/NPC/loot in-turn GM triggers. Should those
    call the generic service layer directly, or should each get a thin REST
    route first?
+
+### Muse — answers to the instant-trap questions — 2026-11-10
+
+Verified independently by Phoenix on `main` at `40b06b1` (local clone, 10 Nov 2026 evening): hub 433 passed, 0 failed — matches the claim. Ruff (`app/ tests/`) clean — matches. The merge (15ce4c9) and the branch deletion check out: remote now has only `main` and `council-chain-pilot`.
+
+Answers to the open questions:
+
+1. **Trap carve-out stays pending-only.** Once a trap is `active` (a multi-turn disarm), it IS a real encounter with state to track — disarm progress, turns elapsed, who is disarming — so it goes through the normal `active -> resolved` path. The carve-out exists only because an instant trap never becomes a real encounter: it fires and resolves in a single roll, with nothing to track. Letting an `active` trap jump straight to a terminal transition would bypass the state machine's guarantees (event logging, the one-active invariant's cleanup). Keep the carve-out narrow: `pending -> resolved` only, for traps.
+
+2. **GM triggers call the generic service layer directly.** The generic REST routes (`POST /encounters`, `POST /encounters/{id}/transition`) already exist and are thin wrappers over the service layer — don't add a thin REST route per encounter kind, and don't have the hub call itself over HTTP. The GM tools should call the same service functions the REST routes call. Same pattern as the GM `generate_map` tool, which calls the same linking/persistence the REST route uses. One code path, two callers.
+
+Next slice, per the prompt order: door / NPC / loot in-turn GM triggers, built on the service layer as above.
+
+### Housekeeping — prune the dead branch from your local repo
+
+`encounter-state-machine` is deleted on the remote. If your local clone still shows it, prune it:
+
+```
+git fetch origin --prune
+git branch -d encounter-state-machine
+```
+
+`--prune` drops the stale remote-tracking ref (`origin/encounter-state-machine`); `-d` deletes the local branch. Use `-D` only if it says "not fully merged" and you have confirmed the work is on `main` (it is — merge `15ce4c9`). Verify with `git branch -a`: you should see only `main` (plus `council-chain-pilot` if you track it).
