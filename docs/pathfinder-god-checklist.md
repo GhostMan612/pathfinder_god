@@ -1,7 +1,7 @@
 # Pathfinder God — Master Checklist
 
 Living tracker for the Pathfinder God / Intelligent Virtual Table Top Engine plan.
-Updated 10 Nov 2026, ~22:00 CST. Glenn is the only merge authority — nothing
+Updated 11 Nov 2026, ~01:05 CST. Glenn is the only merge authority — nothing
 is pushed, committed, or PR'd without his explicit approval.
 
 ## Done — landed
@@ -21,7 +21,7 @@ is pushed, committed, or PR'd without his explicit approval.
       merged `main`) and GitHub CI run `42951885968` green. Spoke unit tests,
       forced local rerun and `assembleDebug` green; CI Spoke tests/build green.
       On-device evidence: BLU B160V and `atlas_avd` each 7/7 connected tests;
-      Moto G still unverified (not attached).
+      Moto G later verified 11 Nov 2026 — see item 7 below.
 - [x] Council chain pilot pushed (`council-chain-pilot` @ `05989d5`); watcher
       cron live every 30 min; master prompt in `docs/MASTER_PROMPT.md`.
 - [x] **Encounter lifecycle foundation** (battle-first, `97e21a2` on
@@ -56,6 +56,57 @@ is pushed, committed, or PR'd without his explicit approval.
       `trap` transition straight to `resolved`/`failed` without taking the
       active-encounter slot, logged as `hazard_resolved`. Door/NPC/loot GM
       in-turn triggers and automatic turn-action detection landed in Slice 1.
+- [x] **Per-kind encounter state and resolvers** (`48c2092`, Phase 1 item 1):
+      `door` defaults `{locked,key,barred,dc}`, `trap` `{dc,damage,armed}`,
+      `npc` `{npc_id,npc_name,disposition,topic}`, `loot` `{items,claimed}`.
+      Door lock/bar/trap checks resolve deterministically in `SoloLoop`; failed
+      traps apply damage through `hp_changes`; loot claims validate and upsert
+      items; NPC disposition refreshes from the `npcs` row. Instant traps stay
+      `pending`-only and never take the active slot.
+- [x] **All encounter kinds link to maps** (`978c688`, Phase 1 item 2):
+      `door`/`trap` token kinds emit from scene doors/secret trap features and
+      are excluded from connectivity; `npc` tokens link to npc combatants + the
+      encounter's `npcs` row; `loot` tokens link to `items` through
+      `MapToken.item_id`; all use the same REST/GM path and `state.map` persists.
+- [x] **Stage scene switch** (`978c688`, Phase 1 item 3): pending → active
+      activation (any encounter kind) reuses the location's scene or derives the
+      deterministic 12×10 fallback; `state.scene` mirrors it; WS emits an
+      `encounter_stage` frame with the full scene. Instant traps emit no stage
+      frame and do not take the active slot. `test_encounter_stage.py` 8 passed.
+- [x] **Campaign and character `.db` portability** (`6792e88`, Phase 1 item 4):
+      standalone `schema.sql` exports carry one campaign (id remapped to 1) and
+      a `meta` marker (`schema_version = "1"`); imports validate integrity and
+      remap row ids across locations, combatants, encounters, events, solo
+      state, and JSON references. `replace_existing=true` replaces the target
+      campaign. Character export/import carries hero + party + items/decisions/
+      notes, rejects duplicate character names, and skips duplicate item names.
+      JSON export/import keeps its existing scope; `.db` is the format that
+      round-trips encounters/events. `test_portability.py` 8 passed.
+- [x] **LLM gateway / queue** (`32fb981`, Phase 1 item 5): one process-wide
+      Ollama gateway with interactive-priority queue, in-flight cap, bounded
+      waiting, TTL cache for builder/JSON/rules tasks, and no chat caching.
+      `OllamaClient` and the `/health` Ollama probe delegate to it; cancellations
+      log and release the slot. `test_llm_gateway.py` 6 passed.
+- [x] **Browser 3D encounter stage** (`32fb981`, Phase 1 item 6): `GET /stage`
+      serves static HTML + `stage.js`; Three.js pinned at 0.170.0 on jsDelivr;
+      `id="three-mount"` renders only the current 5-ft square with wireframe
+      blocked cells and breadcrumb trail; 2D canvas draws the `SceneResponse`
+      contract; listens for `encounter_stage` on `/stream`. Excluded from
+      OpenAPI. `test_stage_page.py` 3 passed.
+- [x] **Android P0 real-device LAN run** (Phase 1 item 7 — PASS): B160V,
+      serial `7040016025040287`, Android 14, Wi-Fi `10.1.10.186`; laptop Wi-Fi
+      `10.1.10.64`; `/health` 200. Debug cleartext allowed; main still locked
+      with only `10.0.2.2` exempt. `LanHubSmokeTest` on the real device: 1 test,
+      0 failures, 2.531s; XML under
+      `spoke_kt/app/build/outputs/androidTest-results/connected/debug/`.
+      `app-universal-debug.apk` install + `MainActivity` launch returned
+      `Status: ok`; `NetworkSecurityConfigTest` 2/2 green. Full character-forge/
+      combat/map UI flow was **not** run.
+- [x] **Phase 1 docs refresh** (Phase 1 item 8): this checklist +
+      `MASTER_PROMPT.md` refreshed; `FOR_MUSE.md` has the full sweep handoff.
+- [x] **Hub full suite 518 passed, 0 failed** on 11 Nov 2026; Ruff clean over
+      `app/ tests/`. Native `assembleDebug` green; no CI result checked in the
+      sweep.
 
 ## Decisions made — locked in
 
@@ -119,22 +170,24 @@ is pushed, committed, or PR'd without his explicit approval.
       disarms activate. `TurnResult` and the WS `encounter` frame surface it;
       `TurnResponse` gains an additive optional `encounter` field (no new
       routes). Hub **472 tests pass**, Ruff clean; no Spoke build run.
-- [x] Link encounters to map positions — **battle slice landed at `890876b`**:
-      battle tokens carry encounter/combatant IDs plus grid cells, and the
-      scene persists on the encounter. Loot/NPC/door/trap token links follow
-      as those encounter kinds wire up.
+- [x] Link encounters to map positions — **all kinds landed at `978c688`**
+      (Phase 1 item 2): battle tokens carry encounter/combatant IDs; loot tokens
+      carry `item_id`; NPC tokens link to npc combatants + the `npcs` row;
+      door/trap tokens emit from the scene and link to their same-location
+      encounter; the scene persists on the encounter's `state.map`.
 - [x] Breadcrumb graph model in the campaign DB — **foundation landed** (see
       `location_edges`, `campaign_events`, `solo_state.world_tick`, graph/move/
       events routes). Town-scale travel graph and location-scale grids remain
       separate layers.
-- [ ] Character / campaign .db portability (export, import, carry between games).
-- [ ] LLM gateway / queue: one resident model, priority queue (turns first,
-      background second), concurrency cap, prompt/result caching.
-- [ ] 3D encounter stage in the browser client (htmx + small Three.js island,
-      viewport from the current square).
-- [ ] Android P0 checks: real-phone LAN cleartext tethering on a real device
-      (LAN smoke test landed in `fd0d6a8`, on-device run still unconfirmed).
-- [ ] Blueprint docs updates (Task 6 of the master prompt).
+- [x] Character / campaign .db portability (`6792e88`, Phase 1 item 4).
+- [x] LLM gateway / queue (`32fb981`, Phase 1 item 5): one resident model,
+      priority queue, concurrency cap, builder/JSON/rules cache, no chat cache.
+- [x] 3D encounter stage in the browser (`32fb981`, Phase 1 item 6): static
+      htmx-ready page + Three.js 0.170.0 island, viewport from current square.
+- [x] Android P0 checks: real-phone LAN cleartext passed on B160V (Phase 1
+      item 7); full UI flow still unverified.
+- [x] Blueprint docs updates (`MASTER_PROMPT.md`, this checklist, `FOR_MUSE.md`)
+      — Phase 1 item 8.
 
 ## Later — after the GM is great
 

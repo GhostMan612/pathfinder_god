@@ -468,3 +468,68 @@ Tests: the route returns 200 and the page contains the Three.js mount point; the
 - If an item cannot be built as specified (missing dependency, a design gap), write the blocker in `FOR_MUSE.md` with exactly what is missing and move to the next independent item — do not stall the whole sweep on one item.
 - Never claim CI green without seeing the CI result. Never claim device evidence without a device attached. Spoke builds/tests only when the SDK is available; say plainly when they were not run.
 - House rules (unchanged): hub lane ends at pytest green; Ruff on `app/ tests/`; Genesis header on every `.py`/`.kt` file; explicit `git add` paths only; synthetic data only; the repo is the source of truth.
+
+---
+
+## Phase 1 sweep handoff — 2026-11-11
+
+Items 1–7 landed on `main`; Phase 2 remains named-only. Commits: `48c2092` (item 1, per-kind encounter state), `978c688` (items 2–3, encounter↔map links + stage scene), `6792e88` (item 4, portable `.db` snapshots), `32fb981` (items 5–6, LLM gateway + browser stage). Docs refresh is item 8.
+
+### Items 2–3 — links and the stage switch
+
+- `door`/`trap` token kinds emit from `MapScene.doors` and secret trap features; they are excluded from connectivity waypoints.
+- `npc` tokens link to npc combatants + the encounter's `state.npc_id`; `loot` tokens link to `items` rows by same-location name + FIFO and carry `item_id`.
+- `door`/`trap` tokens link to the same-location encounter of that kind; no encounter means `encounter_id=None`.
+- Linking runs for every active encounter kind through the same REST/GM path. `state.map` remains the persistence shape; `state.scene` mirrors it for the stage.
+- Activation (pending → active, any kind) reuses an existing scene at the location or derives the deterministic 12×10 fallback. WS `encounter_stage` frames carry the full scene. Instant traps do not take the active slot and do not emit an activation frame.
+- Verification: `test_encounter_map_links.py` 11 passed; map suite 28 passed; `test_encounter_stage.py` 8 passed; Ruff clean.
+
+### Item 4 — campaign and character `.db` portability
+
+- `schema.sql` now has `meta(key, value)` with `schema_version = "1"`; `CampaignRepository` sets `PRAGMA user_version = 1` and ensures the row on open.
+- `GET /campaign/export-db` builds a standalone `schema.sql` file with only one campaign's rows, `campaign_id` remapped to 1, `meta` (`schema_version`, `exported_from`, `exported_at`, `source_campaign_id`).
+- `POST /campaign/import-db` validates integrity, schema version, and required tables, then imports as a new campaign or replaces `campaign_id` when `replace_existing=true`. Row ids are remapped, including `locations.parent_id`, `solo_state` location/combatant and turn-order ids, encounter `state_json` entity references, edges, and event references.
+- `GET /campaign/{id}/characters/{name}/export-db` and `POST /campaign/{id}/characters/import-db` carry the hero combatant, party row, items, decisions, and notes. Import assigns new ids and rejects an existing character name; duplicate item names are skipped rather than blocking the hero import.
+- Deviation: JSON export/import keeps its existing scope (campaign, party, NPCs, locations, items, quests, sessions, notes, decisions). The `.db` format is the one that round-trips encounters and events; both paths are tested.
+- Verification: `test_portability.py` 8 passed; full suite below; Ruff clean; `shared/openapi.yaml` regenerated (106507 bytes).
+
+### Item 5 — LLM gateway / queue
+
+- New `app/llm/gateway.py`: `asyncio.PriorityQueue` (interactive 0, background 1), semaphore cap (`llm_gateway_max_inflight=1`), bounded waiting (`llm_gateway_queue_limit=100`), and a TTL cache (`600s`, 256 entries) for `builder`/`builders`/`json`/`rules`/`reasoning` only. Chat/GM/narration are never cached.
+- `backends.py`, `OllamaClient`, and the `/health` Ollama probe now go through the gateway. Queue overflow blocks; cancellation is logged and releases the slot. `tags()` bypasses the queue so readiness probes cannot hang behind a long generation.
+- Deviation: the blueprint said `backends.py` was the only Ollama HTTP call site; that was stale. `OllamaClient` was used by every builder/orchestrator and the health probe. All generation/chat/embedding/tags traffic is now centralized; the semantic-spine embedder keeps its separate loopback `urllib` embedding path.
+- Verification: `test_llm_gateway.py` 6 passed (priority, cap, cache hit, no chat cache, TTL expiry, cancellation); Ruff clean.
+
+### Item 6 — browser stage page
+
+- `GET /stage` serves a static page; `GET /stage/stage.js` serves the JS island. `id="three-mount"` is the Three.js mount point. Three.js is pinned at `0.170.0` on jsDelivr. Excluded from OpenAPI.
+- The page draws the existing `SceneResponse` shape on a 2D canvas, listens for `encounter_stage` frames on `/stream`, and renders only the current 5-ft square in 3D with wireframe blocked cells and a wireframe breadcrumb trail. The 3D view is not a whole-world build.
+- Deviation: CSP forbids inline scripts, so the island is an external same-origin file; `script-src`/`connect-src` allow the pinned jsDelivr origin. Scene fallback uses the existing `POST /map/generate` route (the blueprint's `GET /map/generate?campaign_id=` form does not exist).
+- Verification: `test_stage_page.py` 3 passed (route/script, OpenAPI exclusion, scene contract); Ruff clean.
+
+### Item 7 — real-device LAN run — PASS
+
+- Device: `B160V`, serial `7040016025040287`, Android 14, `wlan0` `10.1.10.186`.
+- Laptop: Wi-Fi `10.1.10.64`; `http://10.1.10.64:8000/health` returned `200` before the run.
+- Debug network security config permits cleartext (`base-config cleartextTrafficPermitted="true"`); main stays locked to `false` and only allows `10.0.2.2` explicitly.
+- Exact run command (PowerShell, from `spoke_kt/`):
+  ```powershell
+  $env:JAVA_HOME='C:\Users\612co\.gradle\jdks\eclipse_adoptium-17-amd64-windows.2'
+  $env:PATH="$env:JAVA_HOME\bin;$env:PATH"
+  $env:ANDROID_SERIAL='7040016025040287'
+  .\gradlew.bat :app:connectedDebugAndroidTest "-Pandroid.testInstrumentationRunnerArguments.class=com.pathfindergod.spoke.data.network.LanHubSmokeTest" --no-daemon
+  ```
+- Exact install/run commands:
+  ```powershell
+  adb -s 7040016025040287 install -r app\build\outputs\apk\debug\app-universal-debug.apk
+  adb -s 7040016025040287 shell am start -W -n com.pathfindergod.spoke/.MainActivity
+  ```
+- Result: `BUILD SUCCESSFUL`; `LanHubSmokeTest` 1 test, 0 failures, 2.531s. Report: `spoke_kt/app/build/reports/androidTests/connected/debug/index.html`; XML: `spoke_kt/app/build/outputs/androidTest-results/connected/debug/TEST-B160V - 14-_app-.xml`.
+- App install/start smoke: `Success`; `Status: ok`; `pidof` returned `13809`. `NetworkSecurityConfigTest` unit test: 2 tests, 0 failures. The emulator's property fetch timed out during Gradle device discovery, but the real-device test itself passed.
+
+### Verification summary
+
+- Full hub suite: **518 passed, 0 failed** (`pytest tests/ -q`, 265.35s). Ruff clean over `app/ tests/`.
+- Native: `assembleDebug` green; `connectedDebugAndroidTest` LanHubSmokeTest green on the real B160V; network-config unit test green.
+- CI was not checked in this sweep; do not claim a CI result.
+- No device UI gameplay flow beyond install/launch and the LAN smoke test was run.
