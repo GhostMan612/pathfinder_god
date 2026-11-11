@@ -383,4 +383,33 @@
 
     <string name="hub_channel_name">Hub Link</string>
     <string name="hub_channel_idle">Hub link idle</string>
+
+    <string name="god_mode_chat">GM Oracle</string>
+    <string name="god_mode_loot">Loot Forge</string>
+    <string name="gm_state_title">Campaign State</string>
+    <string name="gm_state_phase_combat">COMBAT</string>
+    <string name="gm_state_phase_exploration">EXPLORATION</string>
+    <string name="gm_state_round">Round</string>
+    <string name="gm_state_location">Location</string>
+    <string name="gm_state_active">Active</string>
+    <string name="gm_empty">Speak your action or consult the Oracle to begin the chronicle.</string>
+    <string name="gm_input_label">Action or question</string>
+    <string name="gm_send_turn">TAKE TURN</string>
+    <string name="gm_send_ask">ASK ORACLE</string>
+    <string name="gm_streaming">The GM deliberates…</string>
+    <string name="gm_choices_header">CHOICES</string>
+    <string name="gm_dice_pattern">%1$s → %2$d</string>
+    <string name="gm_hp_damage_pattern">%1$s −%2$d HP (%3$d/%4$d)</string>
+    <string name="gm_hp_heal_pattern">%1$s +%2$d HP (%3$d/%4$d)</string>
+    <string name="gm_condition_pattern">%1$s: %2$s %3$d</string>
+    <string name="gm_turn_badge">Turn %1$d</string>
+    <string name="gm_oracle_badge">Oracle · %1$s</string>
+    <string name="gm_sources_pattern">Sources: %1$s</string>
+    <string name="gm_chat_failed">The Oracle is unreachable — is the hub awake?</string>
+    <string name="a11y_god_mode_chat">Switch to GM Oracle chat</string>
+    <string name="a11y_god_mode_loot">Switch to Loot Forge</string>
+    <string name="a11y_gm_send_turn">Stream turn action to the GM</string>
+    <string name="a11y_gm_send_ask">Ask the Oracle a question</string>
+    <string name="a11y_gm_choice">Take choice %1$s</string>
+    <string name="a11y_gm_ready">GM reply ready: %1$s</string>
 </resources>

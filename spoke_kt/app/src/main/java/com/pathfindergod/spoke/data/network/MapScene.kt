@@ -49,6 +49,36 @@ data class MapFogDto(
 )
 
 @Serializable
+data class MapPointDto(
+    val x: Int,
+    val y: Int,
+)
+
+@Serializable
+data class MapDoorDto(
+    val x: Int,
+    val y: Int,
+    val orientation: String = "ew",
+    val kind: String = "wood",
+)
+
+@Serializable
+data class MapCorridorDto(
+    val cells: List<List<Int>> = emptyList(),
+)
+
+@Serializable
+data class MapTokenDto(
+    val id: String = "",
+    val name: String,
+    val kind: String = "monster",
+    val x: Int,
+    val y: Int,
+    val z: Float = 0.5f,
+    val color: String = "#d4af37",
+)
+
+@Serializable
 data class MapSceneDto(
     val grid: MapGridDto,
     val heightmap: List<List<Int>> = emptyList(),
@@ -56,6 +86,13 @@ data class MapSceneDto(
     val props: List<MapPropDto> = emptyList(),
     val lights: List<MapLightDto> = emptyList(),
     val fog: MapFogDto? = null,
+    val walkable: List<List<Int>> = emptyList(),
+    val doors: List<MapDoorDto> = emptyList(),
+    val corridors: List<MapCorridorDto> = emptyList(),
+    val spawn: MapPointDto? = null,
+    val exit: MapPointDto? = null,
+    val tokens: List<MapTokenDto> = emptyList(),
+    val connected: Boolean = true,
 )
 
 object MapSceneCodec {

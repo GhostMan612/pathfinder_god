@@ -7,14 +7,19 @@
 Campaign Repository — SQLite CRUD + queries for Campaign & Continuity data.
 """
 
+import hashlib
 import json
+import logging
 import sqlite3
+import struct
 from contextlib import contextmanager
 from dataclasses import dataclass, fields
 from pathlib import Path
 
 from app.config import settings
 from app.rag._fts import build_match_query
+
+logger = logging.getLogger(__name__)
 
 # Ceiling on sessions.raw_log, applied in SQL on every turn append. Without it
 # the transcript grows without bound, SQLite rewrites the whole TEXT value on
@@ -114,6 +119,45 @@ class Decision:
     made_by: str | None
 
 
+@dataclass
+class Combatant:
+    id: int
+    campaign_id: int
+    name: str
+    kind: str
+    hp: int
+    max_hp: int
+    temp_hp: int = 0
+    ac: int = 10
+    initiative: int = 0
+    conditions: list[dict] | None = None
+    is_active: bool = True
+    turn_order: int = 0
+
+
+@dataclass
+class SoloState:
+    campaign_id: int
+    phase: str = "exploration"
+    round_num: int = 1
+    current_location_id: int | None = None
+    active_combatant_id: int | None = None
+    turn_order: list[int] | None = None
+    next_turn_num: int = 1
+
+
+@dataclass
+class CampaignTurn:
+    id: int
+    campaign_id: int
+    turn_num: int
+    actor: str
+    action: str
+    narration: str
+    outcome: dict
+    dice: list[dict]
+
+
 class CampaignRepository:
     def __init__(self, db_path: str | None = None):
         self.db_path = db_path or str(settings.data_dir / "campaign.db")
@@ -171,6 +215,91 @@ class CampaignRepository:
                     conn.execute("ALTER TABLE campaigns ADD COLUMN combat_json TEXT")
                 except sqlite3.OperationalError:
                     pass
+                # Older solo_state rows predate next_turn_num (the locked turn
+                # counter). Add it and backfill from the highest recorded
+                # turn, so existing campaigns resume numbering without
+                # colliding with turns they already have.
+                try:
+                    conn.execute(
+                        "ALTER TABLE solo_state ADD COLUMN next_turn_num "
+                        "INTEGER NOT NULL DEFAULT 1"
+                    )
+                    conn.execute(
+                        """
+                        UPDATE solo_state SET next_turn_num = (
+                            SELECT COALESCE(MAX(turn_num), 0) + 1
+                            FROM campaign_turns
+                            WHERE campaign_turns.campaign_id = solo_state.campaign_id
+                        )
+                        """
+                    )
+                except sqlite3.OperationalError:
+                    pass
+                # Older campaign.db files carry UNIQUE(campaign_id, name) on
+                # combatants, which collapsed duplicate monsters into one row:
+                # upserting a second "Goblin" overwrote the first one's HP/AC.
+                # Rebuild the table without that constraint, preserving rows.
+                try:
+                    row = conn.execute(
+                        "SELECT sql FROM sqlite_master "
+                        "WHERE type = 'table' AND name = 'combatants'"
+                    ).fetchone()
+                    if row and row[0] and "UNIQUE(campaign_id, name)" in row[0]:
+                        conn.execute(
+                            "ALTER TABLE combatants RENAME TO combatants_legacy"
+                        )
+                        conn.execute(
+                            """
+                            CREATE TABLE combatants (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+                                name TEXT NOT NULL,
+                                kind TEXT CHECK(kind IN ('hero','npc','monster')) DEFAULT 'monster',
+                                hp INTEGER NOT NULL DEFAULT 1,
+                                max_hp INTEGER NOT NULL DEFAULT 1,
+                                temp_hp INTEGER NOT NULL DEFAULT 0,
+                                ac INTEGER NOT NULL DEFAULT 10,
+                                initiative INTEGER NOT NULL DEFAULT 0,
+                                conditions_json TEXT NOT NULL DEFAULT '[]',
+                                is_active INTEGER NOT NULL DEFAULT 1,
+                                turn_order INTEGER NOT NULL DEFAULT 0,
+                                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                            )
+                            """
+                        )
+                        conn.execute(
+                            """
+                            INSERT INTO combatants
+                                (id, campaign_id, name, kind, hp, max_hp, temp_hp, ac,
+                                 initiative, conditions_json, is_active, turn_order,
+                                 created_at, updated_at)
+                            SELECT id, campaign_id, name, kind, hp, max_hp, temp_hp, ac,
+                                   initiative, conditions_json, is_active, turn_order,
+                                   created_at, updated_at
+                            FROM combatants_legacy
+                            """
+                        )
+                        conn.execute("DROP TABLE combatants_legacy")
+                        # schema.sql ran before this rebuild, so the old
+                        # index/trigger followed the renamed table and were
+                        # dropped with it. Recreate them on the new table.
+                        conn.execute(
+                            "CREATE INDEX IF NOT EXISTS idx_combatants_campaign "
+                            "ON combatants(campaign_id)"
+                        )
+                        conn.execute(
+                            """
+                            CREATE TRIGGER IF NOT EXISTS trigger_combatants_updated
+                            AFTER UPDATE ON combatants
+                            BEGIN
+                                UPDATE combatants SET updated_at = datetime('now')
+                                WHERE id = NEW.id;
+                            END
+                            """
+                        )
+                except sqlite3.OperationalError:
+                    pass
                 # Index any already-saved sessions into the recall FTS table so
                 # long campaigns are searchable from the very first run after
                 # the schema upgrade. For content= external tables this is safe
@@ -196,6 +325,22 @@ class CampaignRepository:
             )
             row = cur.fetchone()
             return Campaign(**dict(row))
+
+    def create_campaign(self, name: str, edition: str = "2e") -> Campaign:
+        """Create a brand-new campaign row with an auto-assigned id."""
+        with self._conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO campaigns (name, edition) VALUES (?, ?) RETURNING *",
+                (name, edition),
+            )
+            return Campaign(**dict(cur.fetchone()))
+
+    def campaign_exists(self, campaign_id: int) -> bool:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM campaigns WHERE id = ?", (campaign_id,)
+            ).fetchone()
+            return row is not None
 
     def reset_campaign(self, campaign_id: int) -> None:
         with self._conn() as conn:
@@ -350,19 +495,8 @@ class CampaignRepository:
             ).fetchone()
             return row[0] if row else 1
 
-    def search_sessions(self, query: str, campaign_id: int = 1, limit: int = 5) -> list[dict]:
-        """Full-text search across saved session summaries/facts/logs.
-
-        This is the long-campaign recall primitive: instead of dumping every
-        historical turn into the LLM prompt, the GM retrieves the few sessions
-        that match its current question. The FTS5 table mirrors `sessions` and
-        is kept in sync by triggers declared in schema.sql.
-
-        The query is sanitised with build_match_query before it reaches MATCH.
-        It used to be interpolated raw, so an unbalanced quote, a bare
-        AND/OR/NOT, or a stray operator in the GM's own search phrasing raised
-        sqlite3.OperationalError, which propagated out of the tool handler.
-        """
+    def search_sessions_lexical(self, query: str, campaign_id: int = 1, limit: int = 5) -> list[dict]:
+        """Full-text search across saved session summaries/facts/logs."""
         if not query or not query.strip():
             return []
         match = build_match_query(query)
@@ -395,6 +529,145 @@ class CampaignRepository:
                 d["facts_json"] = []
             out.append(d)
         return out
+
+    def search_sessions_hybrid(
+        self,
+        query: str,
+        campaign_id: int = 1,
+        limit: int = 5,
+        embedder: object | None = None,
+    ) -> list[dict]:
+        bounded_query = (query or "").strip()[:200]
+        if not bounded_query or limit <= 0:
+            return []
+        if not build_match_query(bounded_query):
+            return []
+
+        lexical = self.search_sessions_lexical(query, campaign_id=campaign_id, limit=limit)
+
+        try:
+            with self._conn() as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS session_embeddings (
+                        campaign_id INTEGER NOT NULL,
+                        session_num INTEGER NOT NULL,
+                        content_hash TEXT NOT NULL,
+                        vector_blob BLOB NOT NULL,
+                        PRIMARY KEY (campaign_id, session_num)
+                    )
+                    """
+                )
+                sessions_rows = conn.execute(
+                    """
+                    SELECT session_num, summary, facts_json, substr(raw_log, 1, 1200) AS excerpt
+                    FROM sessions
+                    WHERE campaign_id = ?
+                    ORDER BY session_num ASC
+                    """,
+                    (campaign_id,),
+                ).fetchall()
+                if not sessions_rows:
+                    return lexical
+
+                cached_rows = conn.execute(
+                    "SELECT session_num, content_hash, vector_blob FROM session_embeddings WHERE campaign_id = ?",
+                    (campaign_id,),
+                ).fetchall()
+                cached_embeddings = {r["session_num"]: (r["content_hash"], r["vector_blob"]) for r in cached_rows}
+
+                active_embedder = embedder
+                if active_embedder is None:
+                    from app.rag.semantic_spine.ollama import OllamaEmbedder
+                    active_embedder = OllamaEmbedder(
+                        endpoint=settings.ollama_host,
+                        model=settings.semantic_model,
+                        dimensions=settings.semantic_dimensions,
+                        timeout_s=min(getattr(settings, "semantic_timeout_s", 15.0), 10.0),
+                        num_ctx=4096,
+                    )
+
+                dim = getattr(active_embedder, "dimensions", settings.semantic_dimensions)
+                session_vectors: dict[int, tuple[float, ...]] = {}
+                to_embed: list[tuple[int, str, str]] = []
+
+                for row in sessions_rows:
+                    s_num = row["session_num"]
+                    summary = row["summary"] or ""
+                    facts = row["facts_json"] or "[]"
+                    excerpt = row["excerpt"] or ""
+                    doc_text = f"Session {s_num}: {summary}\nKey facts: {facts}\nEvents: {excerpt}"[:1800]
+                    h = hashlib.sha256(doc_text.encode("utf-8")).hexdigest()
+
+                    if s_num in cached_embeddings and cached_embeddings[s_num][0] == h:
+                        blob = cached_embeddings[s_num][1]
+                        if len(blob) == dim * 4:
+                            session_vectors[s_num] = struct.unpack(f"{dim}f", blob)
+                            continue
+
+                    to_embed.append((s_num, h, doc_text))
+
+                if to_embed:
+                    texts = [t[2] for t in to_embed]
+                    vectors = active_embedder.embed(texts, query=False)
+                    for (s_num, h, _), vec in zip(to_embed, vectors):
+                        session_vectors[s_num] = vec
+                        blob = struct.pack(f"{len(vec)}f", *vec)
+                        conn.execute(
+                            """
+                            INSERT INTO session_embeddings (campaign_id, session_num, content_hash, vector_blob)
+                            VALUES (?, ?, ?, ?)
+                            ON CONFLICT(campaign_id, session_num) DO UPDATE SET
+                                content_hash = excluded.content_hash,
+                                vector_blob = excluded.vector_blob
+                            """,
+                            (campaign_id, s_num, h, blob),
+                        )
+                    conn.commit()
+
+                query_vec = active_embedder.embed([bounded_query], query=True)[0]
+                scored: list[tuple[int, float]] = []
+                for s_num, s_vec in session_vectors.items():
+                    dot = sum(a * b for a, b in zip(query_vec, s_vec))
+                    scored.append((s_num, dot))
+                scored.sort(key=lambda x: -x[1])
+
+                session_dict = {}
+                for row in sessions_rows:
+                    d = dict(row)
+                    d["campaign_id"] = campaign_id
+                    try:
+                        d["facts_json"] = json.loads(d.get("facts_json") or "[]")
+                    except Exception:
+                        d["facts_json"] = []
+                    session_dict[row["session_num"]] = d
+
+                rrf_scores: dict[int, float] = {}
+                rrf_k = 60
+                for rank, hit in enumerate(lexical, 1):
+                    s_num = hit["session_num"]
+                    rrf_scores[s_num] = rrf_scores.get(s_num, 0.0) + 1.0 / (rrf_k + rank)
+
+                for rank, (s_num, _) in enumerate(scored, 1):
+                    rrf_scores[s_num] = rrf_scores.get(s_num, 0.0) + 0.8 / (rrf_k + rank)
+
+                fused_order = sorted(rrf_scores.keys(), key=lambda s: -rrf_scores[s])
+                return [session_dict[s_num] for s_num in fused_order if s_num in session_dict][:limit]
+        except Exception:
+            logger.warning("Semantic campaign recall failed, falling back to lexical FTS5", exc_info=True)
+            return lexical
+
+    def search_sessions(
+        self,
+        query: str,
+        campaign_id: int = 1,
+        limit: int = 5,
+        embedder: object | None = None,
+    ) -> list[dict]:
+        """Recall past sessions. Uses semantic hybrid search when enabled, with lexical fallback."""
+        if getattr(settings, "semantic_recall_enabled", False) or getattr(settings, "semantic_enabled", False):
+            return self.search_sessions_hybrid(query, campaign_id=campaign_id, limit=limit, embedder=embedder)
+        return self.search_sessions_lexical(query, campaign_id=campaign_id, limit=limit)
 
     # ──────────────────────────────────────────────────────────────
     # NPCs
@@ -1142,6 +1415,559 @@ class CampaignRepository:
                 counts["quests"] += 1
 
         return counts
+
+    # ──────────────────────────────────────────────────────────────
+    # Solo campaign loop (server-owned play state)
+    # ──────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _combatant_from_row(row: dict) -> Combatant:
+        values = dict(row)
+        values["conditions"] = json.loads(values.pop("conditions_json") or "[]")
+        values["is_active"] = bool(values.get("is_active", 1))
+        values.pop("created_at", None)
+        values.pop("updated_at", None)
+        return Combatant(**values)
+
+    def ensure_solo_state(self, campaign_id: int) -> SoloState:
+        """Create the solo_state row if missing, else return the existing one."""
+        with self._conn() as conn:
+            self._ensure_campaign(conn, campaign_id)
+            conn.execute(
+                """
+                INSERT INTO solo_state (campaign_id)
+                VALUES (?)
+                ON CONFLICT(campaign_id) DO NOTHING
+                """,
+                (campaign_id,),
+            )
+            row = conn.execute(
+                "SELECT * FROM solo_state WHERE campaign_id = ?", (campaign_id,)
+            ).fetchone()
+            values = dict(row)
+            values["turn_order"] = json.loads(values.pop("turn_order_json") or "[]")
+            values.pop("created_at", None)
+            values.pop("updated_at", None)
+            return SoloState(**values)
+
+    def get_solo_state(self, campaign_id: int) -> SoloState | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM solo_state WHERE campaign_id = ?", (campaign_id,)
+            ).fetchone()
+            if not row:
+                return None
+            values = dict(row)
+            values["turn_order"] = json.loads(values.pop("turn_order_json") or "[]")
+            values.pop("created_at", None)
+            values.pop("updated_at", None)
+            return SoloState(**values)
+
+    def update_solo_state(
+        self,
+        campaign_id: int,
+        *,
+        phase: str | None = None,
+        round_num: int | None = None,
+        current_location_id: int | None = None,
+        active_combatant_id: int | None = None,
+        turn_order: list[int] | None = None,
+        clear_active: bool = False,
+    ) -> SoloState:
+        """Patch solo_state fields; only the given fields change."""
+        state = self.ensure_solo_state(campaign_id)
+        new_phase = phase if phase is not None else state.phase
+        new_round = round_num if round_num is not None else state.round_num
+        new_location = (
+            current_location_id
+            if current_location_id is not None
+            else state.current_location_id
+        )
+        new_active = (
+            None
+            if clear_active
+            else (
+                active_combatant_id
+                if active_combatant_id is not None
+                else state.active_combatant_id
+            )
+        )
+        new_order = turn_order if turn_order is not None else (state.turn_order or [])
+        with self._conn() as conn:
+            conn.execute(
+                """
+                UPDATE solo_state SET phase = ?, round_num = ?,
+                    current_location_id = ?, active_combatant_id = ?,
+                    turn_order_json = ?
+                WHERE campaign_id = ?
+                """,
+                (
+                    new_phase,
+                    new_round,
+                    new_location,
+                    new_active,
+                    json.dumps(new_order),
+                    campaign_id,
+                ),
+            )
+        return SoloState(
+            campaign_id=campaign_id,
+            phase=new_phase,
+            round_num=new_round,
+            current_location_id=new_location,
+            active_combatant_id=new_active,
+            turn_order=new_order,
+        )
+
+    def set_current_location(self, campaign_id: int, location_id: int) -> SoloState:
+        return self.update_solo_state(campaign_id, current_location_id=location_id)
+
+    def upsert_combatant(
+        self,
+        campaign_id: int,
+        name: str,
+        kind: str = "monster",
+        hp: int = 1,
+        max_hp: int = 1,
+        temp_hp: int = 0,
+        ac: int = 10,
+        initiative: int = 0,
+        conditions: list[dict] | None = None,
+        turn_order: int = 0,
+        is_active: bool = True,
+    ) -> int:
+        """Insert or refresh the single combatant row for (campaign_id, name).
+
+        Heroes are unique by name, so re-adding a hero refreshes its row.
+        Monsters must NOT use this: several monsters may share a name, so
+        start_combat inserts them with add_combatant instead. (The old
+        UNIQUE(campaign_id, name) + ON CONFLICT upsert silently overwrote
+        the first monster whenever a duplicate name was added.)
+        """
+        with self._conn() as conn:
+            self._ensure_campaign(conn, campaign_id)
+            existing = conn.execute(
+                "SELECT id FROM combatants WHERE campaign_id = ? AND name = ? "
+                "ORDER BY id LIMIT 1",
+                (campaign_id, name),
+            ).fetchone()
+            if existing is not None:
+                conn.execute(
+                    """
+                    UPDATE combatants SET kind = ?, hp = ?, max_hp = ?, temp_hp = ?,
+                        ac = ?, initiative = ?, conditions_json = ?,
+                        is_active = ?, turn_order = ?, updated_at = datetime('now')
+                    WHERE id = ?
+                    """,
+                    (
+                        kind,
+                        max(0, hp),
+                        max(1, max_hp),
+                        max(0, temp_hp),
+                        ac,
+                        initiative,
+                        json.dumps(conditions or []),
+                        1 if is_active else 0,
+                        turn_order,
+                        existing[0],
+                    ),
+                )
+                return existing[0]
+            return self._insert_combatant(
+                conn,
+                campaign_id,
+                name,
+                kind,
+                hp,
+                max_hp,
+                temp_hp,
+                ac,
+                initiative,
+                conditions,
+                turn_order,
+                is_active,
+            )
+
+    def add_combatant(
+        self,
+        campaign_id: int,
+        name: str,
+        kind: str = "monster",
+        hp: int = 1,
+        max_hp: int = 1,
+        temp_hp: int = 0,
+        ac: int = 10,
+        initiative: int = 0,
+        conditions: list[dict] | None = None,
+        turn_order: int = 0,
+        is_active: bool = True,
+    ) -> int:
+        """Always insert a new combatant row, even if the name already exists.
+
+        Use for monsters: an encounter may field several creatures with the
+        same name, and each one needs its own HP/AC/initiative row.
+        """
+        with self._conn() as conn:
+            self._ensure_campaign(conn, campaign_id)
+            return self._insert_combatant(
+                conn,
+                campaign_id,
+                name,
+                kind,
+                hp,
+                max_hp,
+                temp_hp,
+                ac,
+                initiative,
+                conditions,
+                turn_order,
+                is_active,
+            )
+
+    @staticmethod
+    def _insert_combatant(
+        conn,
+        campaign_id: int,
+        name: str,
+        kind: str,
+        hp: int,
+        max_hp: int,
+        temp_hp: int,
+        ac: int,
+        initiative: int,
+        conditions: list[dict] | None,
+        turn_order: int,
+        is_active: bool,
+    ) -> int:
+        cur = conn.execute(
+            """
+            INSERT INTO combatants (campaign_id, name, kind, hp, max_hp, temp_hp,
+                                   ac, initiative, conditions_json, is_active, turn_order)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                campaign_id,
+                name,
+                kind,
+                max(0, hp),
+                max(1, max_hp),
+                max(0, temp_hp),
+                ac,
+                initiative,
+                json.dumps(conditions or []),
+                1 if is_active else 0,
+                turn_order,
+            ),
+        )
+        return cur.lastrowid
+
+    def get_combatants(self, campaign_id: int, active_only: bool = False) -> list[Combatant]:
+        with self._conn() as conn:
+            sql = "SELECT * FROM combatants WHERE campaign_id = ?"
+            if active_only:
+                sql += " AND is_active = 1"
+            sql += " ORDER BY turn_order, id"
+            rows = conn.execute(sql, (campaign_id,)).fetchall()
+            return [self._combatant_from_row(dict(r)) for r in rows]
+
+    def get_combatant(self, campaign_id: int, combatant_id: int) -> Combatant | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM combatants WHERE campaign_id = ? AND id = ?",
+                (campaign_id, combatant_id),
+            ).fetchone()
+            return self._combatant_from_row(dict(row)) if row else None
+
+    def get_combatant_by_name(self, campaign_id: int, name: str) -> Combatant | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM combatants WHERE campaign_id = ? AND name = ?",
+                (campaign_id, name),
+            ).fetchone()
+            return self._combatant_from_row(dict(row)) if row else None
+
+    def update_combatant(
+        self,
+        combatant_id: int,
+        *,
+        hp: int | None = None,
+        temp_hp: int | None = None,
+        conditions: list[dict] | None = None,
+        initiative: int | None = None,
+        turn_order: int | None = None,
+        is_active: bool | None = None,
+    ) -> Combatant | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM combatants WHERE id = ?", (combatant_id,)
+            ).fetchone()
+            if not row:
+                return None
+            current = self._combatant_from_row(dict(row))
+            new_hp = max(0, hp) if hp is not None else current.hp
+            new_temp = max(0, temp_hp) if temp_hp is not None else current.temp_hp
+            new_conds = conditions if conditions is not None else (current.conditions or [])
+            new_init = initiative if initiative is not None else current.initiative
+            new_order = turn_order if turn_order is not None else current.turn_order
+            new_active = is_active if is_active is not None else current.is_active
+            conn.execute(
+                """
+                UPDATE combatants SET hp = ?, temp_hp = ?, conditions_json = ?,
+                    initiative = ?, turn_order = ?, is_active = ?
+                WHERE id = ?
+                """,
+                (
+                    new_hp,
+                    new_temp,
+                    json.dumps(new_conds),
+                    new_init,
+                    new_order,
+                    1 if new_active else 0,
+                    combatant_id,
+                ),
+            )
+            return Combatant(
+                id=current.id,
+                campaign_id=current.campaign_id,
+                name=current.name,
+                kind=current.kind,
+                hp=new_hp,
+                max_hp=current.max_hp,
+                temp_hp=new_temp,
+                ac=current.ac,
+                initiative=new_init,
+                conditions=new_conds,
+                is_active=new_active,
+                turn_order=new_order,
+            )
+
+    def clear_combatants(self, campaign_id: int) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "DELETE FROM combatants WHERE campaign_id = ?", (campaign_id,)
+            )
+
+    def clear_non_hero_combatants(self, campaign_id: int) -> int:
+        """Remove the encounter roster but keep persistent hero rows.
+
+        start_combat used to clear every combatant, including heroes, and then
+        recreate them at full HP. That silently erased wounds, Dying/Wounded
+        conditions, and rest healing between encounters. Heroes now survive;
+        only monsters/NPCs from the previous fight are discarded.
+        """
+        with self._conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM combatants WHERE campaign_id = ? AND kind != 'hero'",
+                (campaign_id,),
+            )
+            return cur.rowcount
+
+    def deactivate_combatants(self, campaign_id: int) -> int:
+        """Mark every combatant in the campaign inactive; returns how many
+        changed. Ending combat must do this: flipping solo_state to
+        exploration alone left a live combat roster behind, so the next
+        exploration turn still saw active foes."""
+        with self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE combatants SET is_active = 0 "
+                "WHERE campaign_id = ? AND is_active = 1",
+                (campaign_id,),
+            )
+            return cur.rowcount
+
+    def get_next_turn_num(self, campaign_id: int) -> int:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(turn_num), 0) FROM campaign_turns WHERE campaign_id = ?",
+                (campaign_id,),
+            ).fetchone()
+            return (row[0] if row else 0) + 1
+
+    def reserve_turn_num(self, campaign_id: int) -> int:
+        """Atomically reserve the next turn number for a campaign.
+
+        The old path computed MAX(turn_num)+1 in one connection and inserted
+        the turn in another, so two concurrent turns could reserve the same
+        number and the second insert then failed on
+        UNIQUE(campaign_id, turn_num). This holds BEGIN IMMEDIATE across the
+        read and the counter increment on the solo_state row, so each caller
+        gets a distinct number. A reserved number is consumed even if the
+        turn later fails — turn numbers may skip, never collide.
+        """
+        with self._conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._ensure_campaign(conn, campaign_id)
+            conn.execute(
+                """
+                INSERT INTO solo_state (campaign_id)
+                VALUES (?)
+                ON CONFLICT(campaign_id) DO NOTHING
+                """,
+                (campaign_id,),
+            )
+            row = conn.execute(
+                "SELECT next_turn_num FROM solo_state WHERE campaign_id = ?",
+                (campaign_id,),
+            ).fetchone()
+            turn_num = int(row[0]) if row else 1
+            # Belt and braces: if the counter is ever stale (a solo_state
+            # row created after turns were already recorded), never hand
+            # out a number a recorded turn already holds.
+            max_row = conn.execute(
+                "SELECT COALESCE(MAX(turn_num), 0) FROM campaign_turns "
+                "WHERE campaign_id = ?",
+                (campaign_id,),
+            ).fetchone()
+            turn_num = max(turn_num, int(max_row[0]) + 1 if max_row else 1)
+            conn.execute(
+                "UPDATE solo_state SET next_turn_num = ? WHERE campaign_id = ?",
+                (turn_num + 1, campaign_id),
+            )
+            return turn_num
+
+    def record_turn(
+        self,
+        campaign_id: int,
+        turn_num: int,
+        actor: str,
+        action: str,
+        narration: str,
+        outcome: dict | None = None,
+        dice: list[dict] | None = None,
+    ) -> int:
+        with self._conn() as conn:
+            self._ensure_campaign(conn, campaign_id)
+            cur = conn.execute(
+                """
+                INSERT INTO campaign_turns (campaign_id, turn_num, actor, action,
+                                           narration, outcome_json, dice_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                RETURNING id
+                """,
+                (
+                    campaign_id,
+                    turn_num,
+                    actor,
+                    action,
+                    narration,
+                    json.dumps(outcome or {}),
+                    json.dumps(dice or []),
+                ),
+            )
+            return cur.fetchone()[0]
+
+    def get_recent_turns(self, campaign_id: int, limit: int = 10) -> list[CampaignTurn]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM campaign_turns WHERE campaign_id = ?"
+                " ORDER BY turn_num DESC LIMIT ?",
+                (campaign_id, limit),
+            ).fetchall()
+            out = []
+            for r in rows:
+                values = dict(r)
+                values["outcome"] = json.loads(values.pop("outcome_json") or "{}")
+                values["dice"] = json.loads(values.pop("dice_json") or "[]")
+                values.pop("created_at", None)
+                out.append(CampaignTurn(**values))
+            return list(reversed(out))
+
+    def get_quests(self, campaign_id: int) -> list[Quest]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM quests WHERE campaign_id = ? ORDER BY name",
+                (campaign_id,),
+            ).fetchall()
+            out = []
+            for r in rows:
+                values = dict(r)
+                values["objectives"] = json.loads(values.pop("objectives_json") or "[]")
+                values["rewards"] = json.loads(values.pop("rewards_json") or "[]")
+                values.pop("created_at", None)
+                values.pop("updated_at", None)
+                out.append(Quest(**values))
+            return out
+
+    def set_quest_objective(
+        self, campaign_id: int, quest_name: str, objective_description: str
+    ) -> dict | None:
+        """Mark one objective of a quest completed; complete the quest when all are done.
+
+        Returns {"quest": name, "objective": description, "quest_completed": bool}
+        or None when the quest/objective was not found. Objective matching is
+        case-insensitive substring on the objective description.
+        """
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM quests WHERE campaign_id = ? AND name = ?",
+                (campaign_id, quest_name),
+            ).fetchone()
+            if not row:
+                return None
+            values = dict(row)
+            objectives = json.loads(values.get("objectives_json") or "[]")
+            needle = objective_description.strip().lower()
+            matched = False
+            for obj in objectives:
+                if not isinstance(obj, dict):
+                    continue
+                desc = str(obj.get("description", ""))
+                if needle and needle in desc.lower():
+                    obj["completed"] = True
+                    matched = True
+            if not matched:
+                return None
+            all_done = bool(objectives) and all(
+                bool(o.get("completed")) for o in objectives if isinstance(o, dict)
+            )
+            status = "completed" if all_done else values.get("status", "active")
+            conn.execute(
+                """
+                UPDATE quests SET objectives_json = ?, status = ?,
+                    completed_session = CASE WHEN ? = 'completed'
+                        THEN COALESCE(completed_session, 1) ELSE completed_session END,
+                    updated_at = datetime('now')
+                WHERE campaign_id = ? AND name = ?
+                """,
+                (json.dumps(objectives), status, status, campaign_id, quest_name),
+            )
+            return {
+                "quest": quest_name,
+                "objective": objective_description,
+                "quest_completed": all_done,
+            }
+
+    def mirror_combat_json(self, campaign_id: int) -> str:
+        """Rebuild the legacy opaque combat_json from solo combatants + state.
+
+        The spoke still reads campaigns.combat_json; this keeps that mirror
+        current without making it the source of truth.
+        """
+        state = self.get_solo_state(campaign_id)
+        combatants = self.get_combatants(campaign_id)
+        scene = {
+            "phase": state.phase if state else "exploration",
+            "round": state.round_num if state else 1,
+            "active_combatant_id": state.active_combatant_id if state else None,
+            "combatants": [
+                {
+                    "id": c.id,
+                    "name": c.name,
+                    "kind": c.kind,
+                    "hp": c.hp,
+                    "max_hp": c.max_hp,
+                    "temp_hp": c.temp_hp,
+                    "ac": c.ac,
+                    "initiative": c.initiative,
+                    "conditions": c.conditions or [],
+                    "is_active": c.is_active,
+                }
+                for c in combatants
+            ],
+        }
+        scene_json = json.dumps(scene)
+        self.set_combat_json(campaign_id, scene_json)
+        return scene_json
 
     def get_session_notes(self, campaign_id: int) -> list[dict]:
         with self._conn() as conn:

@@ -104,18 +104,30 @@ object MapPalette {
         MapSurfaceKind.STONE -> floatArrayOf(0.56f, 0.53f, 0.48f)
         MapSurfaceKind.METAL -> floatArrayOf(0.36f, 0.38f, 0.41f)
         MapSurfaceKind.FLAME -> floatArrayOf(1.0f, 0.48f, 0.10f)
+        MapSurfaceKind.TOKEN_HERO -> floatArrayOf(0.23f, 0.51f, 0.96f)
+        MapSurfaceKind.TOKEN_MONSTER -> floatArrayOf(0.86f, 0.15f, 0.15f)
+        MapSurfaceKind.TOKEN_NPC -> floatArrayOf(0.13f, 0.77f, 0.37f)
+        MapSurfaceKind.TOKEN_LOOT -> floatArrayOf(0.92f, 0.70f, 0.03f)
     }
 
     fun roughnessFor(kind: MapSurfaceKind): Float = when (kind) {
+        MapSurfaceKind.TOKEN_LOOT -> 0.30f
+        MapSurfaceKind.TOKEN_HERO -> 0.38f
         MapSurfaceKind.METAL -> 0.42f
+        MapSurfaceKind.TOKEN_MONSTER -> 0.50f
         MapSurfaceKind.FLAME -> 0.55f
+        MapSurfaceKind.TOKEN_NPC -> 0.55f
         MapSurfaceKind.WOOD -> 0.78f
         MapSurfaceKind.GROUND -> 0.95f
         else -> 0.90f
     }
 
     fun metallicFor(kind: MapSurfaceKind): Float = when (kind) {
+        MapSurfaceKind.TOKEN_LOOT -> 0.80f
         MapSurfaceKind.METAL -> 0.65f
+        MapSurfaceKind.TOKEN_HERO -> 0.55f
+        MapSurfaceKind.TOKEN_MONSTER -> 0.20f
+        MapSurfaceKind.TOKEN_NPC -> 0.15f
         else -> 0f
     }
 }

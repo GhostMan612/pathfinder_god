@@ -21,7 +21,7 @@ import androidx.sqlite.db.SupportSQLiteOpenHelper
         CampaignEntity::class,
         RollEntity::class,
     ],
-    version = 4,
+    version = AppDatabase.VERSION,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -37,6 +37,16 @@ abstract class AppDatabase : RoomDatabase() {
 
     companion object {
         const val FILE_NAME = "pathfinder_spoke.db"
+        const val VERSION = 4
+
+        private const val CREATE_CAMPAIGNS =
+            "CREATE TABLE IF NOT EXISTS `campaigns` (" +
+                "`id` TEXT NOT NULL, " +
+                "`name` TEXT NOT NULL, " +
+                "`description` TEXT NOT NULL, " +
+                "`session_notes` TEXT NOT NULL, " +
+                "`updated_at` TEXT NOT NULL, " +
+                "PRIMARY KEY(`id`))"
 
         private const val CREATE_ROLL_HISTORY =
             "CREATE TABLE IF NOT EXISTS `roll_history` (" +
@@ -52,6 +62,12 @@ abstract class AppDatabase : RoomDatabase() {
                 "`target_number` INTEGER, " +
                 "`rolled_at` INTEGER NOT NULL)"
 
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(CREATE_CAMPAIGNS)
+            }
+        }
+
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(CREATE_ROLL_HISTORY)
@@ -64,14 +80,16 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+
         fun create(
             context: Context,
             factory: SupportSQLiteOpenHelper.Factory = NgaSQLiteOpenHelperFactory(),
+            name: String = FILE_NAME,
         ): AppDatabase =
-            Room.databaseBuilder(context, AppDatabase::class.java, FILE_NAME)
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
+            Room.databaseBuilder(context, AppDatabase::class.java, name)
+                .addMigrations(*MIGRATIONS)
                 .openHelperFactory(factory)
-                .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
 
         @Volatile

@@ -7,11 +7,13 @@
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.agents.map_maker import MapMakerAgent
+from app.api.deps import get_repo
 from app.config import get_settings
+from app.db.repository import CampaignRepository
 from app.llm.ollama_client import OllamaClient
 
 logger = logging.getLogger(__name__)
@@ -22,6 +24,11 @@ router = APIRouter(prefix="/map", tags=["map"])
 class MapRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=500)
     grid_enabled: bool = True
+    campaign_id: int | None = None
+    heroes: list[str] | None = None
+    monsters: list[str] | None = None
+    npcs: list[str] | None = None
+    loot: list[str] | None = None
 
 
 class MapRoomResponse(BaseModel):
@@ -73,6 +80,32 @@ class FogResponse(BaseModel):
     density: float
 
 
+class PointResponse(BaseModel):
+    x: int
+    y: int
+
+
+class DoorResponse(BaseModel):
+    x: int
+    y: int
+    orientation: str = "ew"
+    kind: str = "wood"
+
+
+class CorridorResponse(BaseModel):
+    cells: list[list[int]] = Field(default_factory=list)
+
+
+class TokenResponse(BaseModel):
+    id: str
+    name: str
+    kind: str = Field(pattern="^(hero|monster|npc|loot)$")
+    x: int
+    y: int
+    z: float = 0.5
+    color: str = "#d4af37"
+
+
 class SceneResponse(BaseModel):
     grid: GridResponse
     heightmap: list[list[int]]
@@ -80,6 +113,13 @@ class SceneResponse(BaseModel):
     props: list[PropResponse]
     lights: list[LightResponse]
     fog: FogResponse | None = None
+    walkable: list[list[int]] = Field(default_factory=list)
+    doors: list[DoorResponse] = Field(default_factory=list)
+    corridors: list[CorridorResponse] = Field(default_factory=list)
+    spawn: PointResponse | None = None
+    exit: PointResponse | None = None
+    tokens: list[TokenResponse] = Field(default_factory=list)
+    connected: bool = True
 
 
 class MapResponse(BaseModel):
@@ -96,13 +136,40 @@ class MapResponse(BaseModel):
 
 
 @router.post("/generate", response_model=MapResponse)
-async def generate_map(request: MapRequest) -> MapResponse:
+async def generate_map(
+    request: MapRequest,
+    repo: CampaignRepository = Depends(get_repo),
+) -> MapResponse:
     settings = get_settings()
     llm = OllamaClient(settings.ollama_host)
     agent = MapMakerAgent(llm)
 
+    heroes = request.heroes
+    monsters = request.monsters
+    npcs = request.npcs
+    loot = request.loot
+    if request.campaign_id is not None:
+        c_heroes, c_monsters, c_npcs, c_loot = MapMakerAgent.entities_from_campaign(
+            repo, request.campaign_id
+        )
+        if heroes is None and c_heroes:
+            heroes = c_heroes
+        if monsters is None and c_monsters:
+            monsters = c_monsters
+        if npcs is None and c_npcs:
+            npcs = c_npcs
+        if loot is None and c_loot:
+            loot = c_loot
+
     try:
-        result = await agent.build(request.prompt, grid_enabled=request.grid_enabled)
+        result = await agent.build(
+            request.prompt,
+            grid_enabled=request.grid_enabled,
+            heroes=heroes,
+            monsters=monsters,
+            npcs=npcs,
+            loot=loot,
+        )
     except Exception:
         # Never echo the exception text to the client: it carries filesystem
         # paths, library versions and model output fragments.
@@ -154,6 +221,40 @@ async def generate_map(request: MapRequest) -> MapResponse:
                 if result.scene.fog is not None
                 else None
             ),
+            walkable=result.scene.walkable,
+            doors=[
+                DoorResponse(
+                    x=d.x, y=d.y, orientation=d.orientation, kind=d.kind
+                )
+                for d in result.scene.doors
+            ],
+            corridors=[
+                CorridorResponse(cells=[[cx, cy] for cx, cy in c.cells])
+                for c in result.scene.corridors
+            ],
+            spawn=(
+                PointResponse(x=result.scene.spawn.x, y=result.scene.spawn.y)
+                if result.scene.spawn is not None
+                else None
+            ),
+            exit=(
+                PointResponse(x=result.scene.exit.x, y=result.scene.exit.y)
+                if result.scene.exit is not None
+                else None
+            ),
+            tokens=[
+                TokenResponse(
+                    id=t.id,
+                    name=t.name,
+                    kind=t.kind,
+                    x=t.x,
+                    y=t.y,
+                    z=t.z,
+                    color=t.color,
+                )
+                for t in result.scene.tokens
+            ],
+            connected=result.scene.connected,
         )
 
     return MapResponse(

@@ -215,6 +215,74 @@ CREATE INDEX IF NOT EXISTS idx_session_notes_campaign ON session_notes(campaign_
 CREATE INDEX IF NOT EXISTS idx_session_notes_session ON session_notes(campaign_id, session_num);
 
 -- ──────────────────────────────────────────────────────────────
+-- Solo campaign loop (server-owned play state)
+--
+-- The legacy `campaigns.combat_json` column stays untouched: the spoke
+-- syncs its combat scene there as an opaque string. These tables are the
+-- new source of truth for solo play; combat_json is only mirrored from
+-- them (see CampaignRepository.mirror_combat_json) so the old sync path
+-- keeps working while solo state lives here.
+-- ──────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS combatants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    kind TEXT CHECK(kind IN ('hero','npc','monster')) DEFAULT 'monster',
+    hp INTEGER NOT NULL DEFAULT 1,
+    max_hp INTEGER NOT NULL DEFAULT 1,
+    temp_hp INTEGER NOT NULL DEFAULT 0,
+    ac INTEGER NOT NULL DEFAULT 10,
+    initiative INTEGER NOT NULL DEFAULT 0,
+    conditions_json TEXT NOT NULL DEFAULT '[]',
+    is_active INTEGER NOT NULL DEFAULT 1,
+    turn_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS campaign_turns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    turn_num INTEGER NOT NULL,
+    actor TEXT NOT NULL DEFAULT 'player',
+    action TEXT NOT NULL,
+    narration TEXT NOT NULL DEFAULT '',
+    outcome_json TEXT NOT NULL DEFAULT '{}',
+    dice_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(campaign_id, turn_num)
+);
+
+CREATE TABLE IF NOT EXISTS solo_state (
+    campaign_id INTEGER PRIMARY KEY REFERENCES campaigns(id) ON DELETE CASCADE,
+    phase TEXT CHECK(phase IN ('exploration','combat','downtime')) NOT NULL DEFAULT 'exploration',
+    round_num INTEGER NOT NULL DEFAULT 1,
+    current_location_id INTEGER REFERENCES locations(id),
+    active_combatant_id INTEGER,
+    turn_order_json TEXT NOT NULL DEFAULT '[]',
+    next_turn_num INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_combatants_campaign ON combatants(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_turns_campaign ON campaign_turns(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_turns_num ON campaign_turns(campaign_id, turn_num);
+
+CREATE TRIGGER IF NOT EXISTS trigger_combatants_updated
+AFTER UPDATE ON combatants
+BEGIN
+    UPDATE combatants SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trigger_solo_state_updated
+AFTER UPDATE ON solo_state
+BEGIN
+    UPDATE solo_state SET updated_at = datetime('now') WHERE campaign_id = NEW.campaign_id;
+END;
+
+-- ──────────────────────────────────────────────────────────────
 -- Session recall (FTS5) for long campaigns.
 -- External-content mirror of `sessions`, built once and kept in sync by the
 -- triggers below. Lets the GM recall any past session's events instead of

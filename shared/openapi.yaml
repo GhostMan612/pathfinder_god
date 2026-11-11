@@ -350,7 +350,7 @@ paths:
       tags:
       - rules
       summary: List Missed
-      description: Queued misses, oldest first — feed for chunked backfill runs.
+      description: "Queued misses, oldest first \u2014 feed for chunked backfill runs."
       operationId: list_missed_rules_missed_get
       parameters:
       - name: limit
@@ -765,6 +765,191 @@ paths:
                 type: object
                 additionalProperties: true
                 title: Response Add Party Member Campaign Party Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /campaign/create:
+    post:
+      tags:
+      - campaign
+      summary: Create Solo Campaign
+      operationId: create_solo_campaign_campaign_create_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCampaignRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateCampaignResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
+  /campaign/{campaign_id}/turn:
+    post:
+      tags:
+      - campaign
+      summary: Solo Turn
+      operationId: solo_turn_campaign__campaign_id__turn_post
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Campaign Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TurnRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TurnResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /campaign/{campaign_id}/state:
+    get:
+      tags:
+      - campaign
+      summary: Solo State
+      operationId: solo_state_campaign__campaign_id__state_get
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Campaign Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SoloStateResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /campaign/{campaign_id}/combat/start:
+    post:
+      tags:
+      - campaign
+      summary: Solo Combat Start
+      operationId: solo_combat_start_campaign__campaign_id__combat_start_post
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Campaign Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CombatStartRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CombatStartResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /campaign/{campaign_id}/combat/end-turn:
+    post:
+      tags:
+      - campaign
+      summary: Solo Combat End Turn
+      operationId: solo_combat_end_turn_campaign__campaign_id__combat_end_turn_post
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Campaign Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CombatEndTurnResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /campaign/{campaign_id}/combat/end:
+    post:
+      tags:
+      - campaign
+      summary: Solo Combat End
+      operationId: solo_combat_end_campaign__campaign_id__combat_end_post
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Campaign Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CombatEndTurnResponse'
         '422':
           description: Validation Error
           content:
@@ -1554,6 +1739,24 @@ components:
       - party
       - notes
       title: CampaignStateResponse
+    CombatEndTurnResponse:
+      properties:
+        phase:
+          type: string
+          title: Phase
+        round:
+          type: integer
+          title: Round
+        active_combatant:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Active Combatant
+      type: object
+      required:
+      - phase
+      - round
+      title: CombatEndTurnResponse
     CombatSceneIn:
       properties:
         campaign_id:
@@ -1583,6 +1786,76 @@ components:
       - campaign_id
       - scene
       title: CombatSceneOut
+    CombatStartRequest:
+      properties:
+        monster_names:
+          anyOf:
+          - items:
+              type: string
+            type: array
+            maxItems: 20
+          - type: 'null'
+          title: Monster Names
+        theme:
+          anyOf:
+          - type: string
+            maxLength: 200
+          - type: 'null'
+          title: Theme
+        threat:
+          type: string
+          enum:
+          - trivial
+          - low
+          - moderate
+          - severe
+          - extreme
+          title: Threat
+          default: moderate
+        party_level:
+          type: integer
+          maximum: 20.0
+          minimum: 1.0
+          title: Party Level
+          default: 1
+        seed:
+          anyOf:
+          - type: integer
+            maximum: 2147483647.0
+            minimum: 0.0
+          - type: 'null'
+          title: Seed
+      type: object
+      title: CombatStartRequest
+    CombatStartResponse:
+      properties:
+        campaign_id:
+          type: integer
+          title: Campaign Id
+        phase:
+          type: string
+          title: Phase
+        round:
+          type: integer
+          title: Round
+        combatants:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Combatants
+          default: []
+        active_combatant:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Active Combatant
+      type: object
+      required:
+      - campaign_id
+      - phase
+      - round
+      title: CombatStartResponse
     ConditionItem:
       properties:
         name:
@@ -1601,6 +1874,86 @@ components:
       required:
       - name
       title: ConditionItem
+    CorridorResponse:
+      properties:
+        cells:
+          items:
+            items:
+              type: integer
+            type: array
+          type: array
+          title: Cells
+      type: object
+      title: CorridorResponse
+    CreateCampaignRequest:
+      properties:
+        name:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Name
+        edition:
+          type: string
+          enum:
+          - 1e
+          - 2e
+          title: Edition
+          default: 2e
+        premise:
+          type: string
+          maxLength: 4000
+          title: Premise
+          default: ''
+        hero_prompt:
+          anyOf:
+          - type: string
+            maxLength: 2000
+          - type: 'null'
+          title: Hero Prompt
+      type: object
+      required:
+      - name
+      title: CreateCampaignRequest
+    CreateCampaignResponse:
+      properties:
+        campaign_id:
+          type: integer
+          title: Campaign Id
+        name:
+          type: string
+          title: Name
+        edition:
+          type: string
+          title: Edition
+        location:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Location
+        quest:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Quest
+        hero:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Hero
+        opening_narration:
+          type: string
+          title: Opening Narration
+        source:
+          type: string
+          title: Source
+          default: fallback
+      type: object
+      required:
+      - campaign_id
+      - name
+      - edition
+      - opening_narration
+      title: CreateCampaignResponse
     DetailedHealthResponse:
       properties:
         status:
@@ -1657,6 +2010,27 @@ components:
       - ollama
       - checks
       title: DetailedHealthResponse
+    DoorResponse:
+      properties:
+        x:
+          type: integer
+          title: X
+        y:
+          type: integer
+          title: Y
+        orientation:
+          type: string
+          title: Orientation
+          default: ew
+        kind:
+          type: string
+          title: Kind
+          default: wood
+      type: object
+      required:
+      - x
+      - y
+      title: DoorResponse
     EncounterMonsterResponse:
       properties:
         name:
@@ -1999,6 +2373,39 @@ components:
           type: boolean
           title: Grid Enabled
           default: true
+        campaign_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Campaign Id
+        heroes:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Heroes
+        monsters:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Monsters
+        npcs:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Npcs
+        loot:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Loot
       type: object
       required:
       - prompt
@@ -2292,6 +2699,19 @@ components:
       required:
       - name
       title: PartyMemberRequest
+    PointResponse:
+      properties:
+        x:
+          type: integer
+          title: X
+        y:
+          type: integer
+          title: Y
+      type: object
+      required:
+      - x
+      - y
+      title: PointResponse
     PropResponse:
       properties:
         type:
@@ -2413,6 +2833,40 @@ components:
           anyOf:
           - $ref: '#/components/schemas/FogResponse'
           - type: 'null'
+        walkable:
+          items:
+            items:
+              type: integer
+            type: array
+          type: array
+          title: Walkable
+        doors:
+          items:
+            $ref: '#/components/schemas/DoorResponse'
+          type: array
+          title: Doors
+        corridors:
+          items:
+            $ref: '#/components/schemas/CorridorResponse'
+          type: array
+          title: Corridors
+        spawn:
+          anyOf:
+          - $ref: '#/components/schemas/PointResponse'
+          - type: 'null'
+        exit:
+          anyOf:
+          - $ref: '#/components/schemas/PointResponse'
+          - type: 'null'
+        tokens:
+          items:
+            $ref: '#/components/schemas/TokenResponse'
+          type: array
+          title: Tokens
+        connected:
+          type: boolean
+          title: Connected
+          default: true
       type: object
       required:
       - grid
@@ -2421,6 +2875,71 @@ components:
       - props
       - lights
       title: SceneResponse
+    SoloStateResponse:
+      properties:
+        campaign_id:
+          type: integer
+          title: Campaign Id
+        name:
+          type: string
+          title: Name
+        edition:
+          type: string
+          title: Edition
+        phase:
+          type: string
+          title: Phase
+        round:
+          type: integer
+          title: Round
+        location:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Location
+        location_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Location Id
+        active_combatant_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Active Combatant Id
+        combatants:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Combatants
+          default: []
+        quests:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Quests
+          default: []
+        recent_turns:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Recent Turns
+          default: []
+        chronicle:
+          type: string
+          title: Chronicle
+          default: ''
+      type: object
+      required:
+      - campaign_id
+      - name
+      - edition
+      - phase
+      - round
+      title: SoloStateResponse
     SpeakRequest:
       properties:
         text:
@@ -2515,6 +3034,40 @@ components:
       - summary
       - event_count
       title: SummarizeSessionResponse
+    TokenResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        kind:
+          type: string
+          pattern: ^(hero|monster|npc|loot)$
+          title: Kind
+        x:
+          type: integer
+          title: X
+        y:
+          type: integer
+          title: Y
+        z:
+          type: number
+          title: Z
+          default: 0.5
+        color:
+          type: string
+          title: Color
+          default: '#d4af37'
+      type: object
+      required:
+      - id
+      - name
+      - kind
+      - x
+      - y
+      title: TokenResponse
     TranscribeResponse:
       properties:
         text:
@@ -2532,6 +3085,110 @@ components:
       - language
       - duration_s
       title: TranscribeResponse
+    TurnRequest:
+      properties:
+        action:
+          type: string
+          maxLength: 4000
+          minLength: 1
+          title: Action
+        actor:
+          type: string
+          maxLength: 60
+          title: Actor
+          default: player
+        seed:
+          anyOf:
+          - type: integer
+            maximum: 2147483647.0
+            minimum: 0.0
+          - type: 'null'
+          title: Seed
+      type: object
+      required:
+      - action
+      title: TurnRequest
+    TurnResponse:
+      properties:
+        campaign_id:
+          type: integer
+          title: Campaign Id
+        turn_num:
+          type: integer
+          title: Turn Num
+        narration:
+          type: string
+          title: Narration
+        dice_rolls:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Dice Rolls
+          default: []
+        hp_changes:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Hp Changes
+          default: []
+        conditions:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Conditions
+          default: []
+        quest_updates:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Quest Updates
+          default: []
+        location:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Location
+        phase:
+          type: string
+          title: Phase
+        round:
+          type: integer
+          title: Round
+        active_combatant:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Active Combatant
+        choices:
+          items:
+            type: string
+          type: array
+          title: Choices
+          default: []
+        seed:
+          type: integer
+          title: Seed
+        source:
+          type: string
+          title: Source
+          default: fallback
+        kind:
+          type: string
+          title: Kind
+          default: other
+      type: object
+      required:
+      - campaign_id
+      - turn_num
+      - narration
+      - phase
+      - round
+      - seed
+      title: TurnResponse
     ValidationError:
       properties:
         loc:

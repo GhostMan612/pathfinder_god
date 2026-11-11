@@ -48,6 +48,130 @@ class LLMResult:
     sources: list[dict]
 
 
+# Solo-loop tools: the GM can roll dice, resolve strikes, end turns, and
+# build NPCs/monsters/loot/maps in conversation. These are thin wrappers
+# over the existing agents — the builders themselves are not rewritten
+# here. PNGs are deliberately NOT returned by generate_map: two base64
+# images in a tool result would blow up the model's context window; the
+# layout + 3D scene are what the GM reasons about.
+SOLO_LOOP_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "roll_dice",
+            "description": "Roll dice notation (e.g. '2d6+3', '1d20') and return the total and individual rolls.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "notation": {"type": "string", "description": "Dice notation, e.g. '1d20+5'"}
+                },
+                "required": ["notation"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "resolve_strike",
+            "description": "Resolve a PF2e strike: attack roll vs AC, damage, temp HP first.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "attack_roll": {"type": "integer"},
+                    "target_ac": {"type": "integer"},
+                    "damage_roll": {"type": "integer"},
+                    "target_hp": {"type": "integer"},
+                    "target_temp_hp": {"type": "integer", "default": 0},
+                },
+                "required": ["attack_roll", "target_ac", "damage_roll", "target_hp"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "end_turn",
+            "description": "Process end-of-turn condition updates (persistent damage, dying, frightened) for a creature.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "conditions": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "Condition dicts {name, value, duration_rounds?}",
+                    },
+                    "current_hp": {"type": "integer", "default": 0},
+                },
+                "required": ["conditions"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "build_npc",
+            "description": "Build a legal Pathfinder NPC from a concept; returns the validated stat block (LLM, template fallback marked).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "concept": {"type": "string", "description": "e.g. 'cranky level 5 Dwarven alchemist shopkeep'"}
+                },
+                "required": ["concept"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "build_monster",
+            "description": "Build a PF2e monster stat block from a prompt; elite=true applies the elite template (boss).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string"},
+                    "level": {"type": "integer"},
+                    "elite": {"type": "boolean", "default": False},
+                },
+                "required": ["prompt"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_loot",
+            "description": "Generate a validated PF2e magic item / loot drop from a prompt.",
+            "parameters": {
+                "type": "object",
+                "properties": {"prompt": {"type": "string"}},
+                "required": ["prompt"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_map",
+            "description": "Generate a battle map layout + deterministic 3D scene (grid, heightmap, zones, props, lights). Returns layout and scene, not PNGs.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string"},
+                    "grid_enabled": {"type": "boolean", "default": True},
+                },
+                "required": ["prompt"],
+            },
+        },
+    },
+]
+
+
+def _sentence_chunks(text: str) -> list[str]:
+    """Split a completed answer into sentence-sized stream frames."""
+    parts = re.split(r"(?<=[.!?])\s+", (text or "").strip())
+    return [p for p in parts if p]
+
+
 def _tool_result_dict(result) -> dict:
     """Convert a tool result to a JSON-serializable dict.
 
@@ -323,6 +447,26 @@ class LLMOrchestrator:
             return True
         return self._rules_score(prompt) >= self._RULES_THRESHOLD
 
+    @classmethod
+    def _is_build_request(cls, prompt: str) -> bool:
+        """True when a stream turn needs the tool loop (build/dice/combat).
+
+        Deliberately narrow: it must contain a build/dice verb *and* a
+        generation noun, or an explicit roll/strike verb, so ordinary
+        narration ("I attack the goblin" is play, not a tool request — the
+        solo loop resolves those) does not pay for a ReAct round-trip.
+        """
+        text = prompt or ""
+        if re.search(r"\b(roll|strike|attack)\b.*\b(d20|d\d+|dice)\b", text, re.IGNORECASE):
+            return True
+        return bool(
+            re.search(
+                r"\b(build|create|generate|make|summon)\b.*\b(npc|monster|boss|encounter|character|loot|item|map|world|campaign)\b",
+                text,
+                re.IGNORECASE,
+            )
+        )
+
     def _retrieval_confident(self, context: list[dict] | None, prompt: str) -> bool:
         """Did retrieval actually find the rule the player asked about?
 
@@ -452,7 +596,7 @@ class LLMOrchestrator:
                 prompt = self._build_rag_prompt(prompt, context, edition, mode, history)
 
             # Prepare tool definitions for Ollama
-            tools = RULES_LAWYER_TOOLS + NPC_COMPILER_TOOLS + [
+            tools = RULES_LAWYER_TOOLS + NPC_COMPILER_TOOLS + SOLO_LOOP_TOOLS + [
                 {
                     "type": "function",
                     "function": {
@@ -601,6 +745,180 @@ class LLMOrchestrator:
                 )
             elif tool_name == "create_npc":
                 return await self.npc_compiler.create_npc(arguments["concept"])
+            elif tool_name == "build_npc":
+                # Richer alias for create_npc: the validated build result
+                # (stat block + source/attempts/errors) instead of the bare
+                # stat block, so the GM can tell an LLM build from the
+                # template fallback.
+                result = await self.npc_compiler.build(arguments["concept"])
+                return {
+                    "valid": result.valid,
+                    "npc": dict(result.npc.__dict__) if result.npc else None,
+                    "source": result.source,
+                    "attempts": result.attempts,
+                    "errors": result.errors,
+                }
+            elif tool_name == "roll_dice":
+                from app.agents.dice_utils import roll_dice
+
+                total, rolls, kept = roll_dice(arguments["notation"])
+                return {
+                    "notation": arguments["notation"],
+                    "total": total,
+                    "rolls": rolls,
+                    "kept": kept,
+                }
+            elif tool_name == "resolve_strike":
+                from app.agents.combat_tracker import CombatTrackerAgent
+
+                result = CombatTrackerAgent.resolve_strike(
+                    attack_roll=int(arguments["attack_roll"]),
+                    target_ac=int(arguments["target_ac"]),
+                    damage_roll=int(arguments["damage_roll"]),
+                    target_hp=int(arguments["target_hp"]),
+                    target_temp_hp=int(arguments.get("target_temp_hp", 0) or 0),
+                )
+                return _tool_result_dict(result)
+            elif tool_name == "end_turn":
+                from app.agents.combat_tracker import CombatTrackerAgent
+
+                conditions = arguments.get("conditions") or []
+                updated, notes, damage_taken = CombatTrackerAgent.end_of_turn(
+                    conditions, current_hp=int(arguments.get("current_hp", 0) or 0)
+                )
+                return {
+                    "conditions": updated,
+                    "notes": notes,
+                    "damage_taken": damage_taken,
+                }
+            elif tool_name == "build_monster":
+                from app.agents.monster_builder import MonsterBuilderAgent
+
+                agent = MonsterBuilderAgent(self.npc_compiler.ollama)
+                result = await agent.build(
+                    arguments["prompt"],
+                    level=arguments.get("level"),
+                    elite=bool(arguments.get("elite", False)),
+                )
+                return {
+                    "valid": result.valid,
+                    "monster": (
+                        result.monster.model_dump(mode="python")
+                        if result.monster
+                        else None
+                    ),
+                    "attempts": result.attempts,
+                    "errors": result.errors,
+                }
+            elif tool_name == "generate_loot":
+                from app.agents.loot_generator import LootGeneratorAgent
+
+                agent = LootGeneratorAgent(self.npc_compiler.ollama, self.rules_lawyer)
+                result = await agent.build(arguments["prompt"])
+                return {
+                    "valid": result.valid,
+                    "item": (
+                        result.item.model_dump(mode="python") if result.item else None
+                    ),
+                    "craft_dc": result.craft_dc,
+                    "attempts": result.attempts,
+                    "errors": result.errors,
+                }
+            elif tool_name == "generate_map":
+                from app.agents.map_maker import MapMakerAgent
+
+                agent = MapMakerAgent(self.npc_compiler.ollama)
+                c_heroes, c_monsters, c_npcs, c_loot = (
+                    MapMakerAgent.entities_from_campaign(self.repo, campaign_id)
+                )
+                result = await agent.build(
+                    arguments["prompt"],
+                    grid_enabled=bool(arguments.get("grid_enabled", True)),
+                    heroes=arguments.get("heroes") or (c_heroes if c_heroes else None),
+                    monsters=arguments.get("monsters") or (c_monsters if c_monsters else None),
+                    npcs=arguments.get("npcs") or (c_npcs if c_npcs else None),
+                    loot=arguments.get("loot") or (c_loot if c_loot else None),
+                )
+                scene = result.scene
+                return {
+                    "valid": result.valid,
+                    "layout": (
+                        {
+                            "width": result.layout.width,
+                            "height": result.layout.height,
+                            "rooms": [
+                                {
+                                    "x": r.x,
+                                    "y": r.y,
+                                    "w": r.w,
+                                    "h": r.h,
+                                    "name": r.name,
+                                }
+                                for r in result.layout.rooms
+                            ],
+                        }
+                        if result.layout
+                        else None
+                    ),
+                    "scene": (
+                        {
+                            "grid": {"w": scene.grid.w, "h": scene.grid.h, "tile_m": scene.grid.tile_m},
+                            "heightmap": scene.heightmap,
+                            "zones": [
+                                {"name": z.name, "biome": z.biome, "rect": list(z.rect)}
+                                for z in scene.zones
+                            ],
+                            "props": [
+                                {"type": p.type, "x": p.x, "y": p.y, "rot": p.rot}
+                                for p in scene.props
+                            ],
+                            "lights": [
+                                {"x": l.x, "y": l.y, "color": l.color, "radius_m": l.radius_m}
+                                for l in scene.lights
+                            ],
+                            "walkable": scene.walkable,
+                            "doors": [
+                                {
+                                    "x": d.x,
+                                    "y": d.y,
+                                    "orientation": d.orientation,
+                                    "kind": d.kind,
+                                }
+                                for d in scene.doors
+                            ],
+                            "corridors": [
+                                {"cells": [[cx, cy] for cx, cy in c.cells]}
+                                for c in scene.corridors
+                            ],
+                            "spawn": (
+                                {"x": scene.spawn.x, "y": scene.spawn.y}
+                                if scene.spawn is not None
+                                else None
+                            ),
+                            "exit": (
+                                {"x": scene.exit.x, "y": scene.exit.y}
+                                if scene.exit is not None
+                                else None
+                            ),
+                            "tokens": [
+                                {
+                                    "id": t.id,
+                                    "name": t.name,
+                                    "kind": t.kind,
+                                    "x": t.x,
+                                    "y": t.y,
+                                    "z": t.z,
+                                    "color": t.color,
+                                }
+                                for t in scene.tokens
+                            ],
+                            "connected": scene.connected,
+                        }
+                        if scene
+                        else None
+                    ),
+                    "error": result.error,
+                }
             elif tool_name == "save_npc_to_db":
                 return await self.npc_compiler.save_npc_to_db(arguments["npc_json"], campaign_id)
             elif tool_name == "level_up":
@@ -667,6 +985,29 @@ class LLMOrchestrator:
             # Recorded with any abstention so the miss log shows *how* confident
             # the router was, which is what makes the log actionable.
             route_score = self._rules_score(original_prompt) if rules_turn else None
+
+            # Build/generation requests in live chat used to fall through to
+            # the plain narrator stream below, which has no tools at all — the
+            # GM could not roll, build, or resolve anything mid-conversation
+            # even though /ask could. Route those through the same ReAct tool
+            # loop generate() uses, then stream the answer in chunks. Pure
+            # rules questions still go through stream_adjudication below so
+            # BP-08 citation fidelity is preserved.
+            if self._is_build_request(original_prompt):
+                tools = (
+                    RULES_LAWYER_TOOLS
+                    + NPC_COMPILER_TOOLS
+                    + SOLO_LOOP_TOOLS
+                )
+                answer = await self._agentic_chat(
+                    prompt, system, original_prompt, edition, tools, campaign_id
+                )
+                if answer:
+                    for chunk in _sentence_chunks(answer):
+                        acc.append(chunk)
+                        yield ("ollama", chunk)
+                    self._record_live_note(original_prompt, answer, campaign_id)
+                return
 
             if rules_turn:
                 # BP-08 Pillar B: forward the Rules Lawyer's answer verbatim.

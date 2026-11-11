@@ -97,6 +97,17 @@ object GodTags {
     const val CAMPAIGN_SUMMARIZE = "pg:campaign:summarize"
 
     const val LOOT_STATUS = "pg:loot:status"
+    const val GOD_MODE_CHAT = "pg:god:mode:chat"
+    const val GOD_MODE_LOOT = "pg:god:mode:loot"
+    const val GM_STATE_CARD = "pg:gm:state"
+    const val GM_TRANSCRIPT = "pg:gm:transcript"
+    const val GM_CHOICES = "pg:gm:choices"
+    const val GM_INPUT = "pg:gm:input"
+    const val GM_SEND_TURN = "pg:gm:send:turn"
+    const val GM_SEND_ASK = "pg:gm:send:ask"
+    const val GM_STATUS = "pg:gm:status"
+
+    fun gmChoice(index: Int): String = "pg:gm:choice:$index"
 
     fun settingsToggle(key: String): String = "pg:settings:toggle:$key"
     fun settingsTrack(key: String): String = "pg:settings:track:$key"

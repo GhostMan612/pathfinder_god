@@ -298,9 +298,15 @@ class ContinuityKeeper:
         except Exception:
             logger.warning("chronicle refresh failed", exc_info=True)
 
-    def search_sessions(self, query: str, campaign_id: int = 1, limit: int = 5) -> list[dict]:
-        """Recall past sessions by keyword (long-campaign memory)."""
-        return self.repo.search_sessions(query=query, campaign_id=campaign_id, limit=limit)
+    def search_sessions(
+        self,
+        query: str,
+        campaign_id: int = 1,
+        limit: int = 5,
+        embedder: object | None = None,
+    ) -> list[dict]:
+        """Recall past sessions (hybrid semantic + lexical memory)."""
+        return self.repo.search_sessions(query=query, campaign_id=campaign_id, limit=limit, embedder=embedder)
 
     async def _extract_entities(self, log: str) -> ExtractedEntities:
         prompt = f"{ENTITY_EXTRACTION_SYSTEM}\n\nLog:\n{log}\n\nReturn ONLY valid JSON."

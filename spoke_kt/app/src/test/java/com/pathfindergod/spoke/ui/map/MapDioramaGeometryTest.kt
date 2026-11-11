@@ -5,11 +5,14 @@
 
 package com.pathfindergod.spoke.ui.map
 
+import com.pathfindergod.spoke.data.network.MapCorridorDto
+import com.pathfindergod.spoke.data.network.MapDoorDto
 import com.pathfindergod.spoke.data.network.MapFogDto
 import com.pathfindergod.spoke.data.network.MapGridDto
 import com.pathfindergod.spoke.data.network.MapLightDto
 import com.pathfindergod.spoke.data.network.MapPropDto
 import com.pathfindergod.spoke.data.network.MapSceneDto
+import com.pathfindergod.spoke.data.network.MapTokenDto
 import com.pathfindergod.spoke.data.network.MapZoneDto
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -135,5 +138,38 @@ class MapDioramaGeometryTest {
         assertArrayEquals(floatArrayOf(0f, 0f, 0f), MapPalette.parseColor("#000000"), 0.0001f)
         assertEquals(null, MapPalette.parseColor("ff9a3"))
         assertEquals(null, MapPalette.parseColor("#zzzzzz"))
+    }
+
+    @Test
+    fun builds3dTokensDoorsAndCorridorTiles() {
+        val dto = scene().copy(
+            corridors = listOf(MapCorridorDto(cells = listOf(listOf(0, 0), listOf(3, 2)))),
+            doors = listOf(
+                MapDoorDto(x = 1, y = 1, orientation = "ew", kind = "wood"),
+                MapDoorDto(x = 2, y = 2, orientation = "ns", kind = "secret"),
+                MapDoorDto(x = 99, y = 99, orientation = "ew", kind = "wood"),
+            ),
+            tokens = listOf(
+                MapTokenDto(id = "hero-1", name = "SAMPLE HERO", kind = "hero", x = 1, y = 1),
+                MapTokenDto(id = "monster-1", name = "SAMPLE GOBLIN", kind = "monster", x = 2, y = 2),
+                MapTokenDto(id = "npc-1", name = "SAMPLE ELDER", kind = "npc", x = 1, y = 2),
+                MapTokenDto(id = "loot-1", name = "Sunblade", kind = "loot", x = 0, y = 0),
+                MapTokenDto(id = "bad-1", name = "Unknown", kind = "spaceship", x = 1, y = 1),
+                MapTokenDto(id = "oob-1", name = "Out", kind = "monster", x = 99, y = 99),
+            ),
+        )
+        val geometry = MapGeometryBuilder.build(dto)
+        assertEquals(6, geometry.tileCount)
+        assertEquals(2, geometry.doorCount)
+        assertEquals(4, geometry.tokenCount)
+        assertTrue(geometry.batches.any { it.kind == MapSurfaceKind.TOKEN_HERO })
+        assertTrue(geometry.batches.any { it.kind == MapSurfaceKind.TOKEN_MONSTER })
+        assertTrue(geometry.batches.any { it.kind == MapSurfaceKind.TOKEN_NPC })
+        assertTrue(geometry.batches.any { it.kind == MapSurfaceKind.TOKEN_LOOT })
+        for (batch in geometry.batches) {
+            for (index in batch.indices) {
+                assertTrue(index in 0 until batch.vertexCount)
+            }
+        }
     }
 }

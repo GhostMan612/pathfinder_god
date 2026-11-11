@@ -111,3 +111,91 @@ class TestBuildScene:
         assert walls >= 8
         gm_b64, player_b64 = _agent().render(layout, grid_enabled=False)
         assert gm_b64 is not None and player_b64 is not None
+
+
+class TestPlayableMapAndTokens:
+    def test_corridors_doors_walkable_spawn_exit_and_connectivity(self):
+        layout = _agent()._parse_layout(LAYOUT_JSON)
+        assert layout is not None
+        scene = MapMakerAgent.derive_scene(layout)
+        assert scene.connected is True
+        assert scene.spawn is not None
+        assert scene.exit is not None
+        assert (scene.spawn.x, scene.spawn.y) != (scene.exit.x, scene.exit.y)
+        assert scene.walkable[scene.spawn.y][scene.spawn.x] == 1
+        assert scene.walkable[scene.exit.y][scene.exit.x] == 1
+        assert len(scene.corridors) >= 1
+        assert len(scene.doors) >= 2
+        for door in scene.doors:
+            assert door.orientation in ("ns", "ew")
+            assert scene.walkable[door.y][door.x] == 1
+        reachable = MapMakerAgent._reachable_from(
+            (scene.spawn.x, scene.spawn.y), scene.walkable
+        )
+        assert (scene.exit.x, scene.exit.y) in reachable
+        for tok in scene.tokens:
+            assert scene.walkable[tok.y][tok.x] == 1
+            assert (tok.x, tok.y) in reachable
+            assert tok.kind in ("hero", "monster", "npc", "loot")
+            assert tok.z > 0
+
+    def test_links_encounters_npcs_and_loot_to_3d_tokens(self):
+        layout = _agent()._parse_layout(LAYOUT_JSON)
+        assert layout is not None
+        scene = MapMakerAgent.derive_scene(
+            layout,
+            heroes=["SAMPLE HERO"],
+            monsters=["SAMPLE GOBLIN", "SAMPLE WOLF"],
+            npcs=["SAMPLE ELDER"],
+            loot=["Runed Greatsword", "Ruby Chalice"],
+        )
+        by_kind: dict[str, list[str]] = {}
+        coords: set[tuple[int, int]] = set()
+        for tok in scene.tokens:
+            by_kind.setdefault(tok.kind, []).append(tok.name)
+            coords.add((tok.x, tok.y))
+            assert scene.walkable[tok.y][tok.x] == 1
+        assert by_kind["hero"] == ["SAMPLE HERO"]
+        assert by_kind["monster"] == ["SAMPLE GOBLIN", "SAMPLE WOLF"]
+        assert by_kind["npc"] == ["SAMPLE ELDER"]
+        assert by_kind["loot"] == ["Runed Greatsword", "Ruby Chalice"]
+        assert len(coords) == len(scene.tokens)
+        hero_tok = next(t for t in scene.tokens if t.kind == "hero")
+        assert (hero_tok.x, hero_tok.y) == (scene.spawn.x, scene.spawn.y)
+
+    @pytest.mark.asyncio
+    async def test_campaign_entities_linked_into_map_tokens(self, tmp_path):
+        from app.db.repository import CampaignRepository
+
+        repo = CampaignRepository(str(tmp_path / "campaign.db"))
+        campaign = repo.create_campaign("SAMPLE CAMPAIGN")
+        cid = campaign.id
+        repo.upsert_party_member(cid, name="SAMPLE HERO", class_="Fighter", level=2)
+        repo.add_combatant(cid, name="SAMPLE GOBLIN", kind="monster", hp=12, max_hp=12, ac=16)
+        repo.upsert_npc(cid, name="SAMPLE SHOPKEEP", role="ally")
+        repo.upsert_quest(
+            cid,
+            name="Recover the Relic",
+            status="active",
+            objectives=[{"description": "Open the vault"}],
+            rewards=[{"description": "Sunblade"}],
+        )
+        heroes, monsters, npcs, loot = MapMakerAgent.entities_from_campaign(repo, cid)
+        assert heroes == ["SAMPLE HERO"]
+        assert monsters == ["SAMPLE GOBLIN"]
+        assert npcs == ["SAMPLE SHOPKEEP"]
+        assert loot == ["Sunblade"]
+        result = await _agent().build(
+            "A tavern and vault",
+            heroes=heroes,
+            monsters=monsters,
+            npcs=npcs,
+            loot=loot,
+        )
+        assert result.valid is True
+        assert result.scene is not None
+        names = {(t.kind, t.name) for t in result.scene.tokens}
+        assert ("hero", "SAMPLE HERO") in names
+        assert ("monster", "SAMPLE GOBLIN") in names
+        assert ("npc", "SAMPLE SHOPKEEP") in names
+        assert ("loot", "Sunblade") in names

@@ -36,7 +36,8 @@ import com.pathfindergod.spoke.ui.dice.DiceScreen
 import com.pathfindergod.spoke.ui.dice.Die
 import com.pathfindergod.spoke.ui.encounter.EncounterScreen
 import com.pathfindergod.spoke.ui.home.HomeDashboardScreen
-import com.pathfindergod.spoke.ui.loot.LootScreen
+import com.pathfindergod.spoke.ui.loot.GodScreen
+import com.pathfindergod.spoke.ui.loot.rememberGmChatViewModel
 import com.pathfindergod.spoke.ui.loot.rememberLootViewModel
 import com.pathfindergod.spoke.ui.map.MapListScreen
 import com.pathfindergod.spoke.ui.map.MapViewerScreen
@@ -178,7 +179,10 @@ fun NavGraphBuilder.appNavGraph(
         route = Destinations.God.route,
         deepLinks = listOf(navDeepLink { uriPattern = Destinations.God.deepLinkPattern }),
     ) {
-        LootScreen(viewModel = rememberLootViewModel())
+        GodScreen(
+            gmViewModel = rememberGmChatViewModel(),
+            lootViewModel = rememberLootViewModel(),
+        )
     }
 
     composable(

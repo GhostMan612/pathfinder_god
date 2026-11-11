@@ -5,8 +5,10 @@
 
 package com.pathfindergod.spoke.ui.map
 
+import com.pathfindergod.spoke.data.network.MapDoorDto
 import com.pathfindergod.spoke.data.network.MapPropDto
 import com.pathfindergod.spoke.data.network.MapSceneDto
+import com.pathfindergod.spoke.data.network.MapTokenDto
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -22,6 +24,10 @@ enum class MapSurfaceKind {
     STONE,
     METAL,
     FLAME,
+    TOKEN_HERO,
+    TOKEN_MONSTER,
+    TOKEN_NPC,
+    TOKEN_LOOT,
 }
 
 data class MapGeometryBatch(
@@ -43,6 +49,8 @@ data class MapGeometry(
     val propCount: Int,
     val radiusM: Float,
     val tileM: Float,
+    val doorCount: Int = 0,
+    val tokenCount: Int = 0,
 )
 
 object MapGeometryBuilder {
@@ -51,8 +59,11 @@ object MapGeometryBuilder {
     const val MAX_LEVEL = 8
     const val MAX_CELLS = 2_500
     const val MAX_PROPS = 8
+    const val MAX_DOORS = 16
+    const val MAX_TOKENS = 24
 
     private val PROP_TYPES = setOf("crate", "brazier", "pillar", "chest", "barrel", "altar")
+    private val TOKEN_KINDS = setOf("hero", "monster", "npc", "loot")
 
     fun build(scene: MapSceneDto): MapGeometry {
         val width = scene.grid.w.coerceIn(1, 50)
@@ -68,6 +79,16 @@ object MapGeometryBuilder {
             val row = scene.heightmap.getOrNull(y) ?: continue
             for (x in 0 until width) {
                 levels[y * width + x] = (row.getOrNull(x) ?: 0).coerceIn(0, MAX_LEVEL)
+            }
+        }
+        for (corridor in scene.corridors) {
+            for (cell in corridor.cells) {
+                if (cell.size < 2) continue
+                val cx = cell[0]
+                val cy = cell[1]
+                if (cx in 0 until width && cy in 0 until height && levels[cy * width + cx] == 0) {
+                    levels[cy * width + cx] = 1
+                }
             }
         }
 
@@ -132,6 +153,30 @@ object MapGeometryBuilder {
             addProp(::mesh, prop, cx, baseY, cz)
         }
 
+        var doorCount = 0
+        for (door in scene.doors.take(MAX_DOORS)) {
+            if (door.x !in 0 until width || door.y !in 0 until height) continue
+            doorCount++
+            val lvl = levelAt(door.x, door.y)
+            val baseY = (if (lvl in 1..2) lvl else 1) * LEVEL_M
+            val cx = (door.x - width / 2f + 0.5f) * tile
+            val cz = (door.y - height / 2f + 0.5f) * tile
+            addDoor(::mesh, door, cx, baseY, cz)
+        }
+
+        var tokenCount = 0
+        for (token in scene.tokens.take(MAX_TOKENS)) {
+            val kindKey = token.kind.lowercase()
+            if (kindKey !in TOKEN_KINDS) continue
+            if (token.x !in 0 until width || token.y !in 0 until height) continue
+            tokenCount++
+            val lvl = levelAt(token.x, token.y)
+            val baseY = maxOf(1, lvl) * LEVEL_M
+            val cx = (token.x - width / 2f + 0.5f) * tile
+            val cz = (token.y - height / 2f + 0.5f) * tile
+            addToken(::mesh, token, kindKey, cx, baseY, cz)
+        }
+
         val batches = meshes.values
             .mapNotNull { it.toBatch() }
             .sortedBy { it.kind.ordinal }
@@ -144,6 +189,8 @@ object MapGeometryBuilder {
             propCount = propCount,
             radiusM = sqrt(halfX * halfX + halfZ * halfZ) + tile,
             tileM = tile,
+            doorCount = doorCount,
+            tokenCount = tokenCount,
         )
     }
 
@@ -252,6 +299,110 @@ object MapGeometryBuilder {
                     cx, baseY + 0.55f * scale, cz,
                     0.18f * scale, 0.30f * scale, 8, yaw,
                     topRadius = 0.02f,
+                )
+            }
+        }
+    }
+
+    private fun addDoor(
+        mesh: (MapSurfaceKind) -> MeshBuilder,
+        door: MapDoorDto,
+        cx: Float,
+        baseY: Float,
+        cz: Float,
+    ) {
+        val yaw = if (door.orientation.equals("ns", ignoreCase = true)) {
+            0f
+        } else {
+            (PI / 2.0).toFloat()
+        }
+        val leafKind = if (door.kind.equals("secret", ignoreCase = true)) {
+            MapSurfaceKind.STONE
+        } else {
+            MapSurfaceKind.WOOD
+        }
+        mesh(MapSurfaceKind.STONE).box(
+            cx, baseY + 0.92f, cz,
+            0.40f, 0.08f, 0.12f,
+            yaw,
+        )
+        mesh(leafKind).box(
+            cx, baseY + 0.42f, cz,
+            0.34f, 0.42f, 0.07f,
+            yaw,
+        )
+        mesh(MapSurfaceKind.METAL).box(
+            cx, baseY + 0.42f, cz,
+            0.06f, 0.06f, 0.09f,
+            yaw,
+        )
+    }
+
+    private fun addToken(
+        mesh: (MapSurfaceKind) -> MeshBuilder,
+        token: MapTokenDto,
+        kindKey: String,
+        cx: Float,
+        baseY: Float,
+        cz: Float,
+    ) {
+        val yaw = ((token.x * 31 + token.y * 17) and 3) * (PI.toFloat() / 2f)
+        val surfaceKind = when (kindKey) {
+            "hero" -> MapSurfaceKind.TOKEN_HERO
+            "monster" -> MapSurfaceKind.TOKEN_MONSTER
+            "npc" -> MapSurfaceKind.TOKEN_NPC
+            else -> MapSurfaceKind.TOKEN_LOOT
+        }
+        mesh(MapSurfaceKind.METAL).cylinder(
+            cx, baseY, cz,
+            0.28f, 0.06f, 12, yaw,
+        )
+        when (kindKey) {
+            "hero" -> {
+                mesh(surfaceKind).cylinder(
+                    cx, baseY + 0.06f, cz,
+                    0.20f, 0.62f, 12, yaw,
+                    topRadius = 0.14f,
+                )
+                mesh(surfaceKind).box(
+                    cx, baseY + 0.78f, cz,
+                    0.14f, 0.12f, 0.14f,
+                    yaw,
+                )
+            }
+            "monster" -> {
+                mesh(surfaceKind).cylinder(
+                    cx, baseY + 0.06f, cz,
+                    0.24f, 0.58f, 10, yaw,
+                    topRadius = 0.18f,
+                )
+                mesh(surfaceKind).cylinder(
+                    cx, baseY + 0.64f, cz,
+                    0.18f, 0.28f, 8, yaw,
+                    topRadius = 0.01f,
+                )
+            }
+            "npc" -> {
+                mesh(surfaceKind).cylinder(
+                    cx, baseY + 0.06f, cz,
+                    0.18f, 0.56f, 12, yaw,
+                    topRadius = 0.12f,
+                )
+                mesh(surfaceKind).cylinder(
+                    cx, baseY + 0.62f, cz,
+                    0.11f, 0.18f, 10, yaw,
+                )
+            }
+            else -> {
+                mesh(surfaceKind).box(
+                    cx, baseY + 0.20f, cz,
+                    0.20f, 0.14f, 0.16f,
+                    yaw,
+                )
+                mesh(surfaceKind).cylinder(
+                    cx, baseY + 0.34f, cz,
+                    0.14f, 0.24f, 6, yaw,
+                    topRadius = 0.01f,
                 )
             }
         }

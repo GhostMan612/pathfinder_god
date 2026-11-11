@@ -79,4 +79,38 @@ class MapSceneCodecTest {
         val decoded = MapSceneCodec.decode(encoded)
         assertEquals(scene, decoded)
     }
+
+    @Test
+    fun decodesPlayableTokensDoorsCorridorsSpawnAndExit() {
+        val playable = """
+            {
+              "grid": {"w": 6, "h": 5, "tile_m": 1.0},
+              "heightmap": [[0,0,0,0,0,0],[0,3,3,3,3,0],[0,3,1,1,1,0],[0,3,1,1,3,0],[0,3,3,3,3,0]],
+              "walkable": [[0,0,0,0,0,0],[0,0,0,0,0,0],[0,0,1,1,1,0],[0,0,1,1,0,0],[0,0,0,0,0,0]],
+              "doors": [{"x": 4, "y": 2, "orientation": "ew", "kind": "wood"}],
+              "corridors": [{"cells": [[4, 2], [5, 2]]}],
+              "spawn": {"x": 2, "y": 2},
+              "exit": {"x": 3, "y": 3},
+              "tokens": [
+                {"id": "hero-1", "name": "SAMPLE HERO", "kind": "hero", "x": 2, "y": 2, "z": 0.5, "color": "#3b82f6"},
+                {"id": "monster-1", "name": "SAMPLE GOBLIN", "kind": "monster", "x": 3, "y": 2, "z": 0.5, "color": "#dc2626"},
+                {"id": "npc-1", "name": "SAMPLE ELDER", "kind": "npc", "x": 2, "y": 3, "z": 0.5, "color": "#22c55e"},
+                {"id": "loot-1", "name": "Sunblade", "kind": "loot", "x": 3, "y": 3, "z": 0.5, "color": "#eab308"}
+              ],
+              "connected": true
+            }
+        """.trimIndent()
+        val scene = MapSceneCodec.decode(playable)
+        assertNotNull(scene)
+        scene!!
+        assertTrue(scene.connected)
+        assertEquals(2, scene.spawn!!.x)
+        assertEquals(3, scene.exit!!.y)
+        assertEquals(1, scene.doors.size)
+        assertEquals("ew", scene.doors.single().orientation)
+        assertEquals(1, scene.corridors.size)
+        assertEquals(4, scene.tokens.size)
+        assertEquals(listOf("hero", "monster", "npc", "loot"), scene.tokens.map { it.kind })
+        assertEquals(scene, MapSceneCodec.decode(MapSceneCodec.encode(scene)))
+    }
 }

@@ -28,6 +28,67 @@ class StrikeResult:
     notes: str
 
 
+@dataclass
+class RecoveryResult:
+    """Outcome of a PF2e Remaster recovery check (DC 10 + dying value).
+
+    Degrees of success: critical success (beat the DC by 10+, or a natural
+    20) reduces Dying by 2 and stabilises at 0; success reduces Dying by 1;
+    failure increases Dying by 1; critical failure (miss the DC by 10+, or a
+    natural 1) increases Dying by 2. Reaching Dying 4 means death.
+    """
+
+    dying: int
+    dead: bool
+    stabilized: bool
+    outcome: str
+    roll: int
+    dc: int
+    notes: str
+
+
+def dying_value(conditions: list[dict[str, Any]]) -> int:
+    for cond in conditions or []:
+        if str(cond.get("name", "")).lower() == "dying":
+            try:
+                return int(cond.get("value", 0) or 0)
+            except (TypeError, ValueError):
+                return 0
+    return 0
+
+
+def wounded_value(conditions: list[dict[str, Any]]) -> int:
+    for cond in conditions or []:
+        if str(cond.get("name", "")).lower() == "wounded":
+            try:
+                return int(cond.get("value", 0) or 0)
+            except (TypeError, ValueError):
+                return 0
+    return 0
+
+
+def gain_dying(
+    conditions: list[dict[str, Any]], wounded: int | None = None
+) -> tuple[list[dict[str, Any]], bool]:
+    """Apply Dying to a creature that just dropped to 0 HP.
+
+    PF2e Remaster: a wounded creature that gains the dying condition adds
+    its wounded value to the dying value (here: Dying starts at wounded + 1),
+    capped at 4 — and Dying 4 is dead. ``wounded`` defaults to the Wounded
+    value already present in ``conditions``.
+    """
+    if wounded is None:
+        wounded = wounded_value(conditions)
+    value = min(4, max(1, int(wounded or 0) + 1))
+    updated = [dict(c) for c in (conditions or [])]
+    for cond in updated:
+        if str(cond.get("name", "")).lower() == "dying":
+            cond["value"] = value
+            return updated, value >= 4
+    updated.append({"name": "Dying", "value": value})
+    return updated, value >= 4
+
+
 class CombatTrackerAgent:
     """Deterministic combat resolution per PF2e Remaster."""
 
@@ -91,16 +152,92 @@ class CombatTrackerAgent:
         )
 
     @staticmethod
+    def recovery_check(
+        dying: int,
+        wounded: int = 0,
+        roll: int | None = None,
+        rng: random.Random | None = None,
+    ) -> RecoveryResult:
+        """Make a PF2e Remaster recovery check for a dying creature.
+
+        ``roll`` is an injected d20 result (tests / seeded replay); otherwise
+        the roll comes from ``rng`` or the module random. ``wounded`` is
+        accepted for symmetry with gain_dying and recorded in the notes, but
+        the check itself only moves the dying value — wounded only matters
+        when Dying is *gained*, not when recovering.
+        """
+        dying = max(0, int(dying or 0))
+        dc = 10 + dying
+        if roll is None:
+            roll = (rng or random).randint(1, 20)
+        roll = int(roll)
+        margin = roll - dc
+        # Natural 20 improves the degree by one step; natural 1 worsens it.
+        if roll == 20:
+            outcome = "Critical Success"
+        elif roll == 1:
+            outcome = "Critical Failure"
+        elif margin >= 10:
+            outcome = "Critical Success"
+        elif margin >= 0:
+            outcome = "Success"
+        elif margin <= -10:
+            outcome = "Critical Failure"
+        else:
+            outcome = "Failure"
+
+        if outcome == "Critical Success":
+            new_dying = max(0, dying - 2)
+            stabilized = new_dying == 0
+            notes = f"Recovery check {roll} vs DC {dc}: critical success, Dying reduced to {new_dying}."
+        elif outcome == "Success":
+            new_dying = max(0, dying - 1)
+            stabilized = new_dying == 0
+            notes = f"Recovery check {roll} vs DC {dc}: success, Dying reduced to {new_dying}."
+        elif outcome == "Failure":
+            new_dying = dying + 1
+            stabilized = False
+            notes = f"Recovery check {roll} vs DC {dc}: failure, Dying increased to {new_dying}."
+        else:
+            new_dying = dying + 2
+            stabilized = False
+            notes = f"Recovery check {roll} vs DC {dc}: critical failure, Dying increased to {new_dying}."
+
+        dead = new_dying >= 4
+        if dead:
+            new_dying = 4
+            notes += " Dying 4 — the creature is dead."
+        if stabilized:
+            notes += " Stabilized."
+        if wounded:
+            notes += f" (Wounded {wounded}.)"
+        return RecoveryResult(
+            dying=new_dying,
+            dead=dead,
+            stabilized=stabilized,
+            outcome=outcome,
+            roll=roll,
+            dc=dc,
+            notes=notes,
+        )
+
+    @staticmethod
     def end_of_turn(
-        conditions: list[dict[str, Any]], current_hp: int = 0
+        conditions: list[dict[str, Any]],
+        current_hp: int = 0,
+        rng: random.Random | None = None,
     ) -> tuple[list[dict[str, Any]], str, int]:
         """Process end-of-turn condition updates per PF2e Remaster.
 
         - Persistent Damage: roll the dice, then make the DC 15 flat check
           BEFORE applying the damage; success ends the condition.
-        - Dying: increments by 1 each end-of-turn while at 0 HP. Recovery
-          checks and the Dying-4 death threshold are not implemented.
-        - Wounded: recorded as-is; it does not modify Dying (not implemented).
+        - Dying: increments by 1 each end-of-turn while at 0 HP. At Dying 4
+          the creature is dead (a Dead condition is appended so callers can
+          see it in the returned list). Recovery checks are NOT done here —
+          they happen at the start of the dying creature's own turn via
+          recovery_check().
+        - Wounded: when a creature at 0 HP gains Dying here, the new Dying
+          value is wounded + 1 (capped at 4) via gain_dying().
         - Frightened: value > 1 -> decrement by 1; value == 1 -> remove.
         - Duration-based conditions: decrement; remove if 0.
 
@@ -110,6 +247,8 @@ class CombatTrackerAgent:
                 - value (int): Condition value/severity.
                 - duration_rounds (int, optional): Remaining rounds.
             current_hp: Current HP of the creature (for damage and Dying checks).
+            rng: Optional random.Random for the persistent-damage flat check
+                (seeded replay); defaults to module random.
 
         Returns:
             Tuple of (updated conditions list, notes string, damage taken).
@@ -117,6 +256,7 @@ class CombatTrackerAgent:
         updated = []
         notes_parts = []
         hp = max(0, int(current_hp))
+        dead = False
 
         for cond in conditions:
             name = cond.get("name", "")
@@ -128,7 +268,9 @@ class CombatTrackerAgent:
                 dice_match = re.search(r"(\d+d\d+)", name)
                 pending = 0
                 if dice_match:
-                    pending, _, _ = roll_dice(dice_match.group(1))
+                    # Thread the caller's RNG through so a seeded replay
+                    # reproduces the persistent damage exactly.
+                    pending, _, _ = roll_dice(dice_match.group(1), rng=rng)
                 else:
                     # Persistent damage without dice notation uses the
                     # condition's flat value, e.g. "Persistent Fire 2" = 2.
@@ -146,7 +288,7 @@ class CombatTrackerAgent:
                     notes_parts.append(f"No persistent {display} damage; condition ends.")
                     continue
 
-                flat_check = random.randint(1, 20)
+                flat_check = (rng or random).randint(1, 20)
                 if flat_check >= 15:
                     notes_parts.append(
                         f"Flat check {flat_check} vs DC 15: "
@@ -162,8 +304,11 @@ class CombatTrackerAgent:
 
             elif name.lower() == "dying":
                 if hp <= 0:
-                    value += 1
+                    value = min(4, value + 1)
                     notes_parts.append(f"Dying increased to {value}.")
+                    if value >= 4:
+                        dead = True
+                        notes_parts.append("Dying 4 — the creature is dead.")
 
             elif name.lower() == "wounded":
                 pass
@@ -195,8 +340,20 @@ class CombatTrackerAgent:
         if damage_taken > 0 and hp <= 0 and not any(
             c.get("name", "").lower() == "dying" for c in updated
         ):
-            updated.append({"name": "Dying", "value": 1})
-            notes_parts.append("Dying 1.")
+            # A wounded creature that gains Dying starts at wounded + 1.
+            new_conditions, gained_dead = gain_dying(
+                updated, wounded=wounded_value(conditions)
+            )
+            updated = new_conditions
+            gained = dying_value(updated)
+            notes_parts.append(f"Dying {gained}.")
+            if gained_dead:
+                dead = True
+                notes_parts.append("Dying 4 — the creature is dead.")
+        if dead and not any(
+            c.get("name", "").lower() == "dead" for c in updated
+        ):
+            updated.append({"name": "Dead", "value": 1})
 
         notes = " ".join(notes_parts) if notes_parts else ""
         return updated, notes, damage_taken
