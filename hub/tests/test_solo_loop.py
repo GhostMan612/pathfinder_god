@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -266,6 +267,161 @@ async def test_end_turn_advances_and_end_combat_returns_to_exploration(tmp_path:
     assert ended["active_combatant"] is None
     state = loop.repo.get_solo_state(cid)
     assert state.phase == "exploration" and state.active_combatant_id is None
+
+
+def test_repository_transaction_rolls_back_and_nests(tmp_path: Path) -> None:
+    repo = CampaignRepository(str(tmp_path / "campaign.db"))
+    campaign = repo.create_campaign("SAMPLE CAMPAIGN")
+    # A failure inside rolls the whole unit back.
+    with pytest.raises(RuntimeError, match="boom"), repo.transaction():
+        repo.upsert_location(campaign.id, "SAMPLE TOWN", type_="settlement")
+        raise RuntimeError("boom")
+    assert repo.get_locations(campaign.id) == []
+    # Success commits.
+    with repo.transaction():
+        repo.upsert_location(campaign.id, "SAMPLE TOWN", type_="settlement")
+    assert [loc.name for loc in repo.get_locations(campaign.id)] == [
+        "SAMPLE TOWN"
+    ]
+    # A nested transaction is a no-op: the outer rollback covers it.
+    with pytest.raises(RuntimeError, match="boom"), repo.transaction():
+        repo.upsert_location(campaign.id, "SAMPLE CAVE", type_="dungeon")
+        with repo.transaction():
+            repo.upsert_location(campaign.id, "SAMPLE KEEP", type_="settlement")
+        raise RuntimeError("boom")
+    assert [loc.name for loc in repo.get_locations(campaign.id)] == [
+        "SAMPLE TOWN"
+    ]
+
+
+def test_repository_transactions_are_isolated_between_databases(tmp_path: Path) -> None:
+    first = CampaignRepository(str(tmp_path / "first.db"))
+    second = CampaignRepository(str(tmp_path / "second.db"))
+    first_campaign = first.create_campaign("SAMPLE FIRST CAMPAIGN")
+    second_campaign = second.create_campaign("SAMPLE SECOND CAMPAIGN")
+
+    with first.transaction():
+        first.upsert_location(first_campaign.id, "SAMPLE FIRST TOWN", type_="settlement")
+        # The second repository must not reuse the first repository's
+        # transaction connection, even when campaign ids happen to match.
+        second.upsert_location(second_campaign.id, "SAMPLE SECOND TOWN", type_="settlement")
+
+    assert [loc.name for loc in first.get_locations(first_campaign.id)] == [
+        "SAMPLE FIRST TOWN"
+    ]
+    assert [loc.name for loc in second.get_locations(second_campaign.id)] == [
+        "SAMPLE SECOND TOWN"
+    ]
+
+
+def test_repository_transaction_closes_connection_if_begin_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = CampaignRepository(str(tmp_path / "campaign.db"))
+
+    class FailedBegin:
+        closed = False
+
+        def __init__(self) -> None:
+            self.row_factory = None
+
+        def execute(self, sql: str) -> None:
+            if sql == "BEGIN IMMEDIATE":
+                raise sqlite3.OperationalError("database is locked")
+
+        def close(self) -> None:
+            self.closed = True
+
+    failed = FailedBegin()
+    with monkeypatch.context() as patch:
+        patch.setattr("app.db.repository.sqlite3.connect", lambda path: failed)
+        with pytest.raises(sqlite3.OperationalError, match="locked"), repo.transaction():
+            pytest.fail("transaction should not begin")
+    assert failed.closed
+    # A failed transaction must not leave a context lease behind.
+    assert repo.create_campaign("SAMPLE AFTER FAILURE").name == "SAMPLE AFTER FAILURE"
+
+
+async def test_repository_transaction_rejects_inherited_child_task(tmp_path: Path) -> None:
+    repo = CampaignRepository(str(tmp_path / "campaign.db"))
+    campaign = repo.create_campaign("SAMPLE CAMPAIGN")
+
+    async def child_read() -> None:
+        repo.get_locations(campaign.id)
+
+    with repo.transaction():
+        with pytest.raises(RuntimeError, match="different task or thread"):
+            await asyncio.create_task(child_read())
+        repo.upsert_location(campaign.id, "SAMPLE SAFE TOWN", type_="settlement")
+
+    assert [loc.name for loc in repo.get_locations(campaign.id)] == [
+        "SAMPLE SAFE TOWN"
+    ]
+
+
+async def test_start_combat_rolls_back_on_mid_setup_failure(
+    tmp_path: Path,
+) -> None:
+    loop = _make_loop(tmp_path / "campaign.db")
+    created = await loop.create_campaign(
+        "SAMPLE CAMPAIGN", premise="A quiet valley.", hero_prompt="a brave human fighter"
+    )
+    cid = created["campaign_id"]
+    first = await loop.start_combat(cid, monster_names=["SAMPLE GOBLIN"], seed=3)
+    assert first.phase == "combat"
+    first_encounter = loop.repo.get_active_encounter(cid)
+    assert first_encounter is not None
+    first_names = [c.name for c in loop.repo.get_combatants(cid, active_only=True)]
+
+    # Fail the second start_combat after its writes have begun (the
+    # abandon + new encounter + roster clear all happen before the
+    # monster add). The whole unit must roll back: the first combat's
+    # encounter, roster, and phase must be untouched.
+    original_add = loop.repo.add_combatant
+
+    def _failing_add(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    loop.repo.add_combatant = _failing_add
+    try:
+        with pytest.raises(RuntimeError, match="boom"):
+            await loop.start_combat(cid, monster_names=["SAMPLE ORC"], seed=4)
+    finally:
+        loop.repo.add_combatant = original_add
+
+    assert loop.repo.get_solo_state(cid).phase == "combat"
+    active = loop.repo.get_active_encounter(cid)
+    assert active is not None and active.id == first_encounter.id
+    assert [c.name for c in loop.repo.get_combatants(cid, active_only=True)] == first_names
+
+
+async def test_end_combat_rolls_back_on_failure(tmp_path: Path) -> None:
+    loop = _make_loop(tmp_path / "campaign.db")
+    created = await loop.create_campaign(
+        "SAMPLE CAMPAIGN", premise="A quiet valley.", hero_prompt="a brave human fighter"
+    )
+    cid = created["campaign_id"]
+    await loop.start_combat(cid, monster_names=["SAMPLE GOBLIN"], seed=3)
+    first_encounter = loop.repo.get_active_encounter(cid)
+    assert first_encounter is not None
+
+    original_deactivate = loop.repo.deactivate_combatants
+
+    def _failing_deactivate(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    loop.repo.deactivate_combatants = _failing_deactivate
+    try:
+        with pytest.raises(RuntimeError, match="boom"):
+            await loop.end_combat(cid)
+    finally:
+        loop.repo.deactivate_combatants = original_deactivate
+
+    # The resolve + phase flip happened before the failure, so they must
+    # have rolled back too: still in combat, encounter still active.
+    assert loop.repo.get_solo_state(cid).phase == "combat"
+    active = loop.repo.get_active_encounter(cid)
+    assert active is not None and active.id == first_encounter.id
 
 
 async def test_dying_combatant_recovers_on_their_turn(tmp_path: Path) -> None:

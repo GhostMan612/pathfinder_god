@@ -7,12 +7,15 @@
 Campaign Repository — SQLite CRUD + queries for Campaign & Continuity data.
 """
 
+import asyncio
 import hashlib
 import json
 import logging
 import sqlite3
 import struct
+import threading
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
@@ -247,13 +250,53 @@ class CampaignTurn:
     dice: list[dict]
 
 
+@dataclass(frozen=True)
+class _TransactionLease:
+    """A connection owned by one repository, task, and thread."""
+
+    connection: sqlite3.Connection
+    thread_id: int
+    task: asyncio.Task | None
+
+
+def _current_task() -> asyncio.Task | None:
+    try:
+        return asyncio.current_task()
+    except RuntimeError:
+        # Repository code is also used outside a running event loop.
+        return None
+
+
 class CampaignRepository:
     def __init__(self, db_path: str | None = None):
         self.db_path = db_path or str(settings.data_dir / "campaign.db")
+        # Per-instance ContextVar: two repositories must never silently route
+        # operations to each other's SQLite database within one task.
+        self._active_tx: ContextVar[_TransactionLease | None] = ContextVar(
+            f"pathfinder_tx_{id(self)}", default=None
+        )
         self._init_db()
+
+    def _active_connection(self) -> sqlite3.Connection | None:
+        lease = self._active_tx.get()
+        if lease is None:
+            return None
+        # ContextVars propagate to child asyncio tasks and to_thread workers.
+        # SQLite connections must not be used by an inherited context.
+        if lease.thread_id != threading.get_ident() or lease.task is not _current_task():
+            raise RuntimeError(
+                "repository transaction belongs to a different task or thread"
+            )
+        return lease.connection
 
     @contextmanager
     def _conn(self):
+        active = self._active_connection()
+        if active is not None:
+            # Inside this repository's transaction(): reuse the connection.
+            # The outer transaction owns commit/rollback/close.
+            yield active
+            return
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         # SQLite ignores ON DELETE CASCADE unless foreign keys are enabled per
@@ -267,6 +310,44 @@ class CampaignRepository:
             conn.rollback()
             raise
         finally:
+            conn.close()
+
+    @contextmanager
+    def transaction(self):
+        """Run several repo calls as one atomic unit of work.
+
+        Every repo method called inside shares a single connection and a
+        single commit; any exception rolls the whole unit back. The write
+        lock is taken up front (BEGIN IMMEDIATE) so a concurrent writer
+        waits instead of failing mid-unit. Nested use is a no-op — the
+        outer transaction owns the commit. Do not hold a transaction
+        across an LLM call: the write lock would block every other
+        writer for the duration of the call.
+        """
+        if self._active_connection() is not None:
+            yield
+            return
+        conn = sqlite3.connect(self.db_path)
+        token = None
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys = ON")
+            # Begin may fail (e.g. SQLITE_BUSY). Keep it inside finally so
+            # the connection still closes when no transaction was started.
+            conn.execute("BEGIN IMMEDIATE")
+            token = self._active_tx.set(
+                _TransactionLease(conn, threading.get_ident(), _current_task())
+            )
+            try:
+                yield
+                conn.commit()
+            except BaseException:
+                # Includes asyncio cancellation, not only Exception errors.
+                conn.rollback()
+                raise
+        finally:
+            if token is not None:
+                self._active_tx.reset(token)
             conn.close()
 
     @staticmethod
