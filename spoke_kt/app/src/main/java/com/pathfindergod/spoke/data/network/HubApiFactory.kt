@@ -62,6 +62,8 @@ object HubApiFactory {
         .connectTimeout(CONNECT_SECONDS, TimeUnit.SECONDS)
         .readTimeout(READ_SECONDS, TimeUnit.SECONDS)
         .writeTimeout(WRITE_SECONDS, TimeUnit.SECONDS)
+        // An HTTPS Hub must not silently downgrade to HTTP via redirect.
+        .followSslRedirects(false)
         .connectionPool(
             ConnectionPool(MAX_IDLE_CONNECTIONS, KEEP_ALIVE_MINUTES, TimeUnit.MINUTES),
         )
