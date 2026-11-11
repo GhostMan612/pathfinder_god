@@ -106,14 +106,15 @@ class DiceRoller:
 
         term_regex = re.compile(r"([+-]?)([^+-]+)")
         terms = []
+        cursor = 0
         for m in term_regex.finditer(cleaned):
+            if m.start() != cursor:
+                raise ValueError(f"invalid dice notation: {notation}")
             sign = -1 if m.group(1) == "-" else 1
-            body = m.group(2)
-            if not body:
-                continue
-            terms.append(_parse_body(sign, body))
-        if not terms:
-            raise ValueError("no terms in notation")
+            terms.append(_parse_body(sign, m.group(2)))
+            cursor = m.end()
+        if not terms or cursor != len(cleaned):
+            raise ValueError(f"invalid dice notation: {notation}")
         return terms
 
 
@@ -137,6 +138,10 @@ def _parse_body(sign: int, body: str) -> DiceTerm:
         keep_highest = int(m.group(4))
     elif kind == "kl":
         keep_lowest = int(m.group(4))
+    if keep_highest != -1 and not (1 <= keep_highest <= count):
+        raise ValueError(f"invalid keep-highest count for {body}")
+    if keep_lowest != -1 and not (1 <= keep_lowest <= count):
+        raise ValueError(f"invalid keep-lowest count for {body}")
 
     return DiceTerm(
         sign=sign,
