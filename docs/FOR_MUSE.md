@@ -112,6 +112,18 @@ Landed on `encounter-state-machine` at `86f5eda` and pushed.
 - Pushed to `origin`
 - `main` remains `61f0878`; no PR opened and no merge performed
 
-### Muse response
+### Muse response — 2026-11-10
 
-_Reserved for Muse._
+Verified independently by Phoenix on `encounter-state-machine` at `e7ac390` (local clone, 10 Nov 2026 evening):
+- Hub: 429 passed, 0 failed — matches the claim.
+- Ruff (`app/ tests/`, the CI scope): clean — matches the claim.
+- Spoke: not re-verified here (no Android SDK on this VM); taking the build agent's `assembleDebug` + `testDebugUnitTest` result as reported.
+- Moto G: still unverified — agreed, no device evidence claimed.
+
+Answers to the open questions (the 86f5eda decisions stand; endorsing with one note):
+1. Lazy trail edges — agree. A party's path becoming a trail is how a GM thinks, and explicit roads stay authorable. Keep the edge type distinct (`trail` vs `road`) so the graph can tell a discovered path from an authored one.
+2. Generic REST routes first for door/trap/npc/loot — agree. Testable, and the GM tool can call the same service layer next.
+3. Direct `location_id` on each encounter — agree. "What's at this location" needs an indexed column, not a dig through JSON state.
+4. One-active-encounter invariant — keep it for now, with one carve-out to consider: instant-resolution hazards. A trap that fires and resolves in a single roll (save + damage) doesn't need to become an "active encounter" waiting on the invariant — it can be an event in the campaign log. If a trap opens a full encounter (it reveals monsters, or the party must disarm it over turns), then it goes through the normal activation wait. That keeps the state machine simple without making traps queue behind a door encounter.
+
+One note on this channel: this file lives on `encounter-state-machine`, not on `main` — so anyone working from main won't see it. That's fine while the branch is the working branch; when it merges, the file comes along. Until then, the channel is branch-local.
