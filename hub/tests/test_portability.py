@@ -294,6 +294,52 @@ def test_character_db_round_trip_and_conflict_rejection(tmp_path: Path) -> None:
         import_character_db(repo, target.id, str(character_path))
 
 
+def test_character_db_preserves_item_ownership(tmp_path: Path) -> None:
+    repo = CampaignRepository(str(tmp_path / "campaign.db"))
+    campaign = repo.create_campaign("SAMPLE CAMPAIGN")
+    repo.upsert_npc(campaign.id, "Al", disposition="friendly")
+    repo.upsert_party_member(campaign.id, "Al", player_name="SAMPLE PLAYER")
+    repo.upsert_item(campaign.id, "AL BLADE", type_="weapon", holder_name="Al")
+    repo.upsert_item(campaign.id, "AL CHARM", type_="other", notes="a gift for Al")
+
+    payload = export_character_db(repo, campaign.id, "Al")
+    character_path = tmp_path / "al.db"
+    character_path.write_bytes(payload)
+
+    with closing(sqlite3.connect(character_path)) as conn:
+        npc_rows = conn.execute("SELECT id, name FROM npcs").fetchall()
+        assert len(npc_rows) == 1 and npc_rows[0][1] == "Al"
+        file_npc_id = npc_rows[0][0]
+        items = {
+            row[0]: row[1]
+            for row in conn.execute("SELECT name, holder_id FROM items").fetchall()
+        }
+        # The blade keeps its holder (the npc travels in the file); the
+        # charm was only matched by its notes, so its holder is null.
+        assert items["AL BLADE"] == file_npc_id
+        assert items["AL CHARM"] is None
+
+    target = repo.create_campaign("TARGET CAMPAIGN")
+    result = import_character_db(repo, target.id, str(character_path))
+    assert result["npc_id"] is not None
+
+    with closing(sqlite3.connect(repo.db_path)) as conn:
+        npc_id = conn.execute(
+            "SELECT id FROM npcs WHERE campaign_id = ? AND name = ?",
+            (target.id, "Al"),
+        ).fetchone()[0]
+        assert npc_id == result["npc_id"]
+        holders = {
+            row[0]: row[1]
+            for row in conn.execute(
+                "SELECT name, holder_id FROM items WHERE campaign_id = ?",
+                (target.id,),
+            ).fetchall()
+        }
+        assert holders["AL BLADE"] == npc_id
+        assert holders["AL CHARM"] is None
+
+
 @pytest.mark.asyncio
 async def test_json_campaign_export_import_round_trip(authenticated_client) -> None:
     from app.api.deps import get_repo

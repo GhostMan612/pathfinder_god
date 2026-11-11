@@ -589,7 +589,7 @@ def export_character_db(repo: Any, campaign_id: int, name: str) -> bytes:
             (campaign_id, name),
         ).fetchone()
         npc = source.execute(
-            "SELECT id FROM npcs WHERE campaign_id = ? AND name = ?",
+            "SELECT * FROM npcs WHERE campaign_id = ? AND name = ?",
             (campaign_id, name),
         ).fetchone()
         item_rows = source.execute(
@@ -616,13 +616,33 @@ def export_character_db(repo: Any, campaign_id: int, name: str) -> bytes:
         _insert_row(dest, "party_members", dict(party), campaign_id=1)
         if combatant is not None:
             _insert_row(dest, "combatants", dict(combatant), campaign_id=1)
+        if npc is not None:
+            # The npc row travels in the file so item ownership survives
+            # the round trip. Its id is preserved so the items below can
+            # reference it; its location is nulled because the location
+            # row is not part of a single-character file.
+            _insert_row(
+                dest,
+                "npcs",
+                dict(npc),
+                campaign_id=1,
+                overrides={"location_id": None},
+            )
+        npc_id = npc["id"] if npc else -1
         for row in item_rows:
+            # An item keeps its holder only when the holder IS this
+            # character's npc row (which is in the file now). Any other
+            # holder is nulled because that npc is not in the file, and
+            # the location is always nulled for the same reason.
+            holder_id = (
+                row["holder_id"] if row["holder_id"] == npc_id else None
+            )
             _insert_row(
                 dest,
                 "items",
                 dict(row),
                 campaign_id=1,
-                overrides={"holder_id": None, "location_id": None},
+                overrides={"holder_id": holder_id, "location_id": None},
             )
         for row in decision_rows:
             _insert_row(dest, "player_decisions", dict(row), campaign_id=1)
@@ -660,6 +680,9 @@ def import_character_db(
         row for row in rows["combatants"] if str(row.get("kind")) == "hero"
     ]
     hero = dict(heroes[0]) if heroes else None
+    npc_rows = rows.get("npcs") or []
+    npc = dict(npc_rows[0]) if npc_rows else None
+    old_npc_id = npc.get("id") if npc is not None else None
 
     try:
         with closing(sqlite3.connect(repo.db_path)) as dest:
@@ -690,6 +713,27 @@ def import_character_db(
                     campaign_id=campaign_id,
                     drop=("id", "campaign_id"),
                 )
+            npc_id = None
+            if npc is not None:
+                # The character's npc row anchors item ownership. Reuse
+                # the target's npc of the same name when one exists (the
+                # character is already known there); otherwise insert
+                # the row and let it take a fresh id.
+                existing_npc = dest.execute(
+                    "SELECT id FROM npcs WHERE campaign_id = ? AND name = ?",
+                    (campaign_id, name),
+                ).fetchone()
+                if existing_npc is not None:
+                    npc_id = int(existing_npc["id"])
+                else:
+                    npc_id = _insert_row(
+                        dest,
+                        "npcs",
+                        npc,
+                        campaign_id=campaign_id,
+                        drop=("id", "campaign_id"),
+                        overrides={"location_id": None},
+                    )
             for row in rows["items"]:
                 item_name = str(row.get("name") or "")
                 existing_item = dest.execute(
@@ -698,12 +742,22 @@ def import_character_db(
                 ).fetchone()
                 if existing_item is not None:
                     continue
+                # Remap the holder from the file's npc id to the target's.
+                # A holder that is not the character's npc cannot be
+                # resolved (that npc is not in the file), so it is nulled.
+                holder_id = (
+                    npc_id
+                    if old_npc_id is not None
+                    and row.get("holder_id") == old_npc_id
+                    else None
+                )
                 _insert_row(
                     dest,
                     "items",
                     row,
                     campaign_id=campaign_id,
-                    drop=("id", "campaign_id", "holder_id", "location_id"),
+                    drop=("id", "campaign_id"),
+                    overrides={"holder_id": holder_id, "location_id": None},
                 )
             for row in rows["player_decisions"]:
                 _insert_row(
@@ -735,5 +789,6 @@ def import_character_db(
         "name": name,
         "party_member_id": party_id,
         "combatant_id": hero_id,
+        "npc_id": npc_id,
         "source_campaign": campaign.get("name"),
     }
