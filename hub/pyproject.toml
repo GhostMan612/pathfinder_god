@@ -51,4 +51,7 @@ filterwarnings = [
     # starlette.testclient still imports it. Ignore only this import-time warning
     # until starlette ships the from_thread.BlockingPortal import.
     "ignore:The anyio.abc.BlockingPortal alias is deprecated",
+    # In-process test servers on Python 3.14 on Linux can trigger GC cleanup
+    # warnings for underlying OS sockets upon teardown.
+    "ignore:unclosed <socket.socket:ResourceWarning",
 ]

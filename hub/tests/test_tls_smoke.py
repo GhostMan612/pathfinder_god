@@ -26,6 +26,7 @@ def _get_free_port() -> int:
         return s.getsockname()[1]
 
 
+@pytest.mark.filterwarnings("ignore::ResourceWarning")
 def test_tls_smoke_https_and_http_refusal(tmp_path: Path, monkeypatch):
     # Disable zeroconf discovery in test runner
     monkeypatch.setattr("app.discovery.start_advertisement", lambda *a, **k: True)
@@ -47,11 +48,18 @@ def test_tls_smoke_https_and_http_refusal(tmp_path: Path, monkeypatch):
         log_level="warning",
     )
     server = uvicorn.Server(config)
+    loop = asyncio.new_event_loop()
 
     def run_server():
-        loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(server.serve())
+        try:
+            loop.run_until_complete(server.serve())
+        finally:
+            try:
+                loop.run_until_complete(loop.shutdown_asyncgens())
+            except Exception:
+                pass
+            loop.close()
 
     thread = threading.Thread(target=run_server, daemon=True)
     thread.start()
