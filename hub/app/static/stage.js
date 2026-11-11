@@ -10,6 +10,15 @@ const mount = document.getElementById('three-mount');
 const canvas2d = document.getElementById('grid2d');
 const statusEl = document.getElementById('status');
 const logEl = document.getElementById('log');
+// Preserve the selected campaign when navigating from the browser dashboard.
+// The static HTML defaults to campaign 1; URL query is only an initial hint.
+const requestedCampaignId = new URLSearchParams(location.search).get('campaign_id');
+const requestedNumber = Number(requestedCampaignId);
+if (requestedCampaignId && Number.isSafeInteger(requestedNumber) &&
+    requestedNumber >= 1 && requestedNumber <= 2147483647) {
+  document.getElementById('campaign-id').value = String(requestedNumber);
+}
+
 let sceneData = null;
 let ws = null;
 let renderer = null;
