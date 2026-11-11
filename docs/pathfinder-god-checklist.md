@@ -31,6 +31,14 @@ is pushed, committed, or PR'd without his explicit approval.
       per campaign, battle start/end/victory/defeat wiring, `active_encounter`
       in solo state, list/detail REST routes, regenerated `openapi.yaml`.
       Hub **417 tests pass**, Ruff clean.
+- [x] **Encounter ↔ map position links** (battle-first, `890876b` on
+      `encounter-state-machine`): `/map/generate` with `campaign_id` links
+      hero/monster/npc tokens to active combatants by `(kind, name)` + FIFO
+      order; each linked token carries `encounter_id`, `combatant_id`, and its
+      grid cell `x/y/z`. The full scene persists on the encounter's `state.map`
+      so it survives the request; the GM `generate_map` tool performs the same
+      linking. Spoke DTOs parse the new fields. Hub **421 tests pass**, Ruff
+      clean; Spoke `assembleDebug` + `testDebugUnitTest` green.
 
 ## Decisions made — locked in
 
@@ -81,8 +89,10 @@ is pushed, committed, or PR'd without his explicit approval.
       NPC, …). **Battle-first slice landed on `encounter-state-machine` at
       `97e21a2`; the remaining kinds reuse the same lifecycle and are next
       wired as their content lands.**
-- [ ] Link encounters to map positions — next slice; start with battle tokens
-      carrying encounter/combatant IDs and map cell coordinates.
+- [x] Link encounters to map positions — **battle slice landed at `890876b`**:
+      battle tokens carry encounter/combatant IDs plus grid cells, and the
+      scene persists on the encounter. Loot/NPC/door/trap token links follow
+      as those encounter kinds wire up.
 - [ ] Breadcrumb graph model in the campaign DB.
 - [ ] Character / campaign .db portability (export, import, carry between games).
 - [ ] LLM gateway / queue: one resident model, priority queue (turns first,
