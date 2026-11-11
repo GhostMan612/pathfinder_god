@@ -6,6 +6,7 @@
 package com.pathfindergod.spoke.data.network
 
 import java.net.URI
+import java.net.URISyntaxException
 
 /** A single, explicit hub root for Retrofit, saved settings, and WebSocket. */
 object HubEndpoint {
@@ -20,7 +21,7 @@ object HubEndpoint {
         val candidate = if (input.contains("://")) input else "http://$input"
         val uri = try {
             URI(candidate)
-        } catch (exc: IllegalArgumentException) {
+        } catch (exc: URISyntaxException) {
             throw IllegalArgumentException("Invalid hub URL", exc)
         }
         val scheme = uri.scheme?.lowercase()
