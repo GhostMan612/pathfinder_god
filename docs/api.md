@@ -98,6 +98,17 @@ resolves it; wiping out the last active monster resolves it as `resolved`, while
 losing the last hero resolves it as `failed`. A new battle abandons the previous
 active encounter. `GET /state` includes the current `active_encounter`.
 
+#### GM encounter tools
+
+The GM tool loop exposes `trigger_door`, `trigger_npc`, `trigger_loot`, and
+`transition_encounter`. They call the same `CampaignRepository` methods as the
+generic REST routes — there are no per-kind REST routes and the hub never calls
+itself over HTTP. A trigger creates the encounter at the party's current
+location and activates it when the active slot is free; if another encounter
+is already active, it stays `pending` and the tool returns a note. The
+transition tool applies the validated matrix, including `instant: true` for a
+pending trap.
+
 ### Encounter map links
 
 When `/map/generate` is called with `campaign_id` and that campaign has an

@@ -104,8 +104,13 @@ is pushed, committed, or PR'd without his explicit approval.
 - [x] PR #2 merge decision — Glenn approved; merged and pushed `61f0878`.
 - [x] Encounter state machine: types + transitions (battle, loot, door, trap,
       NPC, …). **All five kinds share the generic create/transition routes, and
-      pending traps can resolve instantly via the `instant` carve-out. GM
-      in-turn door/NPC/loot triggers remain.**
+      pending traps can resolve instantly via the `instant` carve-out.**
+- [x] Door/NPC/loot GM triggers: `trigger_door`, `trigger_npc`,
+      `trigger_loot`, and `transition_encounter` call `CampaignRepository`
+      directly — no per-kind REST routes and no hub self-HTTP. Triggers create
+      at the current location, activate when the slot is free, and stay
+      `pending` with a note when another encounter is active. Hub **441 tests
+      pass**, Ruff clean.
 - [x] Link encounters to map positions — **battle slice landed at `890876b`**:
       battle tokens carry encounter/combatant IDs plus grid cells, and the
       scene persists on the encounter. Loot/NPC/door/trap token links follow

@@ -218,3 +218,47 @@ git branch -d encounter-state-machine
 ```
 
 `--prune` drops the stale remote-tracking ref (`origin/encounter-state-machine`); `-d` deletes the local branch. Use `-D` only if it says "not fully merged" and you have confirmed the work is on `main` (it is — merge `15ce4c9`). Verify with `git branch -a`: you should see only `main` (plus `council-chain-pilot` if you track it).
+
+### Build note — door/NPC/loot GM triggers — 2026-11-10
+
+Read your answers and kept the trap carve-out `pending`-only. The branch was
+already gone locally, so the housekeeping commands were a no-op after
+`fetch --prune`.
+
+**Slice landed on `main` at `0f0b7ac`: GM encounter trigger tools.**
+- New tools: `trigger_door`, `trigger_npc`, `trigger_loot`, and
+  `transition_encounter`.
+- All four call `CampaignRepository.create_encounter` /
+  `transition_encounter` directly — the same service methods behind
+  `POST /encounters` and `POST /encounters/{id}/transition`. No per-kind REST
+  routes and no hub self-HTTP.
+- A trigger creates the encounter at the party's current location. It activates
+  immediately when the active slot is free; if a battle or other encounter is
+  already active, the new encounter stays `pending` and the tool returns the
+  reason.
+- `transition_encounter` applies the validated matrix and forwards
+  `instant: true` for the pending-trap carve-out.
+- Tests cover all three trigger kinds, the active-conflict pending path, loot
+  resolution, trap instant resolution through the tool, validation errors, and
+  tool registration.
+
+**Verification**
+- Hub: **441 passed**, 0 failures (433 before + 8 new).
+- Ruff: clean on `app/ tests/`.
+- No REST route or OpenAPI model changed, so the contract was not regenerated.
+- Spoke: no code changed this slice; no native build run.
+- Moto G remains unattached; no device evidence claimed.
+- No GitHub Actions result was observed; no CI claim.
+
+**Git**
+- `main` = `0f0b7ac` (code) plus the docs commit that carries this note.
+- Pushed to `origin`; no new branches.
+
+**One boundary to confirm**
+The tools live in `SOLO_LOOP_TOOLS`, so they run in the orchestrator tool loop
+(`/ask`, and `/stream` when it routes through the agentic path). The Spoke GM
+chat sends `type: "turn"`, which goes to `SoloLoop.take_turn`; that path does
+not use orchestrator tools. So a plain campaign turn like "I open the door"
+creates no encounter yet. If you want automatic turn-action triggers, that is a
+separate `SoloLoop` wiring decision (deterministic regex + the same service
+calls), not another REST route.
