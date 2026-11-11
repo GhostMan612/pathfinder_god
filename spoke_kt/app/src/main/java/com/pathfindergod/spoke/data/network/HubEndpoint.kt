@@ -46,6 +46,28 @@ object HubEndpoint {
     fun streamUrl(raw: String): String =
         normalize(raw).replaceFirst("http", "ws") + "stream"
 
+    /**
+     * Validate a WebSocket stream without initiating a network connection.
+     * Release: wss:// or emulator-only ws://10.0.2.2 on an emulator.
+     * Debug: ws:// is permitted for local LAN testing, not for production.
+     */
+    fun isStreamPermitted(raw: String, debugBuild: Boolean, emulator: Boolean): Boolean {
+        val uri = try {
+            URI(raw.trim())
+        } catch (_: URISyntaxException) {
+            return false
+        }
+        if (uri.scheme != "ws" && uri.scheme != "wss") return false
+        if (uri.host.isNullOrBlank() || uri.rawUserInfo != null) return false
+        if (uri.port == 0 || uri.port !in -1..65535) return false
+        if (uri.rawPath != "/stream" ||
+            uri.rawQuery != null || uri.rawFragment != null
+        ) return false
+        if (uri.scheme == "wss") return true
+        if (uri.host == "10.0.2.2" && !emulator) return false
+        return debugBuild || (emulator && uri.host == "10.0.2.2")
+    }
+
     /** Return true for the emulator-only Android host bridge address. */
     fun isEmulatorOnlyAddress(raw: String): Boolean =
         URI(normalize(raw)).host == "10.0.2.2"
