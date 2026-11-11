@@ -993,6 +993,29 @@ class CampaignRepository:
             )
             return cur.fetchone()[0]
 
+    def get_items(
+        self, campaign_id: int, location_id: int | None = None
+    ) -> list[dict]:
+        """Return campaign item rows, optionally narrowed to one location.
+
+        Door keys and loot claims need the item table, not just the GM context
+        snapshot. Returning plain dicts keeps the existing repository style
+        (the item rows are consumed as JSON by the turn layer).
+        """
+        with self._conn() as conn:
+            if location_id is None:
+                rows = conn.execute(
+                    "SELECT * FROM items WHERE campaign_id = ? ORDER BY name",
+                    (campaign_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM items WHERE campaign_id = ? AND location_id = ?"
+                    " ORDER BY name",
+                    (campaign_id, location_id),
+                ).fetchall()
+            return [dict(r) for r in rows]
+
     # ──────────────────────────────────────────────────────────────
     # Quests
     # ──────────────────────────────────────────────────────────────

@@ -282,11 +282,36 @@ _TRAP_MULTI_RE = re.compile(
     r"carefully|slowly)\b",
     re.IGNORECASE,
 )
+_TRAP_CONTINUE_RE = re.compile(
+    r"\b(continue|keep|finish|work\s+on|carefully|slowly)\b",
+    re.IGNORECASE,
+)
 _NPC_ACTION_RE = re.compile(
     r"\b(?:talk(?:s|ed|ing)?|speak(?:s|ing)?|greet(?:s|ed|ing)?|"
     r"ask(?:s|ed|ing)?|hail(?:s|ed|ing)?|question(?:s|ed|ing)?|"
-    r"address(?:es|ed|ing)?)\b"
+    r"address(?:es|ed|ing)?|persuade(?:s|d|ing)?|"
+    r"negotiate(?:s|d|ing)?|convince(?:s|d|ing)?|"
+    r"threaten(?:s|ed|ing)?|insult(?:s|ed|ing)?|"
+    r"help(?:s|ed|ing)?)\b"
     r"(?:\s+(?:to|with|at))?\s+(?P<target>[^,.!?]{1,60})",
+    re.IGNORECASE,
+)
+_DOOR_RESOLVE_RE = re.compile(
+    r"\b(open(?:s|ed|ing)?|unlock(?:s|ed|ing)?|push(?:es|ed|ing)?|"
+    r"enter(?:s|ed|ing)?|force(?:s|d|ing)?)\b",
+    re.IGNORECASE,
+)
+_LOOT_CLAIM_RE = re.compile(
+    r"\b(claim(?:s|ed|ing)?|take(?:s|n|ing)?|grab(?:s|bed|bing)?|"
+    r"collect(?:s|ed|ing)?|gather(?:s|ed|ing)?)\b",
+    re.IGNORECASE,
+)
+_NPC_PERSUADE_RE = re.compile(
+    r"\b(persuade|negotiate|convince|calm|help|agree|talk\s+down)\b",
+    re.IGNORECASE,
+)
+_NPC_HOSTILE_RE = re.compile(
+    r"\b(attack|threaten|insult|intimidate|draw\s+(?:my|a)\s+weapon)\b",
     re.IGNORECASE,
 )
 _NPC_NON_TARGETS = {
@@ -658,7 +683,14 @@ class SoloLoop:
 
         # ── Deterministic encounter detection (words, not the LLM) ──
         encounter_result = self._apply_encounter_detection(
-            campaign_id, action, state, rng, dice_rolls, notes
+            campaign_id,
+            action,
+            party,
+            state,
+            rng,
+            dice_rolls,
+            hp_changes,
+            notes,
         )
 
         # ── Deterministic resolution (never the LLM) ──
@@ -730,7 +762,14 @@ class SoloLoop:
                 # classification cannot skip a door/NPC/loot/trap trigger.
                 if encounter_result is None:
                     encounter_result = self._apply_encounter_detection(
-                        campaign_id, action, state, rng, dice_rolls, notes
+                        campaign_id,
+                        action,
+                        party,
+                        state,
+                        rng,
+                        dice_rolls,
+                        hp_changes,
+                        notes,
                     )
             if outcome.target and not target_name:
                 target_name = outcome.target
@@ -888,17 +927,21 @@ class SoloLoop:
         self,
         campaign_id: int,
         action: str,
+        party: list[dict],
         state: Any,
         rng: random.Random,
         dice_rolls: list[dict],
+        hp_changes: list[dict],
         notes: list[str],
     ) -> dict | None:
-        """Create or advance the encounter named by the player's action.
+        """Create, advance, or resolve the encounter named by the action.
 
         Detection is additive: the turn's normal deterministic resolution still
         runs, and a missing map door or NPC never fails the turn. Door, NPC,
         loot, and trap records all go through the same repository service the
-        REST routes and GM tools use.
+        REST routes and GM tools use. A newly activated encounter resolves on a
+        later turn (the first turn establishes the beat); an already-active one
+        resolves now through its kind's deterministic resolver.
         """
         detected = detect_encounter_action(action)
         if detected is None:
@@ -908,6 +951,7 @@ class SoloLoop:
         encounter = self._find_open_encounter(
             campaign_id, kind, location_id, target
         )
+        was_active = encounter is not None and encounter.status == "active"
         if encounter is None:
             encounter = self.repo.create_encounter(
                 campaign_id,
@@ -924,6 +968,16 @@ class SoloLoop:
         else:
             notes.append(f"Continuing {kind} encounter {encounter.id}.")
 
+        merged_state = self._normalize_encounter_state(
+            kind, encounter.state, target
+        )
+        if kind == "npc":
+            merged_state = self._refresh_npc_state(
+                campaign_id, merged_state, target
+            )
+            if not merged_state.get("topic"):
+                merged_state["topic"] = action[:200]
+
         instant = False
         activated = False
         if (
@@ -931,20 +985,18 @@ class SoloLoop:
             and self._is_instant_trap(action)
             and encounter.status == "pending"
         ):
-            dc = self._trap_dc(encounter)
-            success = self._roll_skill_check(
-                rng, dice_rolls, notes, dc=dc, label="Trap check"
-            )
-            status = "resolved" if success else "failed"
-            encounter = self.repo.transition_encounter(
+            encounter = self._resolve_trap_encounter(
                 campaign_id,
-                encounter.id,
-                status,
-                summary=action[:1000],
+                encounter,
+                action,
+                party,
+                rng,
+                dice_rolls,
+                hp_changes,
+                notes,
                 instant=True,
             )
             instant = True
-            notes.append(f"Trap {status} without taking the active slot.")
         elif encounter.status == "pending":
             try:
                 encounter = self.repo.transition_encounter(
@@ -952,6 +1004,7 @@ class SoloLoop:
                     encounter.id,
                     "active",
                     summary=action[:1000],
+                    state=merged_state,
                 )
                 activated = True
                 notes.append(
@@ -959,6 +1012,17 @@ class SoloLoop:
                 )
             except ValueError as exc:
                 notes.append(f"{kind.title()} encounter pending: {exc}")
+        elif was_active:
+            encounter = self._resolve_encounter_action(
+                campaign_id,
+                encounter,
+                action,
+                party,
+                rng,
+                dice_rolls,
+                hp_changes,
+                notes,
+            )
         else:
             notes.append(
                 f"{kind.title()} encounter already active (id {encounter.id})."
@@ -970,6 +1034,502 @@ class SoloLoop:
             "instant": instant,
             "note": notes[-1],
         }
+
+    @staticmethod
+    def _normalize_encounter_state(
+        kind: str, state: dict | None, target: str | None = None
+    ) -> dict:
+        """Fill the v1 state shape without discarding authored fields."""
+        merged = dict(state or {})
+        if kind == "door":
+            merged.setdefault("locked", False)
+            merged.setdefault("key", None)
+            merged.setdefault("barred", False)
+            merged.setdefault("dc", None)
+        elif kind == "trap":
+            merged.setdefault("dc", SKILL_CHECK_DC)
+            merged.setdefault("damage", "1d6")
+            merged.setdefault("armed", True)
+        elif kind == "loot":
+            merged.setdefault("items", [])
+            merged.setdefault("claimed", False)
+        elif kind == "npc":
+            merged.setdefault("npc_id", None)
+            merged.setdefault("npc_name", target or "")
+            merged.setdefault("disposition", "unknown")
+            merged.setdefault("topic", None)
+        return merged
+
+    def _refresh_npc_state(
+        self, campaign_id: int, state: dict, target: str | None
+    ) -> dict:
+        """Prefer the npcs-table row (and its disposition) when one exists."""
+        name = str(state.get("npc_name") or target or "").strip()
+        npc = self._find_npc(campaign_id, name)
+        if npc is not None:
+            state["npc_id"] = npc.id
+            state["npc_name"] = npc.name
+            state["disposition"] = npc.disposition or "unknown"
+            return state
+        combatant = self._find_npc_combatant(campaign_id, name)
+        if combatant is not None:
+            state["npc_name"] = combatant.name
+        return state
+
+    def _find_npc(self, campaign_id: int, name: str) -> Any | None:
+        if not name:
+            return None
+        exact = self.repo.get_npc(campaign_id, name)
+        if exact is not None:
+            return exact
+        needle = name.lower()
+        for npc in self.repo.get_npcs(campaign_id):
+            candidate = npc.name.lower()
+            if needle in candidate or candidate in needle:
+                return npc
+        return None
+
+    def _find_npc_combatant(self, campaign_id: int, name: str) -> Any | None:
+        if not name:
+            return None
+        needle = name.lower()
+        for combatant in self.repo.get_combatants(campaign_id):
+            if combatant.kind != "npc":
+                continue
+            candidate = combatant.name.lower()
+            if needle in candidate or candidate in needle:
+                return combatant
+        return None
+
+    def _encounter_state_for(
+        self,
+        campaign_id: int,
+        kind: str,
+        target: str | None,
+        location_id: int | None,
+    ) -> dict:
+        """Attach a known NPC or map door when present; never required."""
+        state = self._normalize_encounter_state(kind, {}, target)
+        if kind == "npc":
+            state = self._refresh_npc_state(campaign_id, state, target)
+        elif kind == "door":
+            door = self._door_from_recent_map(campaign_id, location_id)
+            if door is not None:
+                state["door"] = door
+        return state
+
+    def _resolve_encounter_action(
+        self,
+        campaign_id: int,
+        encounter: Any,
+        action: str,
+        party: list[dict],
+        rng: random.Random,
+        dice_rolls: list[dict],
+        hp_changes: list[dict],
+        notes: list[str],
+    ) -> Any:
+        """Run the deterministic resolver for an already-active encounter."""
+        if encounter.kind == "door":
+            return self._resolve_door_encounter(
+                campaign_id, encounter, action, party, rng, dice_rolls, notes
+            )
+        if encounter.kind == "trap":
+            return self._resolve_trap_encounter(
+                campaign_id,
+                encounter,
+                action,
+                party,
+                rng,
+                dice_rolls,
+                hp_changes,
+                notes,
+                instant=False,
+            )
+        if encounter.kind == "npc":
+            return self._resolve_npc_encounter(
+                campaign_id,
+                encounter,
+                action,
+                rng,
+                dice_rolls,
+                notes,
+            )
+        if encounter.kind == "loot":
+            return self._resolve_loot_encounter(
+                campaign_id, encounter, action, party, notes
+            )
+        return encounter
+
+    def _resolve_door_encounter(
+        self,
+        campaign_id: int,
+        encounter: Any,
+        action: str,
+        party: list[dict],
+        rng: random.Random,
+        dice_rolls: list[dict],
+        notes: list[str],
+    ) -> Any:
+        state = self._normalize_encounter_state(
+            "door", encounter.state
+        )
+        if not _DOOR_RESOLVE_RE.search(action):
+            notes.append("You study the door; opening it will take an action.")
+            return encounter
+
+        locked = bool(state.get("locked")) or bool(state.get("barred"))
+        key = state.get("key")
+        key = str(key) if key else None
+        success = False
+        if not locked:
+            success = True
+            notes.append("The door opens.")
+        elif key and self._party_has_item(campaign_id, party, key):
+            success = True
+            notes.append(f"The {key} opens the door.")
+        else:
+            dc = int(state.get("dc") or SKILL_CHECK_DC)
+            success = self._roll_skill_check(
+                rng, dice_rolls, notes, dc=dc, label="Door check"
+            )
+            notes.append(
+                "The door opens." if success else "The door refuses to budge."
+            )
+
+        if success:
+            state["locked"] = False
+            state["barred"] = False
+        return self._transition_with_state(
+            campaign_id,
+            encounter,
+            "resolved" if success else "failed",
+            state,
+            notes,
+            summary=action[:1000],
+        )
+
+    def _resolve_trap_encounter(
+        self,
+        campaign_id: int,
+        encounter: Any,
+        action: str,
+        party: list[dict],
+        rng: random.Random,
+        dice_rolls: list[dict],
+        hp_changes: list[dict],
+        notes: list[str],
+        *,
+        instant: bool,
+    ) -> Any:
+        state = self._normalize_encounter_state(
+            "trap", encounter.state
+        )
+        if not state.get("armed", True):
+            notes.append("The trap is already spent.")
+            return self._transition_with_state(
+                campaign_id,
+                encounter,
+                "resolved",
+                state,
+                notes,
+                summary=action[:1000],
+                instant=instant,
+            )
+        if (
+            not instant
+            and _TRAP_MULTI_RE.search(action)
+            and not _TRAP_CONTINUE_RE.search(action)
+        ):
+            notes.append("You are still working on the trap; keep at it.")
+            return encounter
+
+        dc = int(state.get("dc") or SKILL_CHECK_DC)
+        success = self._roll_skill_check(
+            rng, dice_rolls, notes, dc=dc, label="Trap check"
+        )
+        state["armed"] = False
+        if not success:
+            damage = str(state.get("damage") or "").strip()
+            if damage:
+                self._apply_trap_damage(
+                    campaign_id,
+                    damage,
+                    party,
+                    rng,
+                    dice_rolls,
+                    hp_changes,
+                    notes,
+                )
+        status = "resolved" if success else "failed"
+        return self._transition_with_state(
+            campaign_id,
+            encounter,
+            status,
+            state,
+            notes,
+            summary=action[:1000],
+            instant=instant,
+        )
+
+    def _apply_trap_damage(
+        self,
+        campaign_id: int,
+        damage: str,
+        party: list[dict],
+        rng: random.Random,
+        dice_rolls: list[dict],
+        hp_changes: list[dict],
+        notes: list[str],
+    ) -> None:
+        try:
+            total, rolls, _ = roll_dice(damage, rng=rng)
+        except (TypeError, ValueError, KeyError):
+            notes.append(f"Trap damage {damage!r} could not be rolled.")
+            return
+        dice_rolls.append({"notation": damage, "rolls": rolls, "total": total})
+        heroes = [
+            c for c in self.repo.get_combatants(campaign_id)
+            if c.kind == "hero"
+        ]
+        if not heroes and party:
+            ids = self._ensure_hero_combatants(campaign_id, rng)
+            heroes = [
+                c
+                for c in (self.repo.get_combatant(campaign_id, i) for i in ids)
+                if c is not None
+            ]
+        if not heroes:
+            notes.append("The trap fires, but no hero is present to take the damage.")
+            return
+        hero = heroes[0]
+        new_hp = max(0, hero.hp - total)
+        self.repo.update_combatant(hero.id, hp=new_hp)
+        hp_changes.append(
+            {
+                "name": hero.name,
+                "hp": new_hp,
+                "max_hp": hero.max_hp,
+                "damage": total,
+            }
+        )
+        notes.append(f"The trap hits {hero.name} for {total} damage.")
+
+    def _resolve_npc_encounter(
+        self,
+        campaign_id: int,
+        encounter: Any,
+        action: str,
+        rng: random.Random,
+        dice_rolls: list[dict],
+        notes: list[str],
+    ) -> Any:
+        state = self._refresh_npc_state(
+            campaign_id,
+            self._normalize_encounter_state("npc", encounter.state),
+            None,
+        )
+        name = str(state.get("npc_name") or "").strip()
+        if not name:
+            notes.append("There is no one here to answer.")
+            return encounter
+        disposition = str(state.get("disposition") or "unknown")
+        hostile = bool(_NPC_HOSTILE_RE.search(action)) or disposition == "hostile"
+        persuade = bool(_NPC_PERSUADE_RE.search(action))
+        if hostile:
+            status = "failed"
+            new_disposition = "hostile"
+            notes.append(f"{name} refuses and turns hostile.")
+        elif persuade:
+            success = self._roll_skill_check(
+                rng, dice_rolls, notes, label="Diplomacy check"
+            )
+            status = "resolved" if success else "failed"
+            new_disposition = "friendly" if success else "hostile"
+            notes.append(
+                f"{name} agrees to help."
+                if success
+                else f"{name} refuses your request."
+            )
+        elif disposition == "friendly":
+            status = "resolved"
+            new_disposition = "friendly"
+            notes.append(f"{name} agrees to help.")
+        else:
+            state["topic"] = action[:200]
+            notes.append(f"{name} is still deciding; the conversation continues.")
+            return encounter
+
+        state["disposition"] = new_disposition
+        self._set_npc_disposition(
+            campaign_id, name, new_disposition, notes[-1]
+        )
+        return self._transition_with_state(
+            campaign_id,
+            encounter,
+            status,
+            state,
+            notes,
+            summary=action[:1000],
+        )
+
+    def _set_npc_disposition(
+        self, campaign_id: int, name: str, disposition: str, note: str
+    ) -> None:
+        npc = self._find_npc(campaign_id, name)
+        if npc is None:
+            self.repo.upsert_npc(
+                campaign_id, name, disposition=disposition, notes=note
+            )
+            return
+        existing_notes = npc.notes or ""
+        combined = f"{existing_notes}\n{note}".strip() if note else existing_notes
+        self.repo.upsert_npc(
+            campaign_id,
+            npc.name,
+            alias=npc.alias,
+            role=npc.role,
+            level=npc.level,
+            ancestry=npc.ancestry,
+            class_=npc.class_,
+            disposition=disposition,
+            notes=combined or None,
+            session_num=npc.last_seen_session,
+        )
+
+    def _resolve_loot_encounter(
+        self,
+        campaign_id: int,
+        encounter: Any,
+        action: str,
+        party: list[dict],
+        notes: list[str],
+    ) -> Any:
+        state = self._normalize_encounter_state(
+            "loot", encounter.state
+        )
+        if state.get("claimed"):
+            notes.append("The loot has already been claimed.")
+            return encounter
+        if not (_LOOT_CLAIM_RE.search(action) or _LOOT_ACTION_RE.search(action)):
+            notes.append("The container is open; search it to claim the contents.")
+            return encounter
+
+        items = state.get("items") or []
+        claimed_by = (
+            str(party[0].get("name") or "the party") if party else "the party"
+        )
+        location_name = self._location_name(campaign_id, encounter.location_id)
+        claimed: list[str] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or item.get("item_name") or "").strip()
+            if not name:
+                continue
+            self.repo.upsert_item(
+                campaign_id,
+                name,
+                type_=self._item_type_for_table(
+                    item.get("item_type") or item.get("type")
+                ),
+                level=item.get("level"),
+                traits=item.get("traits") or [],
+                location_name=location_name,
+                notes=f"Claimed by {claimed_by}",
+            )
+            claimed.append(name)
+        state["claimed"] = True
+        notes.append(
+            f"Claimed {len(claimed)} item(s): {', '.join(claimed)}."
+            if claimed
+            else "The container is empty."
+        )
+        return self._transition_with_state(
+            campaign_id,
+            encounter,
+            "resolved",
+            state,
+            notes,
+            summary=action[:1000],
+        )
+
+    def _transition_with_state(
+        self,
+        campaign_id: int,
+        encounter: Any,
+        status: str,
+        state: dict,
+        notes: list[str],
+        *,
+        summary: str | None = None,
+        instant: bool = False,
+    ) -> Any:
+        try:
+            return self.repo.transition_encounter(
+                campaign_id,
+                encounter.id,
+                status,
+                summary=summary if summary is not None else encounter.summary,
+                state=state,
+                instant=instant,
+            )
+        except ValueError as exc:
+            notes.append(
+                f"{encounter.kind.title()} encounter could not transition: {exc}"
+            )
+            return encounter
+
+    def _party_has_item(
+        self, campaign_id: int, party: list[dict], name: str
+    ) -> bool:
+        needle = name.strip().lower()
+        if not needle:
+            return False
+        for row in self.repo.get_items(campaign_id):
+            candidate = str(row.get("name") or "").strip().lower()
+            if candidate and (needle in candidate or candidate in needle):
+                return True
+        for member in party:
+            stats = member.get("stats_json")
+            if isinstance(stats, str):
+                try:
+                    stats = json.loads(stats)
+                except (TypeError, ValueError):
+                    stats = None
+            if not isinstance(stats, dict):
+                continue
+            for item in stats.get("equipment") or []:
+                if not isinstance(item, dict):
+                    continue
+                candidate = str(item.get("name") or "").strip().lower()
+                if candidate and (needle in candidate or candidate in needle):
+                    return True
+        return False
+
+    def _location_name(
+        self, campaign_id: int, location_id: int | None
+    ) -> str | None:
+        if location_id is None:
+            return None
+        location = self.repo.get_location(campaign_id, location_id)
+        return location.name if location is not None else None
+
+    @staticmethod
+    def _item_type_for_table(raw: Any) -> str:
+        value = str(raw or "other").strip().lower()
+        return {
+            "weapon": "weapon",
+            "armor": "armor",
+            "worn": "armor",
+            "consumable": "consumable",
+            "treasure": "other",
+            "ammunition": "weapon",
+            "magic": "magic",
+            "artifact": "artifact",
+            "currency": "currency",
+            "other": "other",
+        }.get(value, "other")
 
     def _find_open_encounter(
         self,
@@ -987,42 +1547,17 @@ class SoloLoop:
             if encounter.status not in ("pending", "active"):
                 continue
             if kind == "npc" and target:
-                existing = str(encounter.state.get("target") or "")
-                if existing and existing.lower() != target.lower():
+                existing = str(
+                    encounter.state.get("npc_name")
+                    or encounter.state.get("target")
+                    or ""
+                )
+                if existing and target.lower() not in existing.lower() and (
+                    existing.lower() not in target.lower()
+                ):
                     continue
             return encounter
         return None
-
-    def _encounter_state_for(
-        self,
-        campaign_id: int,
-        kind: str,
-        target: str | None,
-        location_id: int | None,
-    ) -> dict:
-        """Attach a known NPC or map door when one is present; never required."""
-        state: dict[str, Any] = {}
-        if target:
-            state["target"] = target
-        if kind == "npc" and target:
-            match = next(
-                (
-                    c
-                    for c in self.repo.get_combatants(campaign_id)
-                    if c.kind == "npc"
-                    and target.lower() in c.name.lower()
-                ),
-                None,
-            )
-            if match is not None:
-                state["npc_id"] = match.id
-                state["npc_name"] = match.name
-                state["target"] = match.name
-        elif kind == "door":
-            door = self._door_from_recent_map(campaign_id, location_id)
-            if door is not None:
-                state["door"] = door
-        return state
 
     def _door_from_recent_map(
         self, campaign_id: int, location_id: int | None

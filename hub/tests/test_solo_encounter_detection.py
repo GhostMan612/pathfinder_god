@@ -151,7 +151,8 @@ async def test_instant_trap_resolves_without_the_active_slot(
     assert result.encounter["kind"] == "trap"
     assert result.encounter["status"] in {"resolved", "failed"}
     assert repo.get_active_encounter(campaign.id) is None
-    assert len(result.dice_rolls) == 1
+    # A failed one-roll trap resolution now also rolls its authored damage.
+    assert len(result.dice_rolls) >= 1
     assert result.dice_rolls[0]["notation"] == "d20"
     kinds = [
         event.kind
@@ -163,7 +164,9 @@ async def test_instant_trap_resolves_without_the_active_slot(
     assert "hazard_resolved" in kinds
 
 
-async def test_multi_turn_trap_activates_and_is_reused(tmp_path: Path) -> None:
+async def test_multi_turn_trap_activates_then_resolves_on_continue(
+    tmp_path: Path,
+) -> None:
     repo, campaign, _town, loop = _setup(tmp_path)
 
     first = await loop.take_turn(
@@ -178,7 +181,7 @@ async def test_multi_turn_trap_activates_and_is_reused(tmp_path: Path) -> None:
     )
     assert second.encounter is not None
     assert second.encounter["id"] == first.encounter["id"]
-    assert second.encounter["status"] == "active"
+    assert second.encounter["status"] in {"resolved", "failed"}
     assert len(repo.list_encounters(campaign.id)) == 1
 
 
@@ -199,7 +202,7 @@ async def test_npc_detection_links_a_known_combatant(tmp_path: Path) -> None:
     assert result.encounter is not None
     assert result.encounter["kind"] == "npc"
     assert result.encounter["state"]["npc_name"] == "SAMPLE MERCHANT"
-    assert result.encounter["state"]["target"] == "SAMPLE MERCHANT"
+    assert result.encounter["state"]["disposition"] == "unknown"
 
 
 async def test_search_loot_still_runs_the_skill_check(tmp_path: Path) -> None:
