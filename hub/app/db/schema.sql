@@ -5,6 +5,18 @@
 
 -- Campaign & Continuity Database Schema
 -- Run this on campaign.db (separate from pathfinder_rag.db)
+--
+-- schema_version history:
+--   1  Initial portable-schema marker (item 4, campaign/character .db portability).
+--      Export files carry meta.schema_version = "1"; import rejects any other value.
+
+CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+
+INSERT INTO meta (key, value) VALUES ('schema_version', '1')
+ON CONFLICT(key) DO NOTHING;
 
 -- ──────────────────────────────────────────────────────────────
 -- Core Campaign

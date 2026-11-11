@@ -621,6 +621,155 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /campaign/export-db:
+    get:
+      tags:
+      - campaign
+      - campaign
+      - export
+      summary: Export Campaign Database
+      description: Download one campaign as a standalone SQLite file.
+      operationId: export_campaign_database_campaign_export_db_get
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
+      parameters:
+      - name: campaign_id
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 2147483647
+          minimum: 1
+          default: 1
+          title: Campaign Id
+      responses:
+        '200':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /campaign/import-db:
+    post:
+      tags:
+      - campaign
+      - campaign
+      - import
+      summary: Import Campaign Database
+      description: Import a standalone campaign file as a new campaign or replacement.
+      operationId: import_campaign_database_campaign_import_db_post
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
+      parameters:
+      - name: campaign_id
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 2147483647
+          minimum: 1
+          default: 1
+          title: Campaign Id
+      - name: replace_existing
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Replace Existing
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_import_campaign_database_campaign_import_db_post'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /campaign/{campaign_id}/characters/{name}/export-db:
+    get:
+      tags:
+      - campaign
+      - campaign
+      - export
+      summary: Export Character Database
+      description: Download one hero as a standalone SQLite file.
+      operationId: export_character_database_campaign__campaign_id__characters__name__export_db_get
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Campaign Id
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /campaign/{campaign_id}/characters/import-db:
+    post:
+      tags:
+      - campaign
+      - campaign
+      - import
+      summary: Import Character Database
+      description: Add a hero from a character file; existing names are rejected.
+      operationId: import_character_database_campaign__campaign_id__characters_import_db_post
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Campaign Id
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_import_character_database_campaign__campaign_id__characters_import_db_post'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /campaign/npcs:
     get:
       tags:
@@ -1651,6 +1800,26 @@ components:
       - edition
       - sources
       title: AskResponse
+    Body_import_campaign_database_campaign_import_db_post:
+      properties:
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+      type: object
+      required:
+      - file
+      title: Body_import_campaign_database_campaign_import_db_post
+    Body_import_character_database_campaign__campaign_id__characters_import_db_post:
+      properties:
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+      type: object
+      required:
+      - file
+      title: Body_import_character_database_campaign__campaign_id__characters_import_db_post
     Body_transcribe_voice_transcribe_post:
       properties:
         file:
@@ -3785,7 +3954,7 @@ components:
           title: Name
         kind:
           type: string
-          pattern: ^(hero|monster|npc|loot)$
+          pattern: ^(hero|monster|npc|loot|door|trap)$
           title: Kind
         x:
           type: integer
@@ -3811,6 +3980,11 @@ components:
           - type: integer
           - type: 'null'
           title: Combatant Id
+        item_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Item Id
       type: object
       required:
       - id

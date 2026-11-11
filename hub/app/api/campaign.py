@@ -8,6 +8,8 @@ Campaign API â€” REST endpoints for campaign state, notes, and continuity.
 """
 import json
 import logging
+import os
+import tempfile
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -15,10 +17,12 @@ from fastapi import (
     APIRouter,
     BackgroundTasks,
     Depends,
+    File,
     HTTPException,
     Query,
     Request,
     Response,
+    UploadFile,
 )
 from pydantic import BaseModel, Field
 
@@ -31,6 +35,13 @@ from app.api.security import (
     require_auth,
 )
 from app.config import get_settings
+from app.db.portability import (
+    PortabilityError,
+    export_campaign_db,
+    export_character_db,
+    import_campaign_db,
+    import_character_db,
+)
 from app.db.repository import CampaignRepository
 from app.llm.ollama_client import OllamaClient
 from app.llm.orchestrator import LLMOrchestrator
@@ -513,6 +524,139 @@ async def download_backup(
         media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
+
+
+@router.get("/export-db", response_class=Response, tags=["campaign", "export"])
+async def export_campaign_database(
+    campaign_id: int = Query(1, ge=1, le=2147483647),
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+    request: Request = None,
+):
+    """Download one campaign as a standalone SQLite file."""
+    audit_logger.log_data_access(
+        user_id=user.get("sub", "unknown"),
+        resource="campaign_db",
+        action="export",
+        ip=get_client_ip(request) if request else "unknown",
+    )
+    try:
+        payload = export_campaign_db(repo, campaign_id)
+    except PortabilityError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    filename = (
+        f"pathfinder_campaign_{campaign_id}_"
+        f"{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}.db"
+    )
+    return Response(
+        content=payload,
+        media_type="application/x-sqlite3",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/import-db", tags=["campaign", "import"])
+async def import_campaign_database(
+    file: UploadFile = File(...),
+    campaign_id: int = Query(1, ge=1, le=2147483647),
+    replace_existing: bool = Query(False),
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+    request: Request = None,
+):
+    """Import a standalone campaign file as a new campaign or replacement."""
+    audit_logger.log_data_access(
+        user_id=user.get("sub", "unknown"),
+        resource="campaign_db",
+        action="import",
+        ip=get_client_ip(request) if request else "unknown",
+    )
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="empty upload")
+    if len(content) > 200 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="campaign file too large")
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as handle:
+        handle.write(content)
+        temp_path = handle.name
+    try:
+        result = import_campaign_db(
+            repo,
+            temp_path,
+            campaign_id=campaign_id,
+            replace_existing=replace_existing,
+        )
+    except PortabilityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        os.unlink(temp_path)
+    return result
+
+
+@router.get(
+    "/{campaign_id}/characters/{name}/export-db",
+    response_class=Response,
+    tags=["campaign", "export"],
+)
+async def export_character_database(
+    campaign_id: int,
+    name: str,
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+    request: Request = None,
+):
+    """Download one hero as a standalone SQLite file."""
+    audit_logger.log_data_access(
+        user_id=user.get("sub", "unknown"),
+        resource="character_db",
+        action="export",
+        ip=get_client_ip(request) if request else "unknown",
+    )
+    try:
+        payload = export_character_db(repo, campaign_id, name)
+    except PortabilityError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    safe = "".join(
+        character if character.isalnum() or character in "-_" else "_"
+        for character in name
+    )
+    return Response(
+        content=payload,
+        media_type="application/x-sqlite3",
+        headers={
+            "Content-Disposition": f'attachment; filename="character_{safe}.db"'
+        },
+    )
+
+
+@router.post("/{campaign_id}/characters/import-db", tags=["campaign", "import"])
+async def import_character_database(
+    campaign_id: int,
+    file: UploadFile = File(...),
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+    request: Request = None,
+):
+    """Add a hero from a character file; existing names are rejected."""
+    audit_logger.log_data_access(
+        user_id=user.get("sub", "unknown"),
+        resource="character_db",
+        action="import",
+        ip=get_client_ip(request) if request else "unknown",
+    )
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="empty upload")
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as handle:
+        handle.write(content)
+        temp_path = handle.name
+    try:
+        result = import_character_db(repo, campaign_id, temp_path)
+    except PortabilityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        os.unlink(temp_path)
+    return result
 
 
 class NPCRequest(BaseModel):
