@@ -266,9 +266,31 @@ CREATE TABLE IF NOT EXISTS solo_state (
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Campaign-scoped encounter lifecycle. The row is the source of truth for
+-- "what is happening here"; battle roster/dice still live in combatants and
+-- campaign_turns. A partial unique index makes "one active encounter per
+-- campaign" a database invariant, not a convention that a route can forget.
+CREATE TABLE IF NOT EXISTS encounters (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK(kind IN ('battle','loot','door','trap','npc')),
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(status IN ('pending','active','resolved','failed','abandoned')),
+    summary TEXT NOT NULL DEFAULT '',
+    state_json TEXT NOT NULL DEFAULT '{}',
+    seed INTEGER,
+    resolved_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_combatants_campaign ON combatants(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_turns_campaign ON campaign_turns(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_turns_num ON campaign_turns(campaign_id, turn_num);
+CREATE INDEX IF NOT EXISTS idx_encounters_campaign
+    ON encounters(campaign_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_encounters_one_active
+    ON encounters(campaign_id) WHERE status = 'active';
 
 CREATE TRIGGER IF NOT EXISTS trigger_combatants_updated
 AFTER UPDATE ON combatants
@@ -280,6 +302,12 @@ CREATE TRIGGER IF NOT EXISTS trigger_solo_state_updated
 AFTER UPDATE ON solo_state
 BEGIN
     UPDATE solo_state SET updated_at = datetime('now') WHERE campaign_id = NEW.campaign_id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trigger_encounters_updated
+AFTER UPDATE ON encounters
+BEGIN
+    UPDATE encounters SET updated_at = datetime('now') WHERE id = NEW.id;
 END;
 
 -- ──────────────────────────────────────────────────────────────

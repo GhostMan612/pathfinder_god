@@ -28,8 +28,10 @@ Interactive playground (hub running): `http://localhost:8000/docs`.
 | GET | `/campaign/backup` | - | Full export as download |
 | POST | `/campaign/create` | `{name, edition=2e, premise?, hero_prompt?}` | `{campaign_id, opening_narration, ...}` |
 | POST | `/campaign/{campaign_id}/turn` | `{action, actor=player, seed?}` | `TurnResponse` (dice, HP, conditions, narration, choices) |
-| GET | `/campaign/{campaign_id}/state` | - | Solo state (phase, round, combatants, quests, recent turns, chronicle) |
-| POST | `/campaign/{campaign_id}/combat/start` | `{monster_names?, theme?, threat, party_level, seed?}` | Combat state |
+| GET | `/campaign/{campaign_id}/state` | - | Solo state (phase, round, active encounter, combatants, quests, recent turns, chronicle) |
+| GET | `/campaign/{campaign_id}/encounters` | - | `{campaign_id, encounters[]}` newest first |
+| GET | `/campaign/{campaign_id}/encounters/{encounter_id}` | - | One encounter lifecycle record |
+| POST | `/campaign/{campaign_id}/combat/start` | `{monster_names?, theme?, threat, party_level, seed?}` | Combat state + `encounter_id` |
 | POST | `/campaign/{campaign_id}/combat/end-turn`, `/combat/end` | - | Combat state |
 | POST | `/rules/fetch` | `{q, edition}` | Scrape one missing term into the DB permanently (1e live; else 404 + queued) |
 | POST | `/rules/missed` | `{queries: [{q, edition}]}` | Queue offline misses for backfill |
@@ -38,6 +40,24 @@ Interactive playground (hub running): `http://localhost:8000/docs`.
 `RuleHit = {name, content, system, category, source_book}`.
 `backend` is `ollama` or `raw-excerpts` (LLM down — excerpts still answer).
 `edition` accepts `1e 2e both` (aliases like `pf2e` normalized server-side).
+
+### Encounter lifecycle
+
+An encounter is campaign-scoped state: `kind` ∈ `battle loot door trap npc`,
+`status` ∈ `pending active resolved failed abandoned`. Only one encounter per
+campaign may be `active` (database-enforced). Legal transitions:
+
+```
+pending -> active | abandoned
+active  -> resolved | failed | abandoned
+resolved | failed | abandoned -> terminal
+```
+
+`POST /combat/start` creates a `battle` encounter in `pending`, activates it
+once the roster is built, and returns its `encounter_id`. `POST /combat/end`
+resolves it; wiping out the last active monster resolves it as `resolved`, while
+losing the last hero resolves it as `failed`. A new battle abandons the previous
+active encounter. `GET /state` includes the current `active_encounter`.
 
 ## WebSocket `/stream` (alias of `/ask/stream`)
 

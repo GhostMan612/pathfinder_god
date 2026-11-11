@@ -350,7 +350,7 @@ paths:
       tags:
       - rules
       summary: List Missed
-      description: "Queued misses, oldest first \u2014 feed for chunked backfill runs."
+      description: Queued misses, oldest first — feed for chunked backfill runs.
       operationId: list_missed_rules_missed_get
       parameters:
       - name: limit
@@ -857,6 +857,70 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SoloStateResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /campaign/{campaign_id}/encounters:
+    get:
+      tags:
+      - campaign
+      summary: Solo Encounters
+      operationId: solo_encounters_campaign__campaign_id__encounters_get
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Campaign Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignEncounterListResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /campaign/{campaign_id}/encounters/{encounter_id}:
+    get:
+      tags:
+      - campaign
+      summary: Solo Encounter
+      operationId: solo_encounter_campaign__campaign_id__encounters__encounter_id__get
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Campaign Id
+      - name: encounter_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Encounter Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignEncounterResponse'
         '422':
           description: Validation Error
           content:
@@ -1526,6 +1590,61 @@ components:
       required:
       - valid
       title: BuildWorldResponse
+    CampaignEncounterListResponse:
+      properties:
+        campaign_id:
+          type: integer
+          title: Campaign Id
+        encounters:
+          items:
+            $ref: '#/components/schemas/CampaignEncounterResponse'
+          type: array
+          title: Encounters
+          default: []
+      type: object
+      required:
+      - campaign_id
+      title: CampaignEncounterListResponse
+    CampaignEncounterResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        campaign_id:
+          type: integer
+          title: Campaign Id
+        kind:
+          type: string
+          title: Kind
+        status:
+          type: string
+          title: Status
+        summary:
+          type: string
+          title: Summary
+          default: ''
+        state:
+          additionalProperties: true
+          type: object
+          title: State
+          default: {}
+        seed:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Seed
+        resolved_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Resolved At
+      type: object
+      required:
+      - id
+      - campaign_id
+      - kind
+      - status
+      title: CampaignEncounterResponse
     CampaignExport:
       properties:
         campaign:
@@ -1850,6 +1969,11 @@ components:
           - type: string
           - type: 'null'
           title: Active Combatant
+        encounter_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Encounter Id
       type: object
       required:
       - campaign_id
@@ -2907,6 +3031,10 @@ components:
           - type: integer
           - type: 'null'
           title: Active Combatant Id
+        active_encounter:
+          anyOf:
+          - $ref: '#/components/schemas/CampaignEncounterResponse'
+          - type: 'null'
         combatants:
           items:
             additionalProperties: true

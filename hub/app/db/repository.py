@@ -13,9 +13,15 @@ import logging
 import sqlite3
 import struct
 from contextlib import contextmanager
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 
+from app.agents.encounter_state import (
+    TERMINAL_STATUSES,
+    validate_kind,
+    validate_status,
+    validate_transition,
+)
 from app.config import settings
 from app.rag._fts import build_match_query
 
@@ -144,6 +150,30 @@ class SoloState:
     active_combatant_id: int | None = None
     turn_order: list[int] | None = None
     next_turn_num: int = 1
+
+
+@dataclass
+class Encounter:
+    id: int
+    campaign_id: int
+    kind: str
+    status: str
+    summary: str = ""
+    state: dict = field(default_factory=dict)
+    seed: int | None = None
+    resolved_at: str | None = None
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "campaign_id": self.campaign_id,
+            "kind": self.kind,
+            "status": self.status,
+            "summary": self.summary,
+            "state": self.state,
+            "seed": self.seed,
+            "resolved_at": self.resolved_at,
+        }
 
 
 @dataclass
@@ -1521,6 +1551,173 @@ class CampaignRepository:
 
     def set_current_location(self, campaign_id: int, location_id: int) -> SoloState:
         return self.update_solo_state(campaign_id, current_location_id=location_id)
+
+    # ── Encounter lifecycle ─────────────────────────────────────
+
+    @staticmethod
+    def _encounter_from_row(row: dict) -> Encounter:
+        values = dict(row)
+        values["state"] = json.loads(values.pop("state_json") or "{}")
+        values.pop("created_at", None)
+        values.pop("updated_at", None)
+        return Encounter(**values)
+
+    def create_encounter(
+        self,
+        campaign_id: int,
+        kind: str,
+        *,
+        summary: str = "",
+        state: dict | None = None,
+        seed: int | None = None,
+        status: str = "pending",
+    ) -> Encounter:
+        """Create an encounter in ``pending`` (or explicitly ``active``) state."""
+        validate_kind(kind)
+        validate_status(status)
+        with self._conn() as conn:
+            self._ensure_campaign(conn, campaign_id)
+            if status == "active":
+                active = conn.execute(
+                    "SELECT id FROM encounters "
+                    "WHERE campaign_id = ? AND status = 'active'",
+                    (campaign_id,),
+                ).fetchone()
+                if active is not None:
+                    raise ValueError(
+                        f"campaign {campaign_id} already has an active encounter"
+                    )
+            try:
+                row = conn.execute(
+                    """
+                    INSERT INTO encounters
+                        (campaign_id, kind, status, summary, state_json, seed)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    RETURNING *
+                    """,
+                    (
+                        campaign_id,
+                        kind,
+                        status,
+                        summary,
+                        json.dumps(state or {}),
+                        seed,
+                    ),
+                ).fetchone()
+            except sqlite3.IntegrityError as exc:
+                raise ValueError(
+                    f"campaign {campaign_id} already has an active encounter"
+                ) from exc
+            return self._encounter_from_row(dict(row))
+
+    def get_encounter(self, campaign_id: int, encounter_id: int) -> Encounter | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM encounters WHERE campaign_id = ? AND id = ?",
+                (campaign_id, encounter_id),
+            ).fetchone()
+            return self._encounter_from_row(dict(row)) if row else None
+
+    def get_active_encounter(self, campaign_id: int) -> Encounter | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM encounters "
+                "WHERE campaign_id = ? AND status = 'active'",
+                (campaign_id,),
+            ).fetchone()
+            return self._encounter_from_row(dict(row)) if row else None
+
+    def list_encounters(self, campaign_id: int, limit: int = 50) -> list[Encounter]:
+        limit = max(1, min(int(limit), 200))
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM encounters WHERE campaign_id = ? "
+                "ORDER BY id DESC LIMIT ?",
+                (campaign_id, limit),
+            ).fetchall()
+            return [self._encounter_from_row(dict(row)) for row in rows]
+
+    def transition_encounter(
+        self,
+        campaign_id: int,
+        encounter_id: int,
+        status: str,
+        *,
+        summary: str | None = None,
+        state: dict | None = None,
+    ) -> Encounter:
+        """Apply one validated lifecycle transition to an existing encounter."""
+        validate_status(status)
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM encounters WHERE campaign_id = ? AND id = ?",
+                (campaign_id, encounter_id),
+            ).fetchone()
+            if row is None:
+                raise ValueError(
+                    f"no encounter {encounter_id} in campaign {campaign_id}"
+                )
+            current = self._encounter_from_row(dict(row))
+            validate_transition(current.status, status)
+
+            new_summary = summary if summary is not None else current.summary
+            new_state = state if state is not None else current.state
+            assignments = [
+                "status = ?",
+                "summary = ?",
+                "state_json = ?",
+                "updated_at = datetime('now')",
+            ]
+            params: list[object] = [
+                status,
+                new_summary,
+                json.dumps(new_state),
+            ]
+            if status in TERMINAL_STATUSES:
+                assignments.append("resolved_at = datetime('now')")
+            params.extend([campaign_id, encounter_id])
+            try:
+                conn.execute(
+                    f"UPDATE encounters SET {', '.join(assignments)} "
+                    "WHERE campaign_id = ? AND id = ?",
+                    params,
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ValueError(
+                    f"campaign {campaign_id} already has an active encounter"
+                ) from exc
+            row = conn.execute(
+                "SELECT * FROM encounters WHERE campaign_id = ? AND id = ?",
+                (campaign_id, encounter_id),
+            ).fetchone()
+            return self._encounter_from_row(dict(row))
+
+    def resolve_active_encounter(
+        self,
+        campaign_id: int,
+        status: str = "resolved",
+        *,
+        summary: str | None = None,
+        state: dict | None = None,
+    ) -> Encounter | None:
+        """Resolve the campaign's active encounter, if one exists."""
+        active = self.get_active_encounter(campaign_id)
+        if active is None:
+            return None
+        return self.transition_encounter(
+            campaign_id, active.id, status, summary=summary, state=state
+        )
+
+    def abandon_active_encounter(
+        self, campaign_id: int, *, summary: str | None = None
+    ) -> Encounter | None:
+        """Abandon the campaign's active encounter, if one exists."""
+        active = self.get_active_encounter(campaign_id)
+        if active is None:
+            return None
+        return self.transition_encounter(
+            campaign_id, active.id, "abandoned", summary=summary
+        )
 
     def upsert_combatant(
         self,

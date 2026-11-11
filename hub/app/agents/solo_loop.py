@@ -219,6 +219,7 @@ class CombatStartResult:
     round: int
     combatants: list[dict]
     active_combatant: str | None
+    encounter_id: int | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -227,6 +228,7 @@ class CombatStartResult:
             "round": self.round,
             "combatants": self.combatants,
             "active_combatant": self.active_combatant,
+            "encounter_id": self.encounter_id,
         }
 
 
@@ -827,13 +829,22 @@ class SoloLoop:
             target_temp_hp=target.temp_hp,
         )
         conditions = list(target.conditions or [])
+        dead = False
         if result.new_hp <= 0 and result.damage_dealt > 0:
             conditions, dead = gain_dying(conditions, wounded=wounded_value(conditions))
             if dead:
                 notes.append(f"{target.name} is dead.")
-        self.repo.update_combatant(
-            target.id, hp=result.new_hp, temp_hp=result.new_temp_hp, conditions=conditions
-        )
+        update_kwargs: dict[str, Any] = {
+            "hp": result.new_hp,
+            "temp_hp": result.new_temp_hp,
+            "conditions": conditions,
+        }
+        if dead:
+            # Dead foes must leave the active roster immediately; waiting for
+            # their initiative slot left a corpse in the turn order and kept
+            # the encounter from ever reaching its resolved state.
+            update_kwargs["is_active"] = False
+        self.repo.update_combatant(target.id, **update_kwargs)
         notes.append(
             f"Attack vs {target.name} (AC {target.ac}): {result.outcome}, "
             f"{result.damage_dealt} damage. {result.notes}"
@@ -948,8 +959,11 @@ class SoloLoop:
         """End the current combatant's turn, advance initiative, wrap rounds."""
         order = list(state.turn_order or [])
         combatants = self.repo.get_combatants(campaign_id, active_only=True)
-        if not order or not combatants:
-            return state
+        if not combatants:
+            self.repo.resolve_active_encounter(
+                campaign_id, "resolved", summary="Combat ended"
+            )
+            return self._leave_combat(campaign_id)
         current_id = state.active_combatant_id
         current = next((c for c in combatants if c.id == current_id), None)
         if current is not None:
@@ -967,15 +981,31 @@ class SoloLoop:
             ):
                 self.repo.update_combatant(current.id, is_active=False)
                 combatants = self.repo.get_combatants(campaign_id, active_only=True)
+
+        # Victory/defeat is a roster condition, not an initiative condition.
+        # The old loop kept advancing heroes after every monster was dead
+        # because it only stopped when the entire roster was empty.
+        if not any(c.kind == "hero" for c in combatants):
+            self.repo.resolve_active_encounter(
+                campaign_id, "failed", summary="All heroes defeated"
+            )
+            return self._leave_combat(campaign_id)
+        if not any(c.kind == "monster" for c in combatants):
+            self.repo.resolve_active_encounter(
+                campaign_id, "resolved", summary="All foes defeated"
+            )
+            return self._leave_combat(campaign_id)
+
         # Re-read the order: deaths may have removed combatants.
         order = [c.id for c in combatants if c.id in order]
         if not order:
-            # Nobody left standing: combat is over, so the roster goes
-            # inactive with the phase change, not just the initiative.
-            self.repo.deactivate_combatants(campaign_id)
-            return self.repo.update_solo_state(
-                campaign_id, phase="exploration", round_num=1, clear_active=True, turn_order=[]
+            # Defensive: active combatants exist but the saved initiative
+            # order has lost them. End cleanly rather than leaving phase
+            # combat with no turn owner.
+            self.repo.resolve_active_encounter(
+                campaign_id, "resolved", summary="Combat ended"
             )
+            return self._leave_combat(campaign_id)
         if current_id in order:
             idx = order.index(current_id)
             nxt = order[(idx + 1) % len(order)]
@@ -985,6 +1015,17 @@ class SoloLoop:
             new_round = state.round_num
         return self.repo.update_solo_state(
             campaign_id, round_num=new_round, active_combatant_id=nxt, turn_order=order
+        )
+
+    def _leave_combat(self, campaign_id: int) -> Any:
+        """Leave the combat phase and retire the active roster."""
+        self.repo.deactivate_combatants(campaign_id)
+        return self.repo.update_solo_state(
+            campaign_id,
+            phase="exploration",
+            round_num=1,
+            clear_active=True,
+            turn_order=[],
         )
 
     # ── LLM structured outcome + narration ────────────────────
@@ -1188,8 +1229,30 @@ class SoloLoop:
         if not self.repo.campaign_exists(campaign_id):
             raise ValueError(f"no campaign {campaign_id}")
         state = self.repo.ensure_solo_state(campaign_id)
-        rng = random.Random(
-            seed if seed is not None else zlib.crc32(f"combat:{campaign_id}".encode())
+        combat_seed = (
+            seed
+            if seed is not None
+            else zlib.crc32(f"combat:{campaign_id}".encode())
+        )
+        rng = random.Random(combat_seed)
+        # A new battle supersedes whatever lifecycle record was active. The
+        # encounter row must be abandoned before the roster is cleared, so a
+        # failed setup cannot leave an active battle pointing at deleted foes.
+        self.repo.abandon_active_encounter(
+            campaign_id, summary="Superseded by a new battle"
+        )
+        encounter = self.repo.create_encounter(
+            campaign_id,
+            "battle",
+            summary=theme or ", ".join(monster_names or []) or "Battle",
+            state={
+                "monster_names": list(monster_names or []),
+                "theme": theme,
+                "threat": threat,
+                "party_level": party_level,
+                "seed": combat_seed,
+            },
+            seed=combat_seed,
         )
         # Keep persistent hero rows; discard only the previous encounter.
         self.repo.clear_non_hero_combatants(campaign_id)
@@ -1245,6 +1308,18 @@ class SoloLoop:
             active_combatant_id=order_ids[0] if order_ids else None,
             turn_order=order_ids,
         )
+        encounter = self.repo.transition_encounter(
+            campaign_id,
+            encounter.id,
+            "active",
+            state={
+                **encounter.state,
+                "combatant_ids": order_ids,
+                "turn_order": order_ids,
+                "round": 1,
+                "active_combatant_id": order_ids[0] if order_ids else None,
+            },
+        )
         self.repo.mirror_combat_json(campaign_id)
         return CombatStartResult(
             campaign_id=campaign_id,
@@ -1252,6 +1327,7 @@ class SoloLoop:
             round=1,
             combatants=[self._combatant_dict(c) for c in combatants],
             active_combatant=combatants[0].name if combatants else None,
+            encounter_id=encounter.id,
         )
 
     @staticmethod
@@ -1354,6 +1430,11 @@ class SoloLoop:
     async def _end_combat_locked(self, campaign_id: int) -> dict:
         if not self.repo.campaign_exists(campaign_id):
             raise ValueError(f"no campaign {campaign_id}")
+        active = self.repo.get_active_encounter(campaign_id)
+        if active is not None and active.kind == "battle":
+            self.repo.resolve_active_encounter(
+                campaign_id, "resolved", summary="Combat ended by player"
+            )
         self.repo.update_solo_state(
             campaign_id, phase="exploration", round_num=1, clear_active=True, turn_order=[]
         )
@@ -1403,5 +1484,11 @@ class SoloLoop:
                 }
                 for t in turns
             ],
+            "active_encounter": (
+                active.to_dict()
+                if (active := self.repo.get_active_encounter(campaign_id))
+                is not None
+                else None
+            ),
             "chronicle": self.repo.get_campaign_summary(campaign_id),
         }

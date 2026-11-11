@@ -1,4 +1,4 @@
-﻿# ============================================================
+# ============================================================
 # As Above, So Below. As Within, So Without.
 # The Future Dictates the Past and the Past is Always Present.
 # ============================================================
@@ -657,6 +657,22 @@ class TurnResponse(BaseModel):
     kind: str = "other"
 
 
+class CampaignEncounterResponse(BaseModel):
+    id: int
+    campaign_id: int
+    kind: str
+    status: str
+    summary: str = ""
+    state: dict = {}
+    seed: int | None = None
+    resolved_at: str | None = None
+
+
+class CampaignEncounterListResponse(BaseModel):
+    campaign_id: int
+    encounters: list[CampaignEncounterResponse] = []
+
+
 class SoloStateResponse(BaseModel):
     campaign_id: int
     name: str
@@ -666,6 +682,7 @@ class SoloStateResponse(BaseModel):
     location: str | None = None
     location_id: int | None = None
     active_combatant_id: int | None = None
+    active_encounter: CampaignEncounterResponse | None = None
     combatants: list[dict] = []
     quests: list[dict] = []
     recent_turns: list[dict] = []
@@ -686,6 +703,7 @@ class CombatStartResponse(BaseModel):
     round: int
     combatants: list[dict] = []
     active_combatant: str | None = None
+    encounter_id: int | None = None
 
 
 class CombatEndTurnResponse(BaseModel):
@@ -761,6 +779,44 @@ async def solo_state(
         return SoloStateResponse(**loop.get_state(campaign_id))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/{campaign_id}/encounters", response_model=CampaignEncounterListResponse)
+async def solo_encounters(
+    campaign_id: int,
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+) -> CampaignEncounterListResponse:
+    if not repo.campaign_exists(campaign_id):
+        raise HTTPException(status_code=404, detail=f"no campaign {campaign_id}")
+    return CampaignEncounterListResponse(
+        campaign_id=campaign_id,
+        encounters=[
+            CampaignEncounterResponse(**encounter.to_dict())
+            for encounter in repo.list_encounters(campaign_id)
+        ],
+    )
+
+
+@router.get(
+    "/{campaign_id}/encounters/{encounter_id}",
+    response_model=CampaignEncounterResponse,
+)
+async def solo_encounter(
+    campaign_id: int,
+    encounter_id: int,
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+) -> CampaignEncounterResponse:
+    if not repo.campaign_exists(campaign_id):
+        raise HTTPException(status_code=404, detail=f"no campaign {campaign_id}")
+    encounter = repo.get_encounter(campaign_id, encounter_id)
+    if encounter is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"no encounter {encounter_id} in campaign {campaign_id}",
+        )
+    return CampaignEncounterResponse(**encounter.to_dict())
 
 
 @router.post("/{campaign_id}/combat/start", response_model=CombatStartResponse)
