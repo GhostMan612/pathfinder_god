@@ -25,7 +25,12 @@ Interactive playground (hub running): `http://localhost:8000/docs`.
 | POST | `/campaign/import` | Export payload | Merged state (incl. sessions, notes, decisions) |
 | POST | `/campaign/summarize-session` | `{events[], campaign_name}` | `{summary, event_count}` — chronicler journal entry |
 | GET/POST | `/campaign/npcs`, `/campaign/party` | NPC/member JSON | IDs + names |
-| GET | `/campaign/backup` | — | Full export as download |
+| GET | `/campaign/backup` | - | Full export as download |
+| POST | `/campaign/create` | `{name, edition=2e, premise?, hero_prompt?}` | `{campaign_id, opening_narration, ...}` |
+| POST | `/campaign/{campaign_id}/turn` | `{action, actor=player, seed?}` | `TurnResponse` (dice, HP, conditions, narration, choices) |
+| GET | `/campaign/{campaign_id}/state` | - | Solo state (phase, round, combatants, quests, recent turns, chronicle) |
+| POST | `/campaign/{campaign_id}/combat/start` | `{monster_names?, theme?, threat, party_level, seed?}` | Combat state |
+| POST | `/campaign/{campaign_id}/combat/end-turn`, `/combat/end` | - | Combat state |
 | POST | `/rules/fetch` | `{q, edition}` | Scrape one missing term into the DB permanently (1e live; else 404 + queued) |
 | POST | `/rules/missed` | `{queries: [{q, edition}]}` | Queue offline misses for backfill |
 | GET | `/rules/missed?limit=` | — | Queued misses (backfill feed) |
@@ -45,6 +50,39 @@ Send one JSON frame: `{query, edition, mode?, history}`. Receive frames:
 
 The Spoke emits its own `retrying` frame across reconnects (server regenerates
 the answer; clients should clear partial text). 15s ping keeps Android Doze away.
+
+### Solo turn frames (same `/stream` socket)
+
+A solo campaign turn uses the same WebSocket instead of a separate
+`/campaign/ws/{id}` route. Send one turn frame:
+
+```json
+{"campaign_id": 1, "action": "I search the altar", "actor": "player", "seed": 123}
+```
+
+`type: "turn"` is accepted as a marker, but `campaign_id` + `action` are the
+required fields. `actor` defaults to `"player"`; `seed` is optional and makes
+resolution reproducible.
+
+Event order and shapes:
+
+```
+{type: "start", campaign_id, turn_num, phase, round}
+{type: "dice", dice_rolls[]}
+{type: "hp", hp_changes[]}
+{type: "conditions", conditions[]}
+{type: "narration", text}*          # sentence chunks
+{type: "end", result: TurnResult}
+| {type: "error", message}
+```
+
+The resolver, RNG, and persisted state are identical to
+`POST /campaign/{campaign_id}/turn`; the socket is an observer sink, so a dropped
+client does not abort or partially apply the turn. When an API key is configured,
+turn frames require `X-API-Key`, `Authorization: Bearer ...`, or `?api_key=...`.
+Ask frames remain backward-compatible with keyless local installs.
+`shared/openapi.yaml` documents the REST contract only; this section is the
+authoritative WebSocket contract.
 
 ## mDNS discovery (out-of-band, no auth)
 
