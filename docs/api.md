@@ -27,7 +27,7 @@ Interactive playground (hub running): `http://localhost:8000/docs`.
 | GET/POST | `/campaign/npcs`, `/campaign/party` | NPC/member JSON | IDs + names |
 | GET | `/campaign/backup` | - | Full export as download |
 | POST | `/campaign/create` | `{name, edition=2e, premise?, hero_prompt?}` | `{campaign_id, opening_narration, ...}` |
-| POST | `/campaign/{campaign_id}/turn` | `{action, actor=player, seed?}` | `TurnResponse` (dice, HP, conditions, narration, choices) |
+| POST | `/campaign/{campaign_id}/turn` | `{action, actor=player, seed?}` | `TurnResponse` (dice, HP, conditions, narration, choices, encounter) |
 | GET | `/campaign/{campaign_id}/state` | - | Solo state (phase, round, world tick, active encounter, combatants, quests, recent turns, chronicle) |
 | GET | `/campaign/{campaign_id}/graph` | - | `{campaign_id, world_tick, current_location_id, nodes[], edges[], event_count}` |
 | POST | `/campaign/{campaign_id}/graph/edges` | `{from_location_id, to_location_id, kind=trail, label?, travel_ticks=1, state?, bidirectional=false}` | One travel edge (plus the reverse when bidirectional) |
@@ -109,6 +109,29 @@ is already active, it stays `pending` and the tool returns a note. The
 transition tool applies the validated matrix, including `instant: true` for a
 pending trap.
 
+#### Automatic turn-action detection
+
+Plain solo turns do not need a GM tool call to trigger an encounter. Before the
+normal deterministic resolver runs, `SoloLoop` detects door, NPC, loot, and trap
+actions from the raw text (`I open the door`, `I talk to the merchant`,
+`I search the chest`, `I disarm the trap`) and creates/advances the encounter
+through the same `CampaignRepository` methods as the routes and tools. This is
+the path behind the Spoke's `type: "turn"` frame.
+
+- A matched action creates the encounter at the party's current location and
+  tries to activate it. If another encounter already holds the active slot, it
+  stays `pending` with the reason in the turn notes.
+- A one-roll trap attempt (`disarm`, `trigger`, `step on`, `avoid`) rolls the
+  seeded skill check into the turn's normal `dice_rolls` and resolves through
+  `instant: true`; it never takes the active slot. A multi-turn disarm
+  (`begin`/`start`/`continue`/`work on`/`carefully`/`slowly`) activates the trap
+  instead.
+- The normal resolution still runs. `I search the chest` creates the loot
+  encounter and still rolls the search skill check.
+- `TurnResult` and the REST `TurnResponse` carry `encounter: { ... } | null`.
+  The WS turn stream emits an `encounter` frame with the same record plus
+  `activated`, `instant`, and `note`.
+
 ### Encounter map links
 
 When `/map/generate` is called with `campaign_id` and that campaign has an
@@ -165,9 +188,10 @@ Event order and shapes:
 {type: "start", campaign_id, turn_num, phase, round}
 {type: "dice", dice_rolls[]}
 {type: "hp", hp_changes[]}
+{type: "encounter", encounter, activated, instant, note}  # when detected
 {type: "conditions", conditions[]}
 {type: "narration", text}*          # sentence chunks
-{type: "end", result: TurnResult}
+{type: "end", result: TurnResult}   # result.encounter mirrors the frame
 | {type: "error", message}
 ```
 

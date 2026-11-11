@@ -55,7 +55,7 @@ is pushed, committed, or PR'd without his explicit approval.
 - [x] **Instant trap hazards** (Muse carve-out): `instant: true` lets a pending
       `trap` transition straight to `resolved`/`failed` without taking the
       active-encounter slot, logged as `hazard_resolved`. Door/NPC/loot GM
-      in-turn triggers remain next.
+      in-turn triggers and automatic turn-action detection landed in Slice 1.
 
 ## Decisions made — locked in
 
@@ -111,6 +111,14 @@ is pushed, committed, or PR'd without his explicit approval.
       at the current location, activate when the slot is free, and stay
       `pending` with a note when another encounter is active. Hub **441 tests
       pass**, Ruff clean.
+- [x] Automatic turn-action detection in `SoloLoop` (Slice 1): plain turns
+      like `I open the door`, `I talk to the merchant`, `I search the chest`,
+      and `I disarm the trap` create/advance the encounter through the same
+      repository service before normal resolution. One-roll trap attempts roll
+      the seeded skill check and resolve via the `instant` carve-out; multi-turn
+      disarms activate. `TurnResult` and the WS `encounter` frame surface it;
+      `TurnResponse` gains an additive optional `encounter` field (no new
+      routes). Hub **472 tests pass**, Ruff clean; no Spoke build run.
 - [x] Link encounters to map positions — **battle slice landed at `890876b`**:
       battle tokens carry encounter/combatant IDs plus grid cells, and the
       scene persists on the encounter. Loot/NPC/door/trap token links follow

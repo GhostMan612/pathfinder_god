@@ -327,3 +327,69 @@ When an encounter activates, attach the deterministic 3D scene JSON (already emi
 - World clock tick: HELD — Glenn has an idea; do not design the tick. The clock advances by edge `travel_ticks` today; leave it alone until he says otherwise.
 
 **House rules (unchanged).** Main only, no new branches. Hub lane ends at pytest green. Ruff on `app/ tests/`. Genesis header on every `.py`/`.kt` file. Explicit `git add` paths only. Synthetic data only. Never claim CI green without seeing the CI result. The repo is the source of truth.
+
+### DeepSeek — Slice 1 landed: deterministic turn-action detection — 2026-11-10
+
+Muse's blueprint is implemented on `main` at `0ad4a6f` (code); this docs commit
+carries the note. The Spoke's `type: "turn"` path now triggers encounters from
+the words, not from a GM tool call.
+
+**What landed**
+- Pure `detect_encounter_action(action) -> (kind, target) | None` in
+  `hub/app/agents/solo_loop.py`, called in `_take_turn_locked` after
+  `classify_action` and before `_resolve_deterministic`.
+- Door / NPC / loot / trap verbs cover base, gerund, and simple past forms, plus
+  plural nouns. `I open the door`, `I talk to the merchant`, `I search the
+  chest`, `I disarm the trap`, and `I begin disarming the trap` all detect.
+- Matches create or reuse a pending/active encounter at the current location
+  through `CampaignRepository` (`create_encounter` / `transition_encounter`) —
+  the same service layer as the REST routes and GM tools. No new routes, no
+  hub self-HTTP.
+- Activation is attempted only when the slot is free. If another encounter is
+  active, the new one stays `pending` and the reason is appended to the turn
+  notes.
+- One-roll trap attempts (`disarm`, `trigger`, `step on`, `avoid`) roll through
+  the shared `_roll_skill_check` path, so the d20 lands in the normal
+  `dice_rolls`, then resolve with `instant=True` (`hazard_resolved`) without
+  taking the active slot. A DC in encounter state wins; otherwise the existing
+  `SKILL_CHECK_DC` (15) is used.
+- Multi-turn trap phrasing (`begin`/`start`/`continue`/`work on`/`carefully`/
+  `slowly`) creates/activates a trap instead of resolving it immediately. A
+  later `I continue disarming the trap` reuses the same active record.
+- Entity matching is best-effort, never required: a named NPC combatant is
+  linked by name into `state.npc_id` / `state.npc_name`; a door is attached from
+  the most recent encounter `state.map.scene.doors` at the same location when a
+  map exists. Missing entities still create the encounter from the action text.
+- Detection re-runs after an LLM refinement from `other` when the first pass
+  found nothing, as specified.
+- `TurnResult` and `TurnResponse` carry `encounter: { ... } | null`; the WS turn
+  stream emits `{"type": "encounter", encounter, activated, instant, note}`
+  alongside dice/HP and the final `end` result mirrors it.
+- `shared/openapi.yaml` regenerated: one additive optional property
+  (`TurnResponse.encounter`). This is a schema addition, not a new route; the
+  blueprint's "no OpenAPI changes" line was read as "no new routes".
+
+**Verification**
+- New `hub/tests/test_solo_encounter_detection.py`: 31 cases covering every verb
+  family, no-match, active-slot conflict, instant trap, multi-turn trap, NPC
+  linkage, loot-plus-skill roll, WS event, narration note, LLM-refinement
+  re-run, and the response field.
+- Full hub suite: **472 passed**, 0 failed. Ruff clean on `app/ tests/`.
+  (One earlier full run hit the existing semantic-recall p95 latency assertion
+  at 61.27 ms vs 60 ms; the test passed standalone and the full rerun was
+  green. Not caused by this slice.)
+- No Spoke code changed and no native build was run. `HubApiFactory` /
+  `HubWebSocketClient` both use `ignoreUnknownKeys = true`, so the additive
+  `encounter` field cannot break the existing DTO.
+- Moto G is still unattached; no device, LAN, haptics, or TalkBack evidence is
+  claimed. No GitHub Actions result was observed; no CI claim.
+
+**Git**
+- Code: `0ad4a6f` — `feat(campaign): detect door/NPC/loot/trap actions in solo
+  turns`.
+- Docs: this commit. Pushed to `origin/main`; no new branches.
+
+**Next**
+- Slice 2 (per-kind state shapes and resolvers) is next per the blueprint.
+- Remaining map-link work is Slice 3; the 3D stage switch is Slice 4.
+- The world clock tick stays held per Glenn.
