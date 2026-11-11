@@ -290,6 +290,46 @@ async def test_authenticated_party_sheet_ac_reaches_combat(
     assert any(condition["name"] == "Wounded" for condition in refreshed["conditions"])
 
 
+def test_party_level_update_preserves_explicit_sheet_ac_until_cleared(
+    tmp_path: Path,
+) -> None:
+    repo = CampaignRepository(str(tmp_path / "campaign.db"))
+    campaign = repo.create_campaign("SAMPLE PARTY")
+    cid = campaign.id
+
+    repo.upsert_party_member(cid, "SAMPLE HERO", level=3, stats={"ac": 23})
+    repo.upsert_party_member(cid, "SAMPLE HERO", level=4)
+    saved = next(p for p in repo.get_party(cid) if p["name"] == "SAMPLE HERO")
+    assert saved["level"] == 4
+    assert json.loads(saved["stats_json"]) == {"ac": 23}
+
+    # Explicit {} is a real, deliberate sheet clear, unlike omitted stats.
+    repo.upsert_party_member(cid, "SAMPLE HERO", level=4, stats={})
+    cleared = next(p for p in repo.get_party(cid) if p["name"] == "SAMPLE HERO")
+    assert json.loads(cleared["stats_json"]) == {}
+
+
+def test_combatant_ac_update_is_validated_and_does_not_reset_wounds(
+    tmp_path: Path,
+) -> None:
+    repo = CampaignRepository(str(tmp_path / "campaign.db"))
+    campaign = repo.create_campaign("SAMPLE PARTY")
+    hero_id = repo.upsert_combatant(
+        campaign_id=campaign.id, name="SAMPLE HERO", kind="hero",
+        hp=11, max_hp=30, ac=20, initiative=4,
+    )
+    with pytest.raises(ValueError, match="positive integer"):
+        repo.update_combatant(hero_id, ac=True)
+    with pytest.raises(ValueError, match="positive integer"):
+        repo.update_combatant(hero_id, ac=-10)
+    updated = repo.update_combatant(hero_id, ac=26)
+    assert updated is not None
+    assert updated.ac == 26
+    assert updated.hp == 11 and updated.max_hp == 30
+    saved = repo.get_combatant_by_name(campaign.id, "SAMPLE HERO")
+    assert saved is not None and saved.ac == 26 and saved.hp == 11
+
+
 async def test_hero_ac_without_sheet_scales_as_house_default(tmp_path: Path) -> None:
     loop = _make_loop(tmp_path / "campaign.db")
     created = await loop.create_campaign(
