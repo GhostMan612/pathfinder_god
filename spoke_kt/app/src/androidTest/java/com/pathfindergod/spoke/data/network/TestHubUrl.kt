@@ -10,6 +10,7 @@ import android.os.Build
 import androidx.test.platform.app.InstrumentationRegistry
 import com.pathfindergod.spoke.data.local.AppPreferences
 import java.net.URI
+import java.net.URISyntaxException
 
 /** Resolve a Hub endpoint for real-device tests without hardcoded laptop IPs. */
 object TestHubUrl {
@@ -29,7 +30,7 @@ object TestHubUrl {
         val value = if (candidate.contains("://")) candidate else "http://$candidate"
         val uri = try {
             URI(value)
-        } catch (exc: IllegalArgumentException) {
+        } catch (exc: URISyntaxException) {
             throw IllegalArgumentException("Malformed test Hub URL", exc)
         }
         require(
