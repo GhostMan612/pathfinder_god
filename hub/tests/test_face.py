@@ -171,7 +171,7 @@ def test_face_create_campaign_uses_htmx_redirect(authenticated_client: TestClien
     assert response.status_code == 200
     redirect = response.headers["hx-redirect"]
     assert redirect.startswith("/play?campaign_id=")
-    campaign_id = int(redirect.rsplit("=", 1)[1])
+    assert int(redirect.rsplit("=", 1)[1]) > 0
 
     page = authenticated_client.get(redirect)
     assert page.status_code == 200
