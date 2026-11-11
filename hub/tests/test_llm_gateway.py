@@ -141,6 +141,41 @@ async def test_builder_cache_hit_avoids_second_http_call():
 
 
 @pytest.mark.asyncio
+async def test_cache_key_includes_sampling_settings():
+    client = _FakeClient()
+    gateway = LlmGateway(_settings(), client_factory=lambda: client)
+    try:
+        await gateway.generate(
+            "same prompt", task="builder", format="json", temperature=0.6
+        )
+        # Same prompt, different temperature: a fresh generation, not a
+        # cache hit from the first call.
+        await gateway.generate(
+            "same prompt", task="builder", format="json", temperature=0.9
+        )
+        assert client.calls == ["same prompt", "same prompt"]
+        assert gateway.stats()["cache_hits"] == 0
+        # Same prompt and same sampling as the first call: a cache hit.
+        await gateway.generate(
+            "same prompt", task="builder", format="json", temperature=0.6
+        )
+        assert client.calls == ["same prompt", "same prompt"]
+        assert gateway.stats()["cache_hits"] == 1
+        # Same prompt and temperature, different num_predict: fresh again.
+        await gateway.generate(
+            "same prompt",
+            task="builder",
+            format="json",
+            temperature=0.6,
+            num_predict=100,
+        )
+        assert len(client.calls) == 3
+        assert gateway.stats()["cache_hits"] == 1
+    finally:
+        await gateway.close()
+
+
+@pytest.mark.asyncio
 async def test_chat_is_never_cached():
     client = _FakeClient()
     gateway = LlmGateway(_settings(), client_factory=lambda: client)
@@ -166,6 +201,52 @@ async def test_cache_expires_after_ttl():
         await gateway.generate("expiring", task="rules")
         assert client.calls == ["expiring", "expiring"]
         assert gateway.stats()["cache_hits"] == 0
+    finally:
+        await gateway.close()
+
+
+@pytest.mark.asyncio
+async def test_cancel_after_dispatch_does_not_deadlock_gateway():
+    """A waiter cancelled after the dispatcher hands it a slot must not leak
+    the semaphore permit. Without the fix, the next generation hangs forever
+    (max_inflight=1), because the cancelled waiter never reaches the yield
+    whose finally releases the permit."""
+    client = _FakeClient(block_prompt="held")
+    gateway = LlmGateway(_settings(), client_factory=lambda: client)
+    try:
+        held = asyncio.create_task(
+            gateway.generate("held", task="chat", priority=1)
+        )
+        await asyncio.wait_for(client.started.wait(), timeout=2)
+        queued = asyncio.create_task(
+            gateway.generate("queued", task="chat", priority=1)
+        )
+        await asyncio.sleep(0.02)
+        # The queued ticket is the only item in the gateway's queue. Wrap
+        # its set_result so the cancellation lands after the dispatcher
+        # hands it the slot but before the waiter resumes — the exact
+        # interleaving a client disconnect can produce.
+        ticket = gateway._queue._queue[0]
+        orig_set_result = ticket.future.set_result
+
+        def _set_result_and_cancel(result):
+            orig_set_result(result)
+            queued.cancel()
+
+        ticket.future.set_result = _set_result_and_cancel
+        client.release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await queued
+        await asyncio.wait_for(held, timeout=2)
+
+        # The leaked permit would hang this forever.
+        assert (
+            await asyncio.wait_for(
+                gateway.generate("after", task="chat"), timeout=2
+            )
+            == "answer:after"
+        )
+        assert gateway.stats()["cancelled"] == 1
     finally:
         await gateway.close()
 

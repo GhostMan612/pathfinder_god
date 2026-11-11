@@ -6,27 +6,58 @@
 package com.pathfindergod.spoke.data.network
 
 import android.content.Context
+import android.os.Build
 import androidx.test.platform.app.InstrumentationRegistry
 import com.pathfindergod.spoke.data.local.AppPreferences
+import java.net.URI
 
-/**
- * Hub base URL for instrumentation tests.
- *
- * The laptop's LAN IP changes between networks, so it must not be baked
- * into a test. Priority: the `hubBaseUrl` instrumentation argument, then
- * the hub URL the app already has stored in Settings, then the emulator
- * default. Pass the argument with either of:
- *
- *   ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.hubBaseUrl=http://192.168.1.10:8000
- *   adb shell am instrument -e hubBaseUrl http://192.168.1.10:8000 -w com.pathfindergod.spoke.test/androidx.test.runner.AndroidJUnitRunner
- */
+/** Resolve a Hub endpoint for real-device tests without hardcoded laptop IPs. */
 object TestHubUrl {
     fun resolve(context: Context? = null): String {
-        val fromArg = InstrumentationRegistry.getArguments()
-            .getString("hubBaseUrl")?.trim().orEmpty()
-        if (fromArg.isNotEmpty()) return fromArg.trimEnd('/')
-        val ctx = context
-            ?: InstrumentationRegistry.getInstrumentation().targetContext
-        return AppPreferences(ctx).baseUrl().trimEnd('/')
+        val ctx = context ?: InstrumentationRegistry.getInstrumentation().targetContext
+        return choose(
+            InstrumentationRegistry.getArguments().getString("hubBaseUrl"),
+            AppPreferences(ctx).baseUrl(),
+            isEmulator(),
+        )
+    }
+
+    internal fun choose(argument: String?, saved: String, isEmulator: Boolean): String {
+        val explicit = argument?.trim().orEmpty()
+        val candidate = explicit.ifBlank { saved.trim() }
+            .ifBlank { AppPreferences.DEFAULT_BASE_URL }.trimEnd('/')
+        val value = if (candidate.contains("://")) candidate else "http://$candidate"
+        val uri = try {
+            URI(value)
+        } catch (exc: IllegalArgumentException) {
+            throw IllegalArgumentException("Malformed test Hub URL", exc)
+        }
+        require(
+            (uri.scheme == "http" || uri.scheme == "https") &&
+                !uri.host.isNullOrBlank() && uri.rawUserInfo == null &&
+                uri.rawQuery == null && uri.rawFragment == null &&
+                (uri.rawPath.isNullOrEmpty() || uri.rawPath == "/")
+        ) { "Test Hub URL must be an http(s) server root without credentials" }
+
+        if (explicit.isBlank() && !isEmulator &&
+            uri.scheme == "http" && uri.host == "10.0.2.2"
+        ) {
+            error(
+                "Physical-device smoke tests require hubBaseUrl=<laptop LAN URL> " +
+                    "as instrumentation argument or a custom Hub URL in Settings; " +
+                    "10.0.2.2 is emulator-only."
+            )
+        }
+        return value.trimEnd('/')
+    }
+
+    private fun isEmulator(): Boolean {
+        val fingerprint = Build.FINGERPRINT.lowercase()
+        val model = Build.MODEL.lowercase()
+        val product = Build.PRODUCT.lowercase()
+        return fingerprint.startsWith("generic") ||
+            fingerprint.startsWith("unknown") ||
+            model.contains("emulator") ||
+            product.startsWith("sdk")
     }
 }

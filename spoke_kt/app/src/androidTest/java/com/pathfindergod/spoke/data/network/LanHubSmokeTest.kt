@@ -14,7 +14,7 @@ import java.net.URL
 class LanHubSmokeTest {
 
     @Test
-    fun hubAtLaptopLanIpIsReachableOverCleartextHttp() {
+    fun configuredHubHealthEndpointResponds() {
         val url = URL("${TestHubUrl.resolve()}/health")
         val conn = url.openConnection() as HttpURLConnection
         conn.connectTimeout = 5000
