@@ -22,6 +22,19 @@ from app.agents.map_maker import MapLayout, MapMakerAgent, MapRoom
 logger = logging.getLogger(__name__)
 
 
+def _scene_from_state(state: dict | None) -> dict | None:
+    """Return the scene stored on an encounter state, if any."""
+    if not isinstance(state, dict):
+        return None
+    existing = state.get("scene")
+    if isinstance(existing, dict):
+        return copy.deepcopy(existing)
+    map_scene = (state.get("map") or {}).get("scene")
+    if isinstance(map_scene, dict):
+        return copy.deepcopy(map_scene)
+    return None
+
+
 def stage_scene_for_location(
     repo: Any, campaign_id: int, location_id: int | None
 ) -> dict | None:
@@ -29,15 +42,22 @@ def stage_scene_for_location(
     if location_id is None:
         return None
 
+    # The active encounter owns the stage: its scene wins even when a newer
+    # resolved encounter at the same location already has one. This is a
+    # direct query, so it also survives campaigns with more than 200
+    # encounters (list_encounters caps at 200).
+    active = repo.get_active_encounter(campaign_id)
+    if active is not None and active.location_id == location_id:
+        scene = _scene_from_state(active.state)
+        if scene is not None:
+            return scene
+
     for encounter in repo.list_encounters(campaign_id, limit=200):
         if encounter.location_id != location_id:
             continue
-        existing = encounter.state.get("scene")
-        if isinstance(existing, dict):
-            return copy.deepcopy(existing)
-        map_scene = (encounter.state.get("map") or {}).get("scene")
-        if isinstance(map_scene, dict):
-            return copy.deepcopy(map_scene)
+        scene = _scene_from_state(encounter.state)
+        if scene is not None:
+            return scene
 
     location = repo.get_location(campaign_id, location_id)
     name = location.name if location is not None else "SAMPLE LOCATION"
