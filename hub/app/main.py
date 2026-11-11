@@ -16,6 +16,7 @@ from app.api import (
     campaign,
     combat,
     encounter,
+    face,
     generate,
     loot,
     maps,
@@ -131,6 +132,7 @@ def create_app() -> FastAPI:
     app.include_router(encounter.router)
     app.include_router(maps.router)
     app.include_router(stage.router)
+    app.include_router(face.router)
     app.include_router(voice.router)
 
     # loot.router was registered twice (lines 80 and 88). FastAPI emitted

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in — Pathfinder God</title>
+  <link rel="stylesheet" href="/play/static/face.css">
+</head>
+<body class="login-body">
+  <main class="login-card">
+    <p class="eyebrow">The table is local</p>
+    <h1>Pathfinder <span class="gold">God</span></h1>
+    <p class="muted">Enter the hub API key to open the browser face. Keyless local installs skip this page.</p>
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    <form method="post" action="/play/login" class="login-form">
+      <label for="api-key">API key</label>
+      <input id="api-key" name="api_key" type="password" autocomplete="current-password" required autofocus>
+      <input type="hidden" name="next_path" value="/play">
+      <button class="primary" type="submit">Enter the campaign</button>
+    </form>
+    <p class="muted small">The key is verified against the configured SHA-256 and never stored in the page.</p>
+  </main>
+</body>
+</html>

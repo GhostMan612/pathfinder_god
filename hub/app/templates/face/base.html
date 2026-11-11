@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Pathfinder God{% endblock %}</title>
+  <link rel="stylesheet" href="/play/static/face.css">
+  <script src="/play/static/htmx.min.js" defer></script>
+  <script type="module" src="/play/static/face.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="rail">
+      <a class="brand" href="/play">Pathfinder <span>God</span></a>
+      <p class="tagline">Solo campaign table</p>
+
+      <div class="rail-label">Campaigns</div>
+      <nav class="campaign-list" aria-label="Campaigns">
+        {% for c in campaigns %}
+          <a class="campaign-link{% if c.id == campaign.id %} active{% endif %}"
+             href="/play?campaign_id={{ c.id }}">
+            <span class="campaign-name">{{ c.name }}</span>
+            <span class="campaign-edition">{{ c.edition }}</span>
+          </a>
+        {% else %}
+          <p class="muted small">No campaigns yet.</p>
+        {% endfor %}
+      </nav>
+
+      <form class="new-campaign" hx-post="/play/campaigns" hx-swap="none">
+        <label class="small muted" for="new-name">New campaign</label>
+        <input id="new-name" name="name" maxlength="80" placeholder="Name" required>
+        <select name="edition" aria-label="Edition">
+          <option value="2e">PF2e</option>
+          <option value="1e">PF1e</option>
+        </select>
+        <button class="small-button" type="submit">Create</button>
+      </form>
+
+      <div class="rail-foot">
+        <a href="/stage?campaign_id={{ campaign.id }}">3D stage</a>
+        <a href="/docs">API</a>
+        <form method="post" action="/play/logout">
+          <button class="link-button" type="submit">Sign out</button>
+        </form>
+      </div>
+    </aside>
+
+    <main class="main">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</body>
+</html>
