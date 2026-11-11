@@ -112,15 +112,25 @@ Landed on `encounter-state-machine` at `86f5eda` and pushed.
 - Pushed to `origin`
 - `main` remains `61f0878`; no PR opened and no merge performed
 
-### Muse — God-Tier prompt for the build agent — 2026-11-10
+### Muse — God-Tier prompt for the build agent — 2026-11-10 (CORRECTED)
 
-Supersedes the short Muse response above. Standing direction from Phoenix to the build agent working this branch.
+Supersedes the earlier prompt above. Standing direction from Phoenix to the build agent. Read the correction first — it changes the workflow.
 
-**You are the build agent.** You build; Phoenix reviews and verifies; Glenn decides. Glenn is the only merge authority. Nothing merges, no PR is opened, and nothing is pushed to `main` unless Glenn says so. `main` stays untouched while this branch is the working branch. Do not touch `council-chain-pilot` — that is a separate experiment, not this work.
+**Standing rule from Glenn — NO NEW BRANCHES.** Work on `main` locally, push to `main` remote. No feature branches, no PR branches, no extra branches. This supersedes the earlier instruction that said "`main` stays untouched while this branch is the working branch" — that instruction is withdrawn as of 10 Nov 2026 evening.
+
+**Transition — do this first, before any new work:**
+1. Verify this branch: hub tests green (expect 429+), Ruff clean on `app/ tests/`.
+2. Merge this branch (`encounter-state-machine`) into `main` locally (a real merge commit, not squash/rebase). It was verified clean (no conflicts) on 10 Nov 2026 evening — re-check with `git merge-tree` first; if a conflict appears, stop and write it here instead of resolving it yourself.
+3. Push `main` to GitHub.
+4. Delete this branch, locally and on the remote. After that, this branch must not exist.
+5. From here on, all work happens on `main`: pull main, work, commit, push main. `FOR_MUSE.md` comes along with the merge, so this channel keeps working from main.
+- `council-chain-pilot` is exempt — it is the separate council chain experiment, not feature work. Leave it alone.
+
+**You are the build agent.** You build; Phoenix reviews and verifies; Glenn decides. Glenn is the only merge authority. Nothing merges and nothing is pushed to `main` except through this workflow (work on main, push main) unless Glenn says otherwise.
 
 **Where we are (verified 10 Nov 2026 evening):**
-- `main` = 61f0878 (PR #2 merged, both PRs closed). No floating branches: only main, council-chain-pilot, encounter-state-machine.
-- This branch `encounter-state-machine` = 313685a3 (9 DeepSeek commits + Phoenix's response). Hub: 429 passed, Ruff clean (CI scope). Spoke: assembleDebug + testDebugUnitTest reported successful (not re-verified here). Moto G: unverified.
+- `main` = 61f0878 (PR #2 merged, both PRs closed). Branches: main, council-chain-pilot, encounter-state-machine (the last one goes away in the transition above).
+- This branch `encounter-state-machine` = 70dcec56 (9 DeepSeek commits + Phoenix's response + Phoenix's God-Tier prompt). Hub: 429 passed, Ruff clean (CI scope). Spoke: assembleDebug + testDebugUnitTest reported successful (not re-verified here). Moto G: unverified.
 - The work so far: battle-first encounter state machine (97e21a2), battle token ↔ map linking (890876b), breadcrumb graph + generic encounter lifecycle (86f5eda). Battle was chosen first because it proves the 2D→3D switch.
 - The design decisions (endorsed, challengeable): lazy trail edges; generic REST routes first for door/trap/npc/loot; direct location_id on encounters; one-active-encounter invariant unchanged.
 
@@ -130,10 +140,10 @@ Supersedes the short Muse response above. Standing direction from Phoenix to the
 3. Direct `location_id` on each encounter — agree. "What's at this location" needs an indexed column, not a dig through JSON state.
 4. One-active-encounter invariant — keep it for now, with one carve-out to consider: instant-resolution hazards. A trap that fires and resolves in a single roll (save + damage) doesn't need to become an "active encounter" waiting on the invariant — it can be an event in the campaign log. If a trap opens a full encounter (it reveals monsters, or the party must disarm it over turns), then it goes through the normal activation wait. That keeps the state machine simple without making traps queue behind a door encounter.
 
-**What to build next (in order):**
+**What to build next (in order, on main after the transition):**
 1. Door / trap / NPC / loot lifecycle wiring through the generic REST routes (POST /encounters, POST /encounters/{id}/transition). GM in-turn triggers come after the REST layer is solid.
 2. The instant-resolution hazards carve-out above, as part of the trap wiring.
-3. Then: open a draft PR for this branch (Glenn decides when), or continue to the next checklist item — ask Glenn, or write it here if unsure. Do not start a new big slice without Glenn's direction.
+3. Then: continue to the next checklist item — ask Glenn, or write it here if unsure. Do not start a new big slice without Glenn's direction.
 
 **How to work:**
 - House rules (AGENTS.md): explicit `git add` paths only; every .py/.kt file keeps the Genesis header; synthetic data only; hub lane ends at pytest green; shared/openapi.yaml is the contract — regenerate it when the API changes.
@@ -142,4 +152,4 @@ Supersedes the short Muse response above. Standing direction from Phoenix to the
 - Write every slice's handoff into this file (dated, append-only): what changed, verification numbers, git state, open questions. The repo is the source of truth — if this file and the repo disagree, the repo wins.
 - If a decision in this prompt turns out wrong, say so here and propose the change — don't silently rewrite verified work.
 
-**The channel:** this file is our wire. I read every entry; I verify the claims I can (hub tests, Ruff) and answer the open questions. Keep the entries coming and I'll keep answering. Note: this file lives on `encounter-state-machine`, not on `main` — the channel is branch-local until this branch merges.
+**The channel:** this file is our wire. I read every entry; I verify the claims I can (hub tests, Ruff) and answer the open questions. Keep the entries coming and I'll keep answering. After the transition, this file lives on `main`.
