@@ -51,7 +51,11 @@ is pushed, committed, or PR'd without his explicit approval.
       creates `battle`/`loot`/`door`/`trap`/`npc` records and
       `POST /campaign/{id}/encounters/{id}/transition` applies the validated
       matrix, with location attachment and event logging in the same
-      transaction. Content-specific door/trap/NPC/loot triggers are next.
+      transaction.
+- [x] **Instant trap hazards** (Muse carve-out): `instant: true` lets a pending
+      `trap` transition straight to `resolved`/`failed` without taking the
+      active-encounter slot, logged as `hazard_resolved`. Door/NPC/loot GM
+      in-turn triggers remain next.
 
 ## Decisions made — locked in
 
@@ -99,9 +103,9 @@ is pushed, committed, or PR'd without his explicit approval.
 
 - [x] PR #2 merge decision — Glenn approved; merged and pushed `61f0878`.
 - [x] Encounter state machine: types + transitions (battle, loot, door, trap,
-      NPC, …). **Battle-first slice landed on `encounter-state-machine` at
-      `97e21a2`; all five kinds now share the generic create/transition routes,
-      with content-specific triggers next.**
+      NPC, …). **All five kinds share the generic create/transition routes, and
+      pending traps can resolve instantly via the `instant` carve-out. GM
+      in-turn door/NPC/loot triggers remain.**
 - [x] Link encounters to map positions — **battle slice landed at `890876b`**:
       battle tokens carry encounter/combatant IDs plus grid cells, and the
       scene persists on the encounter. Loot/NPC/door/trap token links follow

@@ -1,22 +1,22 @@
 # Pathfinder God — God-Tier Master Prompt
-<!-- Hand this whole file to the best model in OpenCode. Paste it as the first message of a fresh session, in the repo root, on the `solo-campaign-loop` branch. On `main` it also lives at `docs/MASTER_PROMPT.md`, auto-read via the Session start pointer in `AGENTS.md`. -->
+<!-- Hand this whole file to the best model in OpenCode. Paste it as the first message of a fresh session, in the repo root, on `main` (no feature branches). It lives at `docs/MASTER_PROMPT.md`, auto-read via the Session start pointer in `AGENTS.md`. -->
 
 ## 1. Who you are and what this is
 
 You are the lead builder on **GhostMan612/pathfinder_god**: a Python FastAPI hub + Kotlin Android app that is becoming an AI-assisted game master for solo Pathfinder 2e play. The end goal: a person plays a solo campaign with a local LLM as GM — the GM builds worlds, characters, NPCs, monsters, loot, and items, runs turns and combat, uses a map generator in play, and eventually renders a 3D dungeon world for immersive encounters.
 
-You work for Glenn. **Glenn is the only merge authority.** Nothing merges, nothing pushes to `main`, nothing ships, without his explicit say-so in chat. Your job is to build, verify, and report — never to merge.
+You work for Glenn. **Glenn is the only merge authority.** Nothing merges, nothing pushes to `main`, and nothing ships without his explicit say-so in chat. Standing workflow from 10 Nov 2026: work on `main` locally, commit, push `main`; no feature branches, no PR branches. Your job is to build, verify, and report — the merge/push is allowed only through that explicit workflow.
 
 ## 2. Current state — verified 10 November 2026 (refreshed ~20:35 CST)
 
-- `main` is at `8968ee09` — the master checklist now lives on main at `docs/pathfinder-god-checklist.md`, and this prompt lives there too at `docs/MASTER_PROMPT.md` (OpenCode auto-reads it via the Session start pointer in `AGENTS.md`).
+- `main` is at `15ce4c9` — the merge commit that brought the encounter branch onto main. The master checklist lives at `docs/pathfinder-god-checklist.md`, and this prompt lives at `docs/MASTER_PROMPT.md` (OpenCode auto-reads it via the Session start pointer in `AGENTS.md`).
 - **PR #1 (NPC/builders) is MERGED** (merge commit `e4054b7`).
-- **PR #2 (solo campaign loop) is open, draft, unmerged, base `main`, head `0227584`.** Its diff is 41 files, +8025/−48. Hub tests: **407 passed, 0 failed. Ruff clean. 59 new tests** over main's 348.
-- Landed in PR #2 since the last refresh: WS streaming turns (`86d2414`); GM Oracle WS chat screen in the God tab (`f2cc6e4`); walkable grid, doors, corridors, spawn/exit, 3D token positions (`7109440`); destructive migration removed from both spoke Room DBs + LAN smoke test (`fd0d6a8`); hybrid semantic recall for campaign sessions, enabled by default (`0227584`).
+- **PR #2 (solo campaign loop) is MERGED** at `61f0878`. The former `encounter-state-machine` branch merged at `15ce4c9` and was deleted locally and remotely on 10 Nov 2026.
+- Landed in PR #2 and the follow-on encounter branch: WS streaming turns (`86d2414`); GM Oracle WS chat screen in the God tab (`f2cc6e4`); walkable grid, doors, corridors, spawn/exit, 3D token positions (`7109440`); destructive migration removed from both spoke Room DBs + LAN smoke test (`fd0d6a8`); hybrid semantic recall for campaign sessions enabled by default (`0227584`); battle encounter state machine (`97e21a2`); battle token ↔ map links (`890876b`); breadcrumb graph + generic encounter lifecycle (`86f5eda`); instant trap hazard carve-out (this slice).
 - What PR #2 adds: new tables `combatants`, `campaign_turns`, `solo_state`; `POST /campaign/create`, `POST /campaign/{id}/turn`, `GET /campaign/{id}/state`, combat start/end-turn/end; Dying-4 death, recovery DC 10+Dying, Wounded modifies Dying; GM tools `roll_dice`, `resolve_strike`, `end_turn`, `build_npc`, `build_monster`, `generate_loot`, `generate_map`.
 - What PR #2 fixed in review (do not regress these): duplicate monster names collapsing on `UNIQUE(campaign_id, name)`; `end_combat` leaving active combatants; `end_turn`/`end_combat` auto-creating missing campaigns; LLM refining kind `"other"` to attack without re-resolving; resting in exploration healing nothing; encounter monsters all getting AC 15; turn numbers not transactionally locked (now reserved via a locked `solo_state` counter, `reserve_turn_num`).
 - Follow-ups already landed in PR #2: hero HP/conditions survive between encounters (`start_combat` clears only monsters/NPCs); a per-campaign asyncio gate serializes `take_turn`/`start_combat`/`end_turn`/`end_combat`; the legacy combatants-table migration recreates `idx_combatants_campaign` and `trigger_combatants_updated`.
-- Known limits (do not "fix" unasked): the turn gate is **in-process only** — the hub runs a single uvicorn worker, so that is correct for now; a multi-worker hub would need a DB-level lease. GitHub CI status on PR #2 was last **unverified** — check it yourself (Task 0).
+- Known limits (do not "fix" unasked): the turn gate is **in-process only** — the hub runs a single uvicorn worker, so that is correct for now; a multi-worker hub would need a DB-level lease. GitHub Actions status on `main` is not asserted here — check it yourself (Task 0).
 
 ## 3. Architecture — the facts, not guesses
 
@@ -33,7 +33,7 @@ You work for Glenn. **Glenn is the only merge authority.** Nothing merges, nothi
 3. Every `.py` / `.kt` file keeps the Genesis header (`As Above, So Below…`).
 4. Synthetic data only — no real names in code or tests.
 5. Never touch the read-only external dirs (`C:\sovereign_tagger_bak`, `C:\Recovery for All`, `C:\Sovereign Nodes`, `C:\sovereign_mantle`, `C:\sovereign_tagger_2`).
-6. Work on the `solo-campaign-loop` branch. Commit to the branch; push the branch. Never push to `main`. Never merge. PRs stay draft until Glenn says otherwise.
+6. Work on `main` locally. Commit explicit paths, push `main`. No feature branches, no PR branches. `council-chain-pilot` is the only exempt experiment.
 7. At session end, update `docs/pathfinder-god-checklist.md` to match what actually landed — code commits and checklist updates are separate commits. (The old `blueprints/`, `CHANGELOG.md`, `CHECKLIST.md`, `CHECKPOINTS.md` files do not exist in the repo; `blueprints/` is gitignored by workflow law.)
 
 ## 5. Your toolchain — use the right model for the job
@@ -45,7 +45,7 @@ You work for Glenn. **Glenn is the only merge authority.** Nothing merges, nothi
 ## 6. Tasks — in this order, one at a time, report after each
 
 ### Task 0 — Verify the baseline (do this first, before changing anything)
-Run `git status`, `git log --oneline -5`, `pytest hub/tests/ -q`, `ruff check app/ tests/`, and check GitHub CI on PR #2 (Hub Lint, Hub Tests, Spoke Unit Tests, Spoke Build Android debug). Report the numbers. If CI is red, fixing CI becomes Task 0b and nothing else starts until it is green. **Do not undraft or merge PR #2 — that is Glenn's call, not yours.**
+Run `git status`, `git log --oneline -5`, `pytest hub/tests/ -q`, and `ruff check app/ tests/`. Report the numbers. If GitHub Actions is visible on `main`, report its real status; never claim CI green without seeing it. If CI is red, fixing CI becomes Task 0b and nothing else starts until it is green.
 
 ### Task 1 — WS streaming turns — DONE (`86d2414`)
 Streamed `POST /campaign/{id}/turn` over the existing WebSocket path (incremental dice/HP/narration events, `test_solo_ws_stream.py`). Verify against the current head; keep the deterministic resolution order identical — streaming is a transport change, not a rules change.
@@ -53,8 +53,8 @@ Streamed `POST /campaign/{id}/turn` over the existing WebSocket path (incrementa
 ### Task 2 — GM chat screen in the spoke — DONE (`f2cc6e4`)
 The GM Oracle WS chat screen landed in the God tab (`GmChatScreen`/`GmChatViewModel`, `HubWebSocketClient`). It streams turns over WS and shows narration, dice, HP changes, and campaign state. Verify on a real device with `assembleDebug` + `testDebugUnitTest`; report what is still untested.
 
-### Task 3 — Playable maps and 3D token positions — MAPS DONE (`7109440`), BATTLE TOKEN LINKS DONE (`890876b`), BREADCRUMB GRAPH FOUNDATION DONE, LOOT/NPC LINKS OPEN
-The walkable grid, doors, corridors, connectivity, spawn/exit, and 3D token positions landed. Battle map generation now links hero/monster/npc tokens to the active encounter and combatant IDs, and persists the linked scene on the encounter (`state.map`). The breadcrumb graph foundation adds `location_edges`, immutable tick-stamped `campaign_events`, `solo_state.world_tick`, `GET /graph`, `POST /graph/edges`, `POST /move`, `GET /events`, and generic create/transition routes for all five encounter kinds. Remaining: link loot, NPC-only scenes, doors, and traps to map/3D token positions as those encounter kinds wire up, and add content-specific door/trap/NPC/loot triggers. The hub's deterministic 3D scene JSON is the source of truth; the spoke already renders it as Filament dioramas — extend the linked-token fields into interaction, not just scenery.
+### Task 3 — Playable maps and 3D token positions — MAPS DONE (`7109440`), BATTLE TOKEN LINKS DONE (`890876b`), BREADCRUMB GRAPH + GENERIC LIFECYCLE DONE, INSTANT TRAPS DONE, LOOT/NPC LINKS OPEN
+The walkable grid, doors, corridors, connectivity, spawn/exit, and 3D token positions landed. Battle map generation links hero/monster/npc tokens to the active encounter and combatant IDs, and persists the linked scene on the encounter (`state.map`). The breadcrumb graph adds `location_edges`, immutable tick-stamped `campaign_events`, `solo_state.world_tick`, `GET /graph`, `POST /graph/edges`, `POST /move`, `GET /events`, and generic create/transition routes for all five encounter kinds. Pending traps can resolve instantly via `instant: true` without taking the active slot (`hazard_resolved`). Remaining: link loot, NPC-only scenes, doors, and traps to map/3D token positions as those encounter kinds wire up, and add in-turn GM triggers for door/NPC/loot. The hub's deterministic 3D scene JSON is the source of truth; the spoke already renders it as Filament dioramas — extend the linked-token fields into interaction, not just scenery.
 
 ### Task 4 — Android P0 checks (Moto G is connected — use it)
 (a) Real-phone LAN test: hub on the laptop, phone on the same Wi-Fi, hub at the laptop's LAN IP — **not** the emulator's `10.0.2.2`. A LAN smoke test landed (`fd0d6a8`) but the on-device run is still unconfirmed — confirm the cleartext config works on a real device or fix it. (b) DONE: `fallbackToDestructiveMigration` removed from both Room databases (`fd0d6a8`, with the missing migration 1→2 filled in). Verify by installing the debug build on the Moto G and running the character-forge flow, a combat, and a map render end to end; report pass/fail per check with device logs.

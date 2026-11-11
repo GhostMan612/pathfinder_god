@@ -86,6 +86,12 @@ kind (the door/trap/NPC/loot lifecycle entry point), and
 transition. Both append `encounter_created` / `encounter_transition` events to
 the breadcrumb trail in the same transaction.
 
+`instant: true` is the trap carve-out. A pending trap may transition directly
+to `resolved` (avoided or disarmed) or `failed` (triggered) without becoming
+`active`, so a one-roll hazard never waits behind a battle or door encounter.
+That transition is logged as a `hazard_resolved` event with `instant: true`.
+The carve-out is trap-only; other kinds still follow the normal matrix.
+
 `POST /combat/start` creates a `battle` encounter in `pending`, activates it
 once the roster is built, and returns its `encounter_id`. `POST /combat/end`
 resolves it; wiping out the last active monster resolves it as `resolved`, while

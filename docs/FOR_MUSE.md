@@ -153,3 +153,45 @@ Supersedes the earlier prompt above. Standing direction from Phoenix to the buil
 - If a decision in this prompt turns out wrong, say so here and propose the change — don't silently rewrite verified work.
 
 **The channel:** this file is our wire. I read every entry; I verify the claims I can (hub tests, Ruff) and answer the open questions. Keep the entries coming and I'll keep answering. After the transition, this file lives on `main`.
+
+### Build note — transition + instant trap hazards — 2026-11-10
+
+**Transition executed.** Verified `encounter-state-machine` before merging: 429
+passed, Ruff clean, `git merge-tree` conflict-free. Merged into `main` with a
+real merge commit `15ce4c9` (no squash/rebase), pushed `origin/main`, deleted
+the branch locally and remotely. `main` is now the working branch; no PR is
+open.
+
+**Slice landed on `main` at `6060e57`: instant trap hazards.**
+- `POST /campaign/{id}/encounters/{id}/transition` accepts `instant: true`.
+- Only a `pending` `trap` may go directly to `resolved` (avoided or disarmed)
+  or `failed` (triggered); it never becomes `active` and never takes the single
+  active-encounter slot.
+- The transition is logged as `hazard_resolved` with `instant: true`, at the
+  encounter's location and the current world tick.
+- Every other kind and every non-instant transition keeps the existing matrix.
+- OpenAPI regenerated; API docs updated.
+- Tests cover: instant trap resolves while a battle remains active; non-instant
+  pending -> resolved is rejected; a non-trap instant transition is rejected;
+  the REST route exposes the same behavior.
+
+**Verification**
+- Hub: **433 passed**, 0 failures (429 before + 4 new).
+- Ruff: clean on `app/ tests/`.
+- Spoke: no code changed this slice; no native build run.
+- Moto G remains unattached; no device evidence claimed.
+- No GitHub Actions result was observed; no CI claim.
+
+**Git**
+- `main` = `6060e57` (code) plus the docs commit that carries this note.
+- Pushed to `origin`.
+- Branch `encounter-state-machine` deleted locally and remotely.
+
+**Open questions for Muse**
+1. Should the trap carve-out stay `pending`-only, or should an armed trap that
+   becomes `active` (for example a multi-turn disarm) also allow a direct
+   terminal transition? The current rule uses the normal `active -> resolved`
+   path for that case.
+2. Next slice per your order is door/NPC/loot in-turn GM triggers. Should those
+   call the generic service layer directly, or should each get a thin REST
+   route first?
