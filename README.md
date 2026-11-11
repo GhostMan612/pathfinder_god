@@ -65,7 +65,7 @@ Full guide (Ollama models, firewall, LAN IP): [`docs/setup-hub-windows.md`](docs
 2. **Setup → Tether** → enter `http://<laptop-LAN-IP>:8000` → CONNECT → green CONNECTED.
 
 Lane: `./gradlew assembleDebug` (Temurin 17, `--no-daemon`). Never commit APKs.
-Retired Flutter notes: [`docs/setup-spoke-android.md`](docs/setup-spoke-android.md).
+Native device setup and instrumentation: [`docs/setup-spoke-android.md`](docs/setup-spoke-android.md).
 
 ### 3. Command Center (Windows GM console, optional)
 `Start_CommandCenter.bat` launches the standalone console: start/stop Ollama + Hub,
@@ -116,7 +116,11 @@ Flutter spoke deleted (Phase 22): `spoke_kt/` is the client. Terminal UI is Jetp
 Compose **plus one first-party Filament surface** — the dice pit (`ui/pit/FilamentPit.kt`,
 lit `shadingModel`, directional key light + IBL, shadow-mapped ground plane). No
 Unity/Godot, no game engine, no NDK/CMake — which is also why AGDK's Swappy is rejected.
-Current: hub `pytest hub/tests/`: 300 passed · `assembleDebug`: BUILD SUCCESSFUL.
+Verification: the hub Pytest suite, Ruff, Android JVM tests, and debug APK
+build are exercised by [GitHub Actions](.github/workflows/ci.yml). Check the
+latest run on `main` for current counts rather than treating a historical
+300-test snapshot as a present-day result. Physical-phone instrumentation
+testing and production HTTPS connectivity are separate acceptance gates.
 BP-06 (WP-0…WP-9), BP-08, and SS-001 (P01–P05) are code-complete; semantic
 retrieval stays default-OFF (`PFGOD_SEMANTIC_ENABLED=False`) until a real-corpus
 index budget is recorded. See `blueprints/CURRENT_STATE.md` (local-only).
