@@ -10,8 +10,6 @@ const mount = document.getElementById('three-mount');
 const canvas2d = document.getElementById('grid2d');
 const statusEl = document.getElementById('status');
 const logEl = document.getElementById('log');
-// Preserve the selected campaign when navigating from the browser dashboard.
-// The static HTML defaults to campaign 1; URL query is only an initial hint.
 const requestedCampaignId = new URLSearchParams(location.search).get('campaign_id');
 const requestedNumber = Number(requestedCampaignId);
 if (requestedCampaignId && Number.isSafeInteger(requestedNumber) &&
@@ -37,8 +35,6 @@ function apiKey() {
 function setStatus(text) { statusEl.textContent = text; }
 const MAX_LOG_CHARS = 16_384;
 function log(text) {
-  // Long streamed turns otherwise prepend forever and eventually freeze the
-  // page. Keep the newest 16 KiB and avoid inserting markup from model text.
   const next = String(text ?? '') + (logEl.textContent ? '\n' + logEl.textContent : '');
   logEl.textContent = next.slice(0, MAX_LOG_CHARS);
 }
@@ -271,8 +267,6 @@ function setScene(scene) {
 // ── transport ────────────────────────────────────────────────────────
 function connectStage() {
   const cid = campaignId();
-  // Invalidate the previous socket *before* closing it. Old close/message
-  // events can arrive asynchronously after a new socket is established.
   const previous = ws;
   ws = null;
   if (previous) { try { previous.close(); } catch (_) {} }
