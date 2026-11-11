@@ -10,6 +10,7 @@ The GM Storyteller can call these agent tools:
 - Rules Lawyer: lookup_rule, calculate_dc, validate_action
 - NPC Compiler: create_npc, save_npc_to_db, level_up
 - Continuity Keeper: process_session, get_campaign_context
+- Solo loop: dice/combat/builders/map plus encounter triggers
 """
 
 import asyncio
@@ -21,6 +22,7 @@ from collections.abc import AsyncGenerator
 from dataclasses import asdict, dataclass, is_dataclass
 from typing import ClassVar, Self
 
+from app.agents.encounter_state import EncounterStateError
 from app.agents.npc_compiler import NPC_COMPILER_TOOLS, NPCCompilerAgent
 from app.agents.rules_lawyer import (
     ABSTENTION_TEXT,
@@ -163,7 +165,83 @@ SOLO_LOOP_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "trigger_door",
+            "description": "Create a door encounter at the party's current location when the story reaches a door, and activate it if no other encounter is active.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string", "description": "What the door is, e.g. 'SAMPLE IRON DOOR'"},
+                    "state": {"type": "object", "description": "Door state such as {locked, dc, open}"},
+                    "location_id": {"type": "integer", "description": "Omit to use the party's current location"},
+                    "activate": {"type": "boolean", "default": True},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "trigger_npc",
+            "description": "Create an NPC encounter at the party's current location when the party meets someone, and activate it if no other encounter is active.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string", "description": "Who the party met, e.g. 'SAMPLE MERCHANT'"},
+                    "state": {"type": "object", "description": "NPC state such as {disposition, met}"},
+                    "location_id": {"type": "integer", "description": "Omit to use the party's current location"},
+                    "activate": {"type": "boolean", "default": True},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "trigger_loot",
+            "description": "Create a loot encounter at the party's current location when they find a chest, cache, or corpse, and activate it if no other encounter is active.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string", "description": "What was found, e.g. 'SAMPLE CACHE'"},
+                    "state": {"type": "object", "description": "Loot state such as {items, claimed}"},
+                    "location_id": {"type": "integer", "description": "Omit to use the party's current location"},
+                    "activate": {"type": "boolean", "default": True},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "transition_encounter",
+            "description": "Apply a validated lifecycle transition to an existing encounter. Use instant=true only for a pending trap that resolves in one roll.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "encounter_id": {"type": "integer"},
+                    "status": {
+                        "type": "string",
+                        "enum": ["active", "resolved", "failed", "abandoned"],
+                    },
+                    "summary": {"type": "string"},
+                    "state": {"type": "object"},
+                    "instant": {"type": "boolean", "default": False},
+                },
+                "required": ["encounter_id", "status"],
+            },
+        },
+    },
 ]
+
+# GM trigger tools map to the same encounter service the REST routes use.
+ENCOUNTER_TRIGGER_TOOLS = {
+    "trigger_door": "door",
+    "trigger_npc": "npc",
+    "trigger_loot": "loot",
+}
 
 
 def _sentence_chunks(text: str) -> list[str]:
@@ -726,6 +804,57 @@ class LLMOrchestrator:
     # Tool Handlers (called when Ollama invokes a tool)
     # ══════════════════════════════════════════════════════════════
 
+    def _trigger_encounter_tool(
+        self, campaign_id: int, kind: str, arguments: dict
+    ) -> dict:
+        """Create (and normally activate) a door/NPC/loot encounter.
+
+        Calls ``CampaignRepository`` directly, the same service the generic
+        REST routes use. If another encounter already owns the active slot,
+        the new encounter stays pending and the tool says why.
+        """
+        try:
+            encounter = self.repo.create_encounter(
+                campaign_id,
+                kind,
+                summary=str(arguments.get("summary") or ""),
+                state=arguments.get("state") or {},
+                location_id=arguments.get("location_id"),
+            )
+        except (EncounterStateError, ValueError) as exc:
+            return {"error": str(exc)}
+
+        activated = False
+        note = ""
+        if arguments.get("activate", True):
+            try:
+                encounter = self.repo.transition_encounter(
+                    campaign_id, encounter.id, "active"
+                )
+                activated = True
+            except (EncounterStateError, ValueError) as exc:
+                note = str(exc)
+        return {
+            "encounter": encounter.to_dict(),
+            "activated": activated,
+            "note": note,
+        }
+
+    def _transition_encounter_tool(self, campaign_id: int, arguments: dict) -> dict:
+        """Apply one validated lifecycle transition via the encounter service."""
+        try:
+            encounter = self.repo.transition_encounter(
+                campaign_id,
+                int(arguments["encounter_id"]),
+                str(arguments["status"]),
+                summary=arguments.get("summary"),
+                state=arguments.get("state"),
+                instant=bool(arguments.get("instant", False)),
+            )
+        except (EncounterStateError, ValueError) as exc:
+            return {"error": str(exc)}
+        return {"encounter": encounter.to_dict()}
+
     async def handle_tool_call(self, tool_name: str, arguments: dict, campaign_id: int = 1) -> dict:
         """Execute a tool call and return result."""
         try:
@@ -897,6 +1026,14 @@ class LLMOrchestrator:
                     ),
                     "linked_token_count": linked_count,
                 }
+            elif tool_name in ENCOUNTER_TRIGGER_TOOLS:
+                return self._trigger_encounter_tool(
+                    campaign_id,
+                    ENCOUNTER_TRIGGER_TOOLS[tool_name],
+                    arguments,
+                )
+            elif tool_name == "transition_encounter":
+                return self._transition_encounter_tool(campaign_id, arguments)
             elif tool_name == "save_npc_to_db":
                 return await self.npc_compiler.save_npc_to_db(arguments["npc_json"], campaign_id)
             elif tool_name == "level_up":
