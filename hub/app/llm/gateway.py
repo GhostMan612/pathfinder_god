@@ -132,8 +132,24 @@ class LlmGateway:
         system: str,
         task: str,
         fmt: str | None,
+        temperature: float,
+        num_predict: int,
     ) -> str:
-        raw = "\x00".join((model, prompt, system, task, fmt or ""))
+        # Sampling is part of the key: two builder calls with the same
+        # prompt but different temperature / num_predict must not share
+        # a cached result. repr(float(...)) and int(...) normalize the
+        # formatting so equivalent settings hash identically.
+        raw = "\x00".join(
+            (
+                model,
+                prompt,
+                system,
+                task,
+                fmt or "",
+                repr(float(temperature)),
+                str(int(num_predict)),
+            )
+        )
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def _cache_get(self, key: str) -> str | None:
@@ -204,7 +220,9 @@ class LlmGateway:
         model = model or self._s.ollama_model
         cache_key = None
         if task in CACHEABLE_TASKS:
-            cache_key = self._cache_key(model, prompt, system, task, format)
+            cache_key = self._cache_key(
+                model, prompt, system, task, format, temperature, num_predict
+            )
             cached = self._cache_get(cache_key)
             if cached is not None:
                 return cached
