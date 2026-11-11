@@ -32,6 +32,10 @@ class TestHubUrlTest {
         assertThrows(IllegalStateException::class.java) {
             TestHubUrl.choose(null, "http://10.0.2.2:8000", false)
         }
+        // Even an explicit emulator-only URL is invalid on a real handset.
+        assertThrows(IllegalStateException::class.java) {
+            TestHubUrl.choose("http://10.0.2.2:8000", "", false)
+        }
     }
 
     @Test fun malformedTransportOrCredentialsAreRejected() {
