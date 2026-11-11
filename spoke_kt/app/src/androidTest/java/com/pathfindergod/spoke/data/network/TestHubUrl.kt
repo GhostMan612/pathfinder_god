@@ -40,9 +40,7 @@ object TestHubUrl {
                 (uri.rawPath.isNullOrEmpty() || uri.rawPath == "/")
         ) { "Test Hub URL must be an http(s) server root without credentials" }
 
-        if (explicit.isBlank() && !isEmulator &&
-            uri.scheme == "http" && uri.host == "10.0.2.2"
-        ) {
+        if (!isEmulator && uri.host == "10.0.2.2") {
             error(
                 "Physical-device smoke tests require hubBaseUrl=<laptop LAN URL> " +
                     "as instrumentation argument or a custom Hub URL in Settings; " +
@@ -53,12 +51,12 @@ object TestHubUrl {
     }
 
     private fun isEmulator(): Boolean {
-        val fingerprint = Build.FINGERPRINT.lowercase()
+        val hardware = Build.HARDWARE.lowercase()
         val model = Build.MODEL.lowercase()
-        val product = Build.PRODUCT.lowercase()
-        return fingerprint.startsWith("generic") ||
-            fingerprint.startsWith("unknown") ||
-            model.contains("emulator") ||
-            product.startsWith("sdk")
+        // Requiring a recognized emulator hardware or model avoids treating
+        // an unusual/unknown vendor fingerprint as proof of an emulator.
+        return hardware.contains("ranchu") ||
+            hardware.contains("goldfish") ||
+            model.contains("emulator")
     }
 }
