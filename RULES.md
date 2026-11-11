@@ -24,10 +24,15 @@ C:\sovereign_tagger_2
 - Never commit: `.env`, API keys, keystores (`*.keystore`, `debug.keystore`), `local.properties`.
 - Commercial IWADs (DOOM2.WAD etc.) live ONLY outside the repo at `C:\Doom Shit\IWADs\`. Never copy them into `C:\pathfinder_god`.
 
-### 1.3 Git discipline
-- **Stage by explicit path only.** `git add -A` / `git add .` are FORBIDDEN — they pull in unrelated work.
-- Commits happen as part of an approved session workflow; never force-push, rebase public history, or delete branches unless explicitly asked.
-- `blueprints\` and `_archive\` are intentionally gitignored — do not "fix" this.
+### 1.3 Git discipline — PR-first integration gate (supersedes the 10 Nov 2026 main-only rule)
+- **`main` is merge-only.** No agent may commit or push directly to `main`, including docs-only work, unless the repository owner explicitly authorizes an emergency exception. Existing references to "no branches", "work on main", or "push main" in dated handoffs are superseded by this section. `RULES.md` remains the canonical source of truth.
+- **One scoped work branch per change.** Start from current `origin/main`; use `fix/*`, `feat/*`, `docs/*`, `test/*`, or `chore/*`. Do not mix unrelated changes. The existing `council-chain-pilot` experiment stays independent.
+- **Stage by explicit path only.** `git add -A` / `git add .` are FORBIDDEN. Never force-push or rewrite publicly shared history. Never delete an unmerged branch; delete merged branches only after verifying the merge and with owner authorization.
+- **One PR carries its review and patches.** Push the scoped branch and open a PR against `main` (Draft while incomplete). Fix review findings with new commits on that SAME branch/PR; do not open a replacement PR for the same fix. Keep the PR open while reviews, patches, verification, or dependencies are outstanding.
+- **Verify the complete work package before marking it ready.** Apply the project's full-phase-before-gate discipline; run the applicable hub tests, Ruff, Android unit tests and debug build when code is complete. Record exact commands/results and any device or environment checks that were NOT run. API changes update `shared/openapi.yaml`; tests must cover regressions.
+- **Only the owner authorizes a merge.** Before merging, the PR must be current with `main`, have successful required CI, have no unresolved blocking review findings, pass integration/conflict checks against newly merged PRs, and have any required real-device evidence. No automated merge, direct merge, or deployment without the owner's explicit authorization.
+- **Make the gate real on GitHub.** Configure a branch ruleset for `main`: require a PR and passing `Hub - Tests`, `Hub - Lint`, `Spoke - Unit Tests`, and `Spoke - Build Android (debug)` checks; require conversation resolution and an up-to-date branch; block force pushes and deletion; do not grant an unrestricted bypass. The Docker job only runs on `main` pushes, so do NOT make it a pre-merge required check. Ruleset setup is a repository-admin action and is NOT accomplished by this text change.
+- `blueprints\` and `_archive\` are intentionally gitignored — do not "fix" this. See `docs/PR_WORKFLOW.md` for the workchain and branch-protection checklist.
 
 ### 1.4 Synthetic data only
 Never include real operator family names or personal data in committed source code, tests, or fixtures. Use synthetic placeholders (e.g., `SAMPLE ANCESTOR A`). Real genealogy JSON under `MantleBridge\` (events/graph/ledger/game_state.json) is **gitignored** — it exists on disk for the game to read, never in history.
