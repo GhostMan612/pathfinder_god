@@ -534,6 +534,68 @@ async def test_end_combat_rolls_back_on_failure(tmp_path: Path) -> None:
     assert active is not None and active.id == first_encounter.id
 
 
+async def test_take_turn_deterministic_phase_rolls_back_on_failure(
+    tmp_path: Path,
+) -> None:
+    loop = _make_loop(tmp_path / "campaign.db")
+    created = await loop.create_campaign(
+        "SAMPLE CAMPAIGN", premise="A quiet valley.", hero_prompt="a brave human fighter"
+    )
+    cid = created["campaign_id"]
+
+    # Fail the door activation after the encounter was created: the
+    # create (encounter detection) and the transition to active are one
+    # deterministic phase, so the whole phase must roll back and no door
+    # encounter may survive.
+    original_transition = loop.repo.transition_encounter
+
+    def _failing_transition(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    loop.repo.transition_encounter = _failing_transition
+    try:
+        with pytest.raises(RuntimeError, match="boom"):
+            await loop.take_turn(cid, "I open the door", seed=7)
+    finally:
+        loop.repo.transition_encounter = original_transition
+
+    assert loop.repo.get_active_encounter(cid) is None
+    assert loop.repo.list_encounters(cid) == []
+
+
+async def test_take_turn_persist_rolls_back_on_failure(
+    tmp_path: Path,
+) -> None:
+    loop = _make_loop(tmp_path / "campaign.db")
+    created = await loop.create_campaign(
+        "SAMPLE CAMPAIGN", premise="A quiet valley.", hero_prompt="a brave human fighter"
+    )
+    cid = created["campaign_id"]
+    first = await loop.take_turn(cid, "I look around the town square", seed=5)
+    assert first.turn_num == 1
+    assert len(loop.repo.get_recent_turns(cid)) == 1
+
+    # Fail the event-log write after the turn record was written: the
+    # record, the event, the decision, and the note are one persist
+    # phase, so the turn record must roll back with the event.
+    original_append = loop.repo.append_event
+
+    def _failing_append(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    loop.repo.append_event = _failing_append
+    try:
+        with pytest.raises(RuntimeError, match="boom"):
+            await loop.take_turn(cid, "I look around the town square", seed=6)
+    finally:
+        loop.repo.append_event = original_append
+
+    # No turn row for the failed turn: the record rolled back with the event.
+    turns = loop.repo.get_recent_turns(cid)
+    assert len(turns) == 1
+    assert turns[0].turn_num == 1
+
+
 async def test_dying_combatant_recovers_on_their_turn(tmp_path: Path) -> None:
     loop = _make_loop(tmp_path / "campaign.db")
     created = await loop.create_campaign(

@@ -717,40 +717,47 @@ class SoloLoop:
         emitted_encounter = False
         encounter_result: dict | None = None
 
-        # Start-of-turn recovery for the active combatant, if they are dying.
-        # PF2e: the recovery check happens at the start of the creature's
-        # own turn, not at end of turn.
-        if state.phase == "combat" and state.active_combatant_id is not None:
-            active = self.repo.get_combatant(campaign_id, state.active_combatant_id)
-            if active is not None and dying_value(active.conditions or []) > 0:
-                await self._run_recovery(campaign_id, active, rng, notes)
+        # ── Deterministic phase, one transaction ──
+        # Recovery, encounter detection, and deterministic resolution all
+        # write. Group them so a failure mid-phase rolls the whole phase
+        # back instead of leaving a half-applied turn. No LLM call runs
+        # inside a transaction, so the write lock is never held across
+        # LLM latency. Emits below run after this commits.
+        with self.repo.transaction():
+            # Start-of-turn recovery for the active combatant, if they are dying.
+            # PF2e: the recovery check happens at the start of the creature's
+            # own turn, not at end of turn.
+            if state.phase == "combat" and state.active_combatant_id is not None:
+                active = self.repo.get_combatant(campaign_id, state.active_combatant_id)
+                if active is not None and dying_value(active.conditions or []) > 0:
+                    await self._run_recovery(campaign_id, active, rng, notes)
 
-        # ── Deterministic encounter detection (words, not the LLM) ──
-        encounter_result = self._apply_encounter_detection(
-            campaign_id,
-            action,
-            party,
-            state,
-            rng,
-            dice_rolls,
-            hp_changes,
-            notes,
-        )
+            # ── Deterministic encounter detection (words, not the LLM) ──
+            encounter_result = self._apply_encounter_detection(
+                campaign_id,
+                action,
+                party,
+                state,
+                rng,
+                dice_rolls,
+                hp_changes,
+                notes,
+            )
 
-        # ── Deterministic resolution (never the LLM) ──
-        target_name, state = await self._resolve_deterministic(
-            kind,
-            campaign_id,
-            action,
-            party,
-            combatants,
-            locations,
-            state,
-            rng,
-            dice_rolls,
-            hp_changes,
-            notes,
-        )
+            # ── Deterministic resolution (never the LLM) ──
+            target_name, state = await self._resolve_deterministic(
+                kind,
+                campaign_id,
+                action,
+                party,
+                combatants,
+                locations,
+                state,
+                rng,
+                dice_rolls,
+                hp_changes,
+                notes,
+            )
 
         # ── LLM structured outcome (proposal only) ──
         if len(dice_rolls) > emitted_dice:
@@ -774,70 +781,76 @@ class SoloLoop:
         outcome, outcome_source = await self._structured_outcome(
             campaign_id, action, kind, state, combatants, quests, chronicle
         )
+        # ── Post-outcome phase, one transaction ──
+        # The LLM outcome can only refine an unplaced turn, complete a
+        # quest objective, or move the party. Group those writes so a
+        # failure mid-phase rolls the whole phase back. The LLM call that
+        # produced the outcome already ran, outside any transaction.
         if outcome is not None:
-            # The deterministic classifier is authoritative: the LLM outcome
-            # may only refine a turn the classifier could not place ("other").
-            # Letting the model overwrite a classified attack with "other"
-            # silently dropped the whole deterministic resolution.
-            if kind == "other" and outcome.kind:
-                refined = outcome.kind
-                kind = refined
-                # The classifier placed nothing, so the first resolution
-                # pass did nothing. A refinement to a resolvable kind must
-                # actually resolve — re-run it here — or the turn would be
-                # recorded and narrated as an attack/skill/rest/move that
-                # never happened (no damage rolled, no healing, no move).
-                if refined in ("attack", "skill", "rest", "move"):
-                    refined_target, state = await self._resolve_deterministic(
-                        refined,
+            with self.repo.transaction():
+                # The deterministic classifier is authoritative: the LLM outcome
+                # may only refine a turn the classifier could not place ("other").
+                # Letting the model overwrite a classified attack with "other"
+                # silently dropped the whole deterministic resolution.
+                if kind == "other" and outcome.kind:
+                    refined = outcome.kind
+                    kind = refined
+                    # The classifier placed nothing, so the first resolution
+                    # pass did nothing. A refinement to a resolvable kind must
+                    # actually resolve — re-run it here — or the turn would be
+                    # recorded and narrated as an attack/skill/rest/move that
+                    # never happened (no damage rolled, no healing, no move).
+                    if refined in ("attack", "skill", "rest", "move"):
+                        refined_target, state = await self._resolve_deterministic(
+                            refined,
+                            campaign_id,
+                            action,
+                            party,
+                            combatants,
+                            locations,
+                            state,
+                            rng,
+                            dice_rolls,
+                            hp_changes,
+                            notes,
+                        )
+                        if refined_target and not target_name:
+                            target_name = refined_target
+                    # The first pass ran before the LLM refined an unplaced turn.
+                    # Re-run detection against the refined state so a late
+                    # classification cannot skip a door/NPC/loot/trap trigger.
+                    if encounter_result is None:
+                        encounter_result = self._apply_encounter_detection(
+                            campaign_id,
+                            action,
+                            party,
+                            state,
+                            rng,
+                            dice_rolls,
+                            hp_changes,
+                            notes,
+                        )
+                if outcome.target and not target_name:
+                    target_name = outcome.target
+                if outcome.quest_update is not None and outcome.quest_update.completed:
+                    applied = self.repo.set_quest_objective(
                         campaign_id,
-                        action,
-                        party,
-                        combatants,
-                        locations,
-                        state,
-                        rng,
-                        dice_rolls,
-                        hp_changes,
-                        notes,
+                        outcome.quest_update.quest_name,
+                        outcome.quest_update.objective,
                     )
-                    if refined_target and not target_name:
-                        target_name = refined_target
-                # The first pass ran before the LLM refined an unplaced turn.
-                # Re-run detection against the refined state so a late
-                # classification cannot skip a door/NPC/loot/trap trigger.
-                if encounter_result is None:
-                    encounter_result = self._apply_encounter_detection(
-                        campaign_id,
-                        action,
-                        party,
-                        state,
-                        rng,
-                        dice_rolls,
-                        hp_changes,
-                        notes,
+                    if applied is not None:
+                        quest_updates.append(applied)
+                        notes.append(
+                            f"Quest update: {applied['quest']} — {applied['objective']} completed."
+                            + (" Quest complete!" if applied["quest_completed"] else "")
+                        )
+                if outcome.location:
+                    moved = self._resolve_move(
+                        campaign_id, outcome.location, locations, state
                     )
-            if outcome.target and not target_name:
-                target_name = outcome.target
-            if outcome.quest_update is not None and outcome.quest_update.completed:
-                applied = self.repo.set_quest_objective(
-                    campaign_id,
-                    outcome.quest_update.quest_name,
-                    outcome.quest_update.objective,
-                )
-                if applied is not None:
-                    quest_updates.append(applied)
-                    notes.append(
-                        f"Quest update: {applied['quest']} — {applied['objective']} completed."
-                        + (" Quest complete!" if applied["quest_completed"] else "")
-                    )
-            if outcome.location:
-                moved = self._resolve_move(
-                    campaign_id, outcome.location, locations, state
-                )
-                if moved:
-                    state = self.repo.get_solo_state(campaign_id) or state
-                    notes.append(f"Moved to {moved}.")
+                    if moved:
+                        state = self.repo.get_solo_state(campaign_id) or state
+                        notes.append(f"Moved to {moved}.")
 
         if len(dice_rolls) > emitted_dice:
             await _emit_turn_event(
@@ -855,8 +868,12 @@ class SoloLoop:
             )
 
         # ── Initiative advance + end-of-turn conditions (combat only) ──
+        # _advance_turn does several writes (end-of-turn damage, defeat /
+        # victory resolution, initiative advance); group them so a failure
+        # mid-advance rolls the whole advance back.
         if state.phase == "combat":
-            state = await self._advance_turn(campaign_id, state, rng, notes)
+            with self.repo.transaction():
+                state = await self._advance_turn(campaign_id, state, rng, notes)
 
         conditions = self._conditions_snapshot(campaign_id)
         await _emit_turn_event(
@@ -880,43 +897,48 @@ class SoloLoop:
             active = self.repo.get_combatant(campaign_id, state.active_combatant_id)
             active_name = active.name if active else None
 
-        # ── Persist ──
+        # ── Persist, one transaction ──
+        # The turn record, the event-log entry, the decision, the session
+        # note, and the combat mirror commit together or not at all, so a
+        # failure while persisting never leaves a recorded turn with no
+        # event (or an event with no turn).
         outcome_dict = outcome.model_dump(mode="python") if outcome is not None else {"kind": kind}
-        self.repo.record_turn(
-            campaign_id, turn_num, actor, action, narration, outcome_dict, dice_rolls
-        )
-        self.repo.append_event(
-            campaign_id,
-            "turn",
-            summary=f"Turn {turn_num}: {action[:200]}",
-            location_id=state.current_location_id,
-            data={
-                "turn_num": turn_num,
-                "kind": kind,
-                "phase": state.phase,
-                "source": source,
-                "actor": actor,
-            },
-        )
-        self.repo.add_decision(
-            campaign_id=campaign_id,
-            session_num=max(1, self.repo.get_latest_session_num(campaign_id)),
-            decision=action,
-            context=f"turn {turn_num} ({kind})",
-            consequences=[n for n in notes],
-            made_by=actor,
-        )
-        if self._orchestrator is None:
-            # The orchestrator's generate() already records the live note;
-            # only record one here when it was not involved.
-            self.repo.add_session_note(
-                campaign_id,
-                max(1, self.repo.get_latest_session_num(campaign_id)),
-                action,
-                narration,
+        with self.repo.transaction():
+            self.repo.record_turn(
+                campaign_id, turn_num, actor, action, narration, outcome_dict, dice_rolls
             )
-        if state.phase == "combat":
-            self.repo.mirror_combat_json(campaign_id)
+            self.repo.append_event(
+                campaign_id,
+                "turn",
+                summary=f"Turn {turn_num}: {action[:200]}",
+                location_id=state.current_location_id,
+                data={
+                    "turn_num": turn_num,
+                    "kind": kind,
+                    "phase": state.phase,
+                    "source": source,
+                    "actor": actor,
+                },
+            )
+            self.repo.add_decision(
+                campaign_id=campaign_id,
+                session_num=max(1, self.repo.get_latest_session_num(campaign_id)),
+                decision=action,
+                context=f"turn {turn_num} ({kind})",
+                consequences=[n for n in notes],
+                made_by=actor,
+            )
+            if self._orchestrator is None:
+                # The orchestrator's generate() already records the live note;
+                # only record one here when it was not involved.
+                self.repo.add_session_note(
+                    campaign_id,
+                    max(1, self.repo.get_latest_session_num(campaign_id)),
+                    action,
+                    narration,
+                )
+            if state.phase == "combat":
+                self.repo.mirror_combat_json(campaign_id)
 
         choices = (
             list(outcome.choices)[:3]
