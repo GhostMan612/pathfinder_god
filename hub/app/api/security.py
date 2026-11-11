@@ -17,7 +17,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 import jwt
-from fastapi import Depends, HTTPException, Request, Response
+from fastapi import Depends, HTTPException, Request, Response, WebSocket
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
@@ -46,6 +46,28 @@ def hash_api_key(api_key: str) -> str:
 def verify_api_key(api_key: str, hashed: str) -> bool:
     """Verify an API key against its hash."""
     return secrets.compare_digest(hash_api_key(api_key), hashed)
+
+
+def websocket_authorized(websocket: WebSocket) -> bool:
+    """Websocket auth, enforced only when a key is configured.
+
+    HTTP Depends helpers cannot be reused on a WebSocket scope, and keyless
+    local installs are a supported mode. When the operator has configured a
+    key, state-changing websocket frames must present it as X-API-Key, a
+    bearer token, or the ``api_key`` query parameter.
+    """
+    expected = (get_settings().api_key_sha256 or "").strip()
+    if not expected:
+        return True
+    key = (
+        websocket.headers.get(API_KEY_HEADER_NAME)
+        or websocket.query_params.get("api_key")
+        or ""
+    )
+    auth = websocket.headers.get(AUTHORIZATION_HEADER) or ""
+    if not key and auth.lower().startswith("bearer "):
+        key = auth[7:].strip()
+    return bool(key) and verify_api_key(key, expected)
 
 
 def _require_secret_key(settings: Settings) -> str:
@@ -469,6 +491,7 @@ __all__ = [
     "generate_api_key",
     "hash_api_key",
     "verify_api_key",
+    "websocket_authorized",
     "create_access_token",
     "create_refresh_token",
     "decode_token",

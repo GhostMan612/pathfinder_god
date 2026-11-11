@@ -35,6 +35,7 @@ import random
 import re
 import weakref
 import zlib
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -53,6 +54,34 @@ from app.db.repository import CampaignRepository
 from app.llm.ollama_client import OllamaClient
 
 logger = logging.getLogger(__name__)
+
+TurnEmitter = Callable[[dict[str, Any]], Awaitable[None]]
+
+
+async def _emit_turn_event(
+    emit: TurnEmitter | None, event: dict[str, Any]
+) -> None:
+    if emit is None:
+        return
+    try:
+        await emit(event)
+    except Exception:
+        logger.debug("turn event sink failed", exc_info=True)
+
+
+def _narration_chunks(text: str) -> list[str]:
+    value = (text or "").strip()
+    if not value:
+        return []
+    chunks: list[str] = []
+    start = 0
+    for match in re.finditer(r"[.!?]+(?:\s+|$)", value):
+        end = match.end()
+        chunks.append(value[start:end])
+        start = end
+    if start < len(value):
+        chunks.append(value[start:])
+    return chunks
 
 # ──────────────────────────────────────────────────────────────
 # Deterministic play constants (documented, not hidden in prompts)
@@ -457,11 +486,12 @@ class SoloLoop:
         action: str,
         actor: str = "player",
         seed: int | None = None,
+        emit: TurnEmitter | None = None,
     ) -> TurnResult:
         """Resolve one player action, serialized with other state changes."""
         async with _campaign_turn_lock(campaign_id):
             return await self._take_turn_locked(
-                campaign_id, action, actor=actor, seed=seed
+                campaign_id, action, actor=actor, seed=seed, emit=emit
             )
 
     async def _take_turn_locked(
@@ -470,6 +500,7 @@ class SoloLoop:
         action: str,
         actor: str = "player",
         seed: int | None = None,
+        emit: TurnEmitter | None = None,
     ) -> TurnResult:
         if not self.repo.campaign_exists(campaign_id):
             raise ValueError(f"no campaign {campaign_id}")
@@ -479,6 +510,16 @@ class SoloLoop:
         turn_num = self.repo.reserve_turn_num(campaign_id)
         turn_seed = self._turn_seed(campaign_id, turn_num, seed)
         rng = random.Random(turn_seed)
+        await _emit_turn_event(
+            emit,
+            {
+                "type": "start",
+                "campaign_id": campaign_id,
+                "turn_num": turn_num,
+                "phase": state.phase,
+                "round": state.round_num,
+            },
+        )
 
         party = self.repo.get_party(campaign_id)
         combatants = self.repo.get_combatants(campaign_id, active_only=True)
@@ -491,6 +532,8 @@ class SoloLoop:
         hp_changes: list[dict] = []
         quest_updates: list[dict] = []
         notes: list[str] = []
+        emitted_dice = 0
+        emitted_hp = 0
 
         # Start-of-turn recovery for the active combatant, if they are dying.
         # PF2e: the recovery check happens at the start of the creature's
@@ -516,6 +559,17 @@ class SoloLoop:
         )
 
         # ── LLM structured outcome (proposal only) ──
+        if len(dice_rolls) > emitted_dice:
+            await _emit_turn_event(
+                emit, {"type": "dice", "dice_rolls": list(dice_rolls)}
+            )
+            emitted_dice = len(dice_rolls)
+        if len(hp_changes) > emitted_hp:
+            await _emit_turn_event(
+                emit, {"type": "hp", "hp_changes": list(hp_changes)}
+            )
+            emitted_hp = len(hp_changes)
+
         outcome, outcome_source = await self._structured_outcome(
             campaign_id, action, kind, state, combatants, quests, chronicle
         )
@@ -570,9 +624,25 @@ class SoloLoop:
                     state = self.repo.get_solo_state(campaign_id) or state
                     notes.append(f"Moved to {moved}.")
 
+        if len(dice_rolls) > emitted_dice:
+            await _emit_turn_event(
+                emit, {"type": "dice", "dice_rolls": list(dice_rolls)}
+            )
+            emitted_dice = len(dice_rolls)
+        if len(hp_changes) > emitted_hp:
+            await _emit_turn_event(
+                emit, {"type": "hp", "hp_changes": list(hp_changes)}
+            )
+            emitted_hp = len(hp_changes)
+
         # ── Initiative advance + end-of-turn conditions (combat only) ──
         if state.phase == "combat":
             state = await self._advance_turn(campaign_id, state, rng, notes)
+
+        conditions = self._conditions_snapshot(campaign_id)
+        await _emit_turn_event(
+            emit, {"type": "conditions", "conditions": conditions}
+        )
 
         # ── Narration ──
         narration = await self._narrate_turn(
@@ -621,13 +691,8 @@ class SoloLoop:
             if outcome is not None and outcome.choices
             else self._default_choices(kind, state.phase)
         )
-        conditions = []
-        for c in self.repo.get_combatants(campaign_id, active_only=True):
-            conditions.extend(
-                {"combatant": c.name, **cond} for cond in (c.conditions or [])
-            )
 
-        return TurnResult(
+        result = TurnResult(
             campaign_id=campaign_id,
             turn_num=turn_num,
             narration=narration,
@@ -644,6 +709,10 @@ class SoloLoop:
             source=source,
             kind=kind,
         )
+        for chunk in _narration_chunks(narration):
+            await _emit_turn_event(emit, {"type": "narration", "text": chunk})
+        await _emit_turn_event(emit, {"type": "end", "result": result.to_dict()})
+        return result
 
     def _current_location_name(self, campaign_id: int, state: Any) -> str | None:
         if state.current_location_id is None:
@@ -652,6 +721,14 @@ class SoloLoop:
             if loc.id == state.current_location_id:
                 return loc.name
         return None
+
+    def _conditions_snapshot(self, campaign_id: int) -> list[dict]:
+        conditions: list[dict] = []
+        for c in self.repo.get_combatants(campaign_id, active_only=True):
+            conditions.extend(
+                {"combatant": c.name, **cond} for cond in (c.conditions or [])
+            )
+        return conditions
 
     @staticmethod
     def _default_choices(kind: str, phase: str) -> list[str]:

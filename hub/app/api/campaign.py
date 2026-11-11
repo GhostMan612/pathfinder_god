@@ -694,7 +694,7 @@ class CombatEndTurnResponse(BaseModel):
     active_combatant: str | None = None
 
 
-def _solo_loop(repo: CampaignRepository) -> SoloLoop:
+def build_solo_loop(repo: CampaignRepository) -> SoloLoop:
     """Build a SoloLoop with its own LLM + orchestrator clients.
 
     Callers must `await loop.close()` in a finally block: the loop owns
@@ -718,7 +718,7 @@ async def create_solo_campaign(
         action="create",
         ip="unknown",
     )
-    loop = _solo_loop(repo)
+    loop = build_solo_loop(repo)
     try:
         result = await loop.create_campaign(
             name=request.name,
@@ -738,7 +738,7 @@ async def solo_turn(
     repo: CampaignRepository = Depends(get_repo),
     user: dict = Depends(require_auth),
 ) -> TurnResponse:
-    loop = _solo_loop(repo)
+    loop = build_solo_loop(repo)
     try:
         result = await loop.take_turn(
             campaign_id, request.action, actor=request.actor, seed=request.seed
@@ -770,7 +770,7 @@ async def solo_combat_start(
     repo: CampaignRepository = Depends(get_repo),
     user: dict = Depends(require_auth),
 ) -> CombatStartResponse:
-    loop = _solo_loop(repo)
+    loop = build_solo_loop(repo)
     try:
         result = await loop.start_combat(
             campaign_id,
