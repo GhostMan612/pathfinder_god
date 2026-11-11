@@ -49,6 +49,37 @@ class HubApiFactoryTest {
     }
 
     @Test
+    fun stickyWebSocketReconnectUsesSameReleaseTransportGate() {
+        assertTrue(
+            HubEndpoint.isStreamPermitted("wss://hub.example.test/stream", false, false)
+        )
+        assertFalse(
+            HubEndpoint.isStreamPermitted("ws://192.168.1.7:8000/stream", false, false)
+        )
+        assertTrue(
+            HubEndpoint.isStreamPermitted("ws://192.168.1.7:8000/stream", true, false)
+        )
+        assertTrue(
+            HubEndpoint.isStreamPermitted("ws://10.0.2.2:8000/stream", false, true)
+        )
+        assertFalse(
+            HubEndpoint.isStreamPermitted("ws://10.0.2.2:8000/stream", true, false)
+        )
+        assertFalse(
+            HubEndpoint.isStreamPermitted("ws://hub.example.test/other", true, false)
+        )
+        assertFalse(
+            HubEndpoint.isStreamPermitted("wss://user:secret@hub.example.test/stream", false, false)
+        )
+        assertFalse(
+            HubEndpoint.isStreamPermitted("wss://hub.example.test/stream?token=secret", false, false)
+        )
+        assertFalse(
+            HubEndpoint.isStreamPermitted("http://hub.example.test/stream", true, false)
+        )
+    }
+
+    @Test
     fun productionCleartextPolicyMatchesBundledNetworkConfig() {
         assertTrue(HubEndpoint.requiresHttpsInRelease("192.168.1.5:8000"))
         assertFalse(HubEndpoint.requiresHttpsInRelease("https://example.com:443"))
