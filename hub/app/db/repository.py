@@ -1228,7 +1228,11 @@ class CampaignRepository:
                     level = excluded.level,
                     ancestry = excluded.ancestry,
                     background = excluded.background,
-                    stats_json = excluded.stats_json,
+                    -- Omitting stats during a metadata/level update must not
+                    -- erase a previously supplied sheet AC/HP block. Passing
+                    -- an explicit empty dict intentionally clears the sheet.
+                    stats_json = CASE WHEN ? = 1
+                        THEN excluded.stats_json ELSE party_members.stats_json END,
                     updated_at = datetime('now')
                 RETURNING id
                 """,
@@ -1240,7 +1244,8 @@ class CampaignRepository:
                     level,
                     ancestry,
                     background,
-                    json.dumps(stats or {}),
+                    json.dumps(stats if stats is not None else {}),
+                    1 if stats is not None else 0,
                 ),
             )
             return cur.fetchone()[0]
