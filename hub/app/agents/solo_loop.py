@@ -125,6 +125,11 @@ def hero_max_hp(level: int) -> int:
     return 20 + 5 * max(0, int(level or 1) - 1)
 
 
+def hero_default_ac(level: int) -> int:
+    """Default hero AC when no sheet AC is stored: 14 + level (15 at level 1)."""
+    return 14 + max(1, int(level or 1))
+
+
 def _hero_hp_from_stats(stats: dict | None, level: int) -> int:
     """Best-effort HP from a synced character sheet, else the default."""
     if isinstance(stats, dict):
@@ -133,6 +138,16 @@ def _hero_hp_from_stats(stats: dict | None, level: int) -> int:
             if isinstance(value, int) and value > 0:
                 return value
     return hero_max_hp(level)
+
+
+def _hero_ac_from_stats(stats: dict | None, level: int) -> int:
+    """Best-effort AC from a synced character sheet, else the default."""
+    if isinstance(stats, dict):
+        for key in ("ac", "armor_class"):
+            value = stats.get(key)
+            if isinstance(value, int) and value > 0:
+                return value
+    return hero_default_ac(level)
 
 
 def _encounter_monster_ac(level: int, template: str = "normal") -> int:
@@ -2044,6 +2059,7 @@ class SoloLoop:
                 except (TypeError, ValueError):
                     stats = None
             max_hp = _hero_hp_from_stats(stats if isinstance(stats, dict) else None, level)
+            ac = _hero_ac_from_stats(stats if isinstance(stats, dict) else None, level)
             hero_ids.append(
                 self.repo.upsert_combatant(
                     campaign_id=campaign_id,
@@ -2051,7 +2067,7 @@ class SoloLoop:
                     kind="hero",
                     hp=max_hp,
                     max_hp=max_hp,
-                    ac=15,
+                    ac=ac,
                     initiative=initiative,
                 )
             )
@@ -2066,6 +2082,7 @@ class SoloLoop:
                 hero_ids.append(hero.id)
             else:
                 max_hp = hero_max_hp(party_level)
+                ac = hero_default_ac(party_level)
                 hero_ids.append(
                     self.repo.upsert_combatant(
                         campaign_id=campaign_id,
@@ -2073,7 +2090,7 @@ class SoloLoop:
                         kind="hero",
                         hp=max_hp,
                         max_hp=max_hp,
-                        ac=15,
+                        ac=ac,
                         initiative=initiative,
                     )
                 )

@@ -15,7 +15,12 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.agents.solo_loop import SoloLoop, classify_action
+from app.agents.solo_loop import (
+    SoloLoop,
+    _hero_ac_from_stats,
+    classify_action,
+    hero_default_ac,
+)
 from app.db.repository import CampaignRepository
 
 TEST_API_KEY = "pfg_test_key_12345"
@@ -230,6 +235,32 @@ async def test_start_combat_builds_hero_and_monster_and_initiative(tmp_path: Pat
     assert state.phase == "combat"
     # The legacy mirror is kept current for the spoke.
     assert "SAMPLE GOBLIN" in loop.repo.get_combat_json(cid)
+
+
+def test_hero_default_ac_scales_with_level() -> None:
+    assert hero_default_ac(1) == 15  # level 1 keeps the old flat value
+    assert hero_default_ac(0) == 15
+    assert hero_default_ac(5) == 19
+    assert _hero_ac_from_stats(None, 3) == 17
+    assert _hero_ac_from_stats({"ac": 21}, 1) == 21
+    assert _hero_ac_from_stats({"armor_class": 18}, 1) == 18
+    assert _hero_ac_from_stats({"ac": 0}, 2) == 16  # non-positive sheet AC falls back
+    assert _hero_ac_from_stats({"ac": "18"}, 2) == 16  # non-int sheet AC falls back
+
+
+async def test_start_combat_uses_sheet_ac_and_level_default(tmp_path: Path) -> None:
+    loop = _make_loop(tmp_path / "campaign.db")
+    created = await loop.create_campaign(
+        "SAMPLE CAMPAIGN", premise="A quiet valley.", hero_prompt="a brave human fighter"
+    )
+    cid = created["campaign_id"]
+    loop.repo.upsert_party_member(cid, "SAMPLE SHEET HERO", level=5, stats={"ac": 21})
+    loop.repo.upsert_party_member(cid, "SAMPLE PLAIN HERO", level=5)
+    started = await loop.start_combat(cid, monster_names=["SAMPLE GOBLIN"], seed=3)
+    heroes = {c["name"]: c for c in started.combatants if c["kind"] == "hero"}
+    assert heroes["SAMPLE SHEET HERO"]["ac"] == 21
+    assert heroes["SAMPLE PLAIN HERO"]["ac"] == 19  # 14 + level 5, no sheet AC
+    assert heroes["SAMPLE HERO"]["ac"] == 15  # level 1 keeps the old flat value
 
 
 async def test_attack_turn_changes_hp_deterministically(tmp_path: Path) -> None:
