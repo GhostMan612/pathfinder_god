@@ -59,3 +59,58 @@ def test_discovery_advertisement_with_tls(monkeypatch):
     assert registered_info.properties[b"model"] == b"phi4-mini"
 
     discovery.stop_advertisement()
+
+
+def test_registration_failure_closes_socket_and_allows_retry(monkeypatch):
+    monkeypatch.setattr(discovery, "_advertiser", None)
+    monkeypatch.setattr(discovery, "_local_ipv4_addresses", lambda: [b"\\x7f\\x00\\x00\\x01"])
+
+    state = {"fail": True, "instances": []}
+
+    class MockZeroconf:
+        def __init__(self):
+            self.closed = False
+            state["instances"].append(self)
+
+        def register_service(self, info):
+            if state["fail"]:
+                raise OSError("registration unavailable")
+
+        def unregister_service(self, info):
+            pass
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr("zeroconf.Zeroconf", MockZeroconf)
+
+    assert discovery.start_advertisement(8000, "0.1.0", "SAMPLE MODEL") is False
+    assert state["instances"][0].closed is True
+    assert discovery._advertiser is None
+
+    state["fail"] = False
+    assert discovery.start_advertisement(8000, "0.1.0", "SAMPLE MODEL") is True
+    assert state["instances"][1].closed is False
+    discovery.stop_advertisement()
+    assert state["instances"][1].closed is True
+    assert discovery._advertiser is None
+
+
+def test_missing_lan_address_closes_zeroconf(monkeypatch):
+    monkeypatch.setattr(discovery, "_advertiser", None)
+    monkeypatch.setattr(discovery, "_local_ipv4_addresses", lambda: [])
+
+    instances = []
+
+    class MockZeroconf:
+        def __init__(self):
+            self.closed = False
+            instances.append(self)
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr("zeroconf.Zeroconf", MockZeroconf)
+    assert discovery.start_advertisement(8000, "0.1.0", "SAMPLE MODEL") is False
+    assert instances[0].closed is True
+    assert discovery._advertiser is None
