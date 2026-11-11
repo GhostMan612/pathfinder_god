@@ -28,9 +28,15 @@ Interactive playground (hub running): `http://localhost:8000/docs`.
 | GET | `/campaign/backup` | - | Full export as download |
 | POST | `/campaign/create` | `{name, edition=2e, premise?, hero_prompt?}` | `{campaign_id, opening_narration, ...}` |
 | POST | `/campaign/{campaign_id}/turn` | `{action, actor=player, seed?}` | `TurnResponse` (dice, HP, conditions, narration, choices) |
-| GET | `/campaign/{campaign_id}/state` | - | Solo state (phase, round, active encounter, combatants, quests, recent turns, chronicle) |
+| GET | `/campaign/{campaign_id}/state` | - | Solo state (phase, round, world tick, active encounter, combatants, quests, recent turns, chronicle) |
+| GET | `/campaign/{campaign_id}/graph` | - | `{campaign_id, world_tick, current_location_id, nodes[], edges[], event_count}` |
+| POST | `/campaign/{campaign_id}/graph/edges` | `{from_location_id, to_location_id, kind=trail, label?, travel_ticks=1, state?, bidirectional=false}` | One travel edge (plus the reverse when bidirectional) |
+| POST | `/campaign/{campaign_id}/move` | `{location_id, summary?}` | `{location, tick, edge, event}`; advances the world clock |
+| GET | `/campaign/{campaign_id}/events` | `?limit=&since_tick=&location_id=&encounter_id=&kind=` | Breadcrumb trail, oldest event first |
 | GET | `/campaign/{campaign_id}/encounters` | - | `{campaign_id, encounters[]}` newest first |
 | GET | `/campaign/{campaign_id}/encounters/{encounter_id}` | - | One encounter lifecycle record |
+| POST | `/campaign/{campaign_id}/encounters` | `{kind, status=pending, summary?, state?, seed?, location_id?}` | Create any encounter kind |
+| POST | `/campaign/{campaign_id}/encounters/{encounter_id}/transition` | `{status, summary?, state?}` | One validated lifecycle transition |
 | POST | `/campaign/{campaign_id}/combat/start` | `{monster_names?, theme?, threat, party_level, seed?}` | Combat state + `encounter_id` |
 | POST | `/campaign/{campaign_id}/combat/end-turn`, `/combat/end` | - | Combat state |
 | POST | `/rules/fetch` | `{q, edition}` | Scrape one missing term into the DB permanently (1e live; else 404 + queued) |
@@ -40,6 +46,26 @@ Interactive playground (hub running): `http://localhost:8000/docs`.
 `RuleHit = {name, content, system, category, source_book}`.
 `backend` is `ollama` or `raw-excerpts` (LLM down — excerpts still answer).
 `edition` accepts `1e 2e both` (aliases like `pf2e` normalized server-side).
+
+### Breadcrumb graph and world clock
+
+Locations are graph nodes and `location_edges` are directed travel links
+(`road`, `trail`, `door`, `stairs`, `portal`, `other`). Every campaign starts
+with no edges. On the first traversal between two known locations the hub
+records a discovered `trail` edge (and its reverse), so the party's route
+accumulates as the campaign does; explicit roads can be created up front with
+`POST /graph/edges`.
+
+`GET /graph` returns the nodes, edges, current location, `world_tick`, and the
+number of events. `POST /move` requires a known `location_id`, advances the
+clock by the traversed edge's `travel_ticks` (at least 1), moves
+`solo_state.current_location_id`, and appends a `move` event.
+
+`campaign_events` is the campaign memory: immutable rows stamped with `tick`
+and optionally `location_id` and `encounter_id`. `GET /events` returns the most
+recent `limit` events oldest-first, so a client can replay the trail in order.
+`tick = 0` is campaign creation; travel advances it, while encounters and turns
+are stamped at the current tick.
 
 ### Encounter lifecycle
 
@@ -52,6 +78,13 @@ pending -> active | abandoned
 active  -> resolved | failed | abandoned
 resolved | failed | abandoned -> terminal
 ```
+
+Every encounter carries a `location_id`, inferred from the party's current
+location when the caller omits it. `POST /campaign/{id}/encounters` creates any
+kind (the door/trap/NPC/loot lifecycle entry point), and
+`POST /campaign/{id}/encounters/{encounter_id}/transition` applies one validated
+transition. Both append `encounter_created` / `encounter_transition` events to
+the breadcrumb trail in the same transaction.
 
 `POST /combat/start` creates a `battle` encounter in `pending`, activates it
 once the roster is built, and returns its `encounter_id`. `POST /combat/end`

@@ -39,6 +39,19 @@ is pushed, committed, or PR'd without his explicit approval.
       so it survives the request; the GM `generate_map` tool performs the same
       linking. Spoke DTOs parse the new fields. Hub **421 tests pass**, Ruff
       clean; Spoke `assembleDebug` + `testDebugUnitTest` green.
+- [x] **Breadcrumb graph foundation** on `encounter-state-machine`:
+      `location_edges` (directed road/trail/door/stairs/portal links with
+      travel ticks) and immutable `campaign_events` (tick-stamped move, turn,
+      and encounter events). `solo_state.world_tick` advances by traversed
+      edge ticks; first travel between known locations records a discovered
+      trail in both directions. `GET /graph`, `POST /graph/edges`, `POST /move`,
+      and `GET /events` expose the trail; encounters now carry `location_id`.
+      Hub **429 tests pass**, Ruff clean.
+- [x] **Generic encounter lifecycle entry point**: `POST /campaign/{id}/encounters`
+      creates `battle`/`loot`/`door`/`trap`/`npc` records and
+      `POST /campaign/{id}/encounters/{id}/transition` applies the validated
+      matrix, with location attachment and event logging in the same
+      transaction. Content-specific door/trap/NPC/loot triggers are next.
 
 ## Decisions made — locked in
 
@@ -87,13 +100,16 @@ is pushed, committed, or PR'd without his explicit approval.
 - [x] PR #2 merge decision — Glenn approved; merged and pushed `61f0878`.
 - [x] Encounter state machine: types + transitions (battle, loot, door, trap,
       NPC, …). **Battle-first slice landed on `encounter-state-machine` at
-      `97e21a2`; the remaining kinds reuse the same lifecycle and are next
-      wired as their content lands.**
+      `97e21a2`; all five kinds now share the generic create/transition routes,
+      with content-specific triggers next.**
 - [x] Link encounters to map positions — **battle slice landed at `890876b`**:
       battle tokens carry encounter/combatant IDs plus grid cells, and the
       scene persists on the encounter. Loot/NPC/door/trap token links follow
       as those encounter kinds wire up.
-- [ ] Breadcrumb graph model in the campaign DB.
+- [x] Breadcrumb graph model in the campaign DB — **foundation landed** (see
+      `location_edges`, `campaign_events`, `solo_state.world_tick`, graph/move/
+      events routes). Town-scale travel graph and location-scale grids remain
+      separate layers.
 - [ ] Character / campaign .db portability (export, import, carry between games).
 - [ ] LLM gateway / queue: one resident model, priority queue (turns first,
       background second), concurrency cap, prompt/result caching.

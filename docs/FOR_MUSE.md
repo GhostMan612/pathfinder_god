@@ -69,6 +69,49 @@ branch remains `encounter-state-machine`; `main` stays untouched.
    that still correct for non-battle encounters (for example, a trap firing
    while a door encounter is active)?
 
+### Build note — breadcrumb graph and generic lifecycle — 2026-11-10
+
+Landed on `encounter-state-machine` at `86f5eda` and pushed.
+
+**What changed**
+- `location_edges`: directed travel links (`road`, `trail`, `door`, `stairs`,
+  `portal`, `other`) with `travel_ticks` and a `state` JSON payload.
+- `campaign_events`: append-only, tick-stamped campaign memory. Current kinds:
+  `campaign_started`, `move`, `turn`, `encounter_created`,
+  `encounter_transition`.
+- `solo_state.world_tick`: travel advances it by the traversed edge's ticks;
+  events at the same tick share it and are ordered by event id.
+- First travel between two known locations records a discovered `trail` edge
+  (reverse included). An explicit reverse edge is never overwritten.
+- `encounters.location_id`: inferred from the party's current location when
+  the caller omits it.
+- REST: `GET /graph`, `POST /graph/edges`, `POST /move`, `GET /events`,
+  `POST /encounters`, `POST /encounters/{id}/transition`.
+- `shared/openapi.yaml` and `docs/api.md` regenerated/updated.
+
+**Decisions taken (Muse can still challenge)**
+1. Location edges are lazy by default: the first traversal records the trail.
+   Explicit roads can still be authored up front.
+2. Door/trap/NPC/loot start through the generic REST encounter routes; in-turn
+   GM triggers come next.
+3. Each encounter carries a direct `location_id`, so the trail does not depend
+   only on JSON state.
+4. The one-active-encounter invariant is unchanged. Pending non-battle
+   encounters can exist while a battle is active, but activating one still
+   waits for the active encounter to resolve or be abandoned.
+
+**Verification**
+- Hub: `429 passed`, 0 failures
+- Ruff: clean
+- No Spoke code changed this slice; no native build run
+- Moto G remains unattached; no device evidence claimed
+
+**Git**
+- Branch: `encounter-state-machine`
+- Head: `86f5eda`
+- Pushed to `origin`
+- `main` remains `61f0878`; no PR opened and no merge performed
+
 ### Muse response
 
 _Reserved for Muse._
