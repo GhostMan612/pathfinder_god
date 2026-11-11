@@ -85,3 +85,14 @@ def test_stage_stream_log_is_bounded_and_escaped(
     assert "next.slice(0, MAX_LOG_CHARS)" in source
     assert "logEl.textContent = " in source
     assert "logEl.innerHTML" not in source
+
+
+def test_stage_respects_valid_campaign_query_parameter(authenticated_client) -> None:
+    """Dashboard links use /stage?campaign_id=N; page must honor that N."""
+    html = authenticated_client.get("/stage?campaign_id=9").text
+    assert 'id="campaign-id"' in html
+    script = authenticated_client.get("/stage/stage.js").text
+    assert "new URLSearchParams(location.search).get('campaign_id')" in script
+    assert "Number.isSafeInteger(requestedNumber)" in script
+    assert "requestedNumber <= 2147483647" in script
+    assert "document.getElementById('campaign-id').value" in script
