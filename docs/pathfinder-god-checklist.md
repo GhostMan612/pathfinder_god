@@ -1,7 +1,7 @@
 # Pathfinder God — Master Checklist
 
 Living tracker for the Pathfinder God / Intelligent Virtual Table Top Engine plan.
-Updated 10 Nov 2026, ~20:22 CST. Glenn is the only merge authority — nothing
+Updated 10 Nov 2026, ~22:00 CST. Glenn is the only merge authority — nothing
 is pushed, committed, or PR'd without his explicit approval.
 
 ## Done — landed
@@ -9,18 +9,49 @@ is pushed, committed, or PR'd without his explicit approval.
 - [x] **PR #1 merged** (10 Nov 2026, `e4054b7`): NPC/monster/world builders
       (Ollama `format="json"` + validation, template only as marked fallback),
       shared retry helper, typed endpoints, `openapi.yaml` regenerated.
-- [x] **PR #2 solo campaign loop** (open, draft, unmerged, head `0227584`):
-  combat state machine (Dying-4 death, recovery DC 10+Dying, Wounded),
-  SoloLoop engine, GM tools (dice/strike/end turn/build NPC/monster/loot/map),
-  7 toolchain-reported bugs fixed, WS streaming turns, GM Oracle chat screen
-  in the God tab, walkable grid + doors/corridors/spawn/exit/3D token positions
-  (`7109440`), destructive migration removed from both spoke Room DBs
-  (`fd0d6a8`), hybrid semantic recall for campaign sessions (`0227584`).
-- [x] Hub tests **407 passed, 0 failed**, Ruff clean (verified locally).
-      GitHub CI status unverified from here. Spoke tests unverified from here
-      (no Android SDK on this VM).
+- [x] **PR #2 solo campaign loop** (merged 10 Nov 2026, merge commit
+      `61f0878`; PR head `0822858`): combat state machine (Dying-4 death,
+      recovery DC 10+Dying, Wounded), SoloLoop engine, GM tools
+      (dice/strike/end turn/build NPC/monster/loot/map), 7 toolchain-reported
+      bugs fixed, WS streaming turns, GM Oracle chat screen in the God tab,
+      walkable grid + doors/corridors/spawn/exit/3D token positions
+      (`7109440`), destructive migration removed from both spoke Room DBs
+      (`fd0d6a8`), hybrid semantic recall for campaign sessions (`0227584`).
+- [x] Hub tests **407 passed, 0 failed**, Ruff clean (verified locally on
+      merged `main`) and GitHub CI run `42951885968` green. Spoke unit tests,
+      forced local rerun and `assembleDebug` green; CI Spoke tests/build green.
+      On-device evidence: BLU B160V and `atlas_avd` each 7/7 connected tests;
+      Moto G still unverified (not attached).
 - [x] Council chain pilot pushed (`council-chain-pilot` @ `05989d5`); watcher
       cron live every 30 min; master prompt in `docs/MASTER_PROMPT.md`.
+- [x] **Encounter lifecycle foundation** (battle-first, `97e21a2` on
+      `encounter-state-machine`): pure transition matrix for all five kinds
+      (`battle loot door trap npc`) and five statuses, SQLite-backed
+      `encounters` table, partial unique index enforcing one active encounter
+      per campaign, battle start/end/victory/defeat wiring, `active_encounter`
+      in solo state, list/detail REST routes, regenerated `openapi.yaml`.
+      Hub **417 tests pass**, Ruff clean.
+- [x] **Encounter ↔ map position links** (battle-first, `890876b` on
+      `encounter-state-machine`): `/map/generate` with `campaign_id` links
+      hero/monster/npc tokens to active combatants by `(kind, name)` + FIFO
+      order; each linked token carries `encounter_id`, `combatant_id`, and its
+      grid cell `x/y/z`. The full scene persists on the encounter's `state.map`
+      so it survives the request; the GM `generate_map` tool performs the same
+      linking. Spoke DTOs parse the new fields. Hub **421 tests pass**, Ruff
+      clean; Spoke `assembleDebug` + `testDebugUnitTest` green.
+- [x] **Breadcrumb graph foundation** on `encounter-state-machine`:
+      `location_edges` (directed road/trail/door/stairs/portal links with
+      travel ticks) and immutable `campaign_events` (tick-stamped move, turn,
+      and encounter events). `solo_state.world_tick` advances by traversed
+      edge ticks; first travel between known locations records a discovered
+      trail in both directions. `GET /graph`, `POST /graph/edges`, `POST /move`,
+      and `GET /events` expose the trail; encounters now carry `location_id`.
+      Hub **429 tests pass**, Ruff clean.
+- [x] **Generic encounter lifecycle entry point**: `POST /campaign/{id}/encounters`
+      creates `battle`/`loot`/`door`/`trap`/`npc` records and
+      `POST /campaign/{id}/encounters/{id}/transition` applies the validated
+      matrix, with location attachment and event logging in the same
+      transaction. Content-specific door/trap/NPC/loot triggers are next.
 
 ## Decisions made — locked in
 
@@ -66,11 +97,19 @@ is pushed, committed, or PR'd without his explicit approval.
 
 ## Next up — make the local-only GM genuinely great (the priority)
 
-- [ ] PR #2 merge decision — Glenn's call.
-- [ ] Encounter state machine: types + transitions (battle, loot, door, trap,
-      NPC, …).
-- [ ] Link encounters to map positions.
-- [ ] Breadcrumb graph model in the campaign DB.
+- [x] PR #2 merge decision — Glenn approved; merged and pushed `61f0878`.
+- [x] Encounter state machine: types + transitions (battle, loot, door, trap,
+      NPC, …). **Battle-first slice landed on `encounter-state-machine` at
+      `97e21a2`; all five kinds now share the generic create/transition routes,
+      with content-specific triggers next.**
+- [x] Link encounters to map positions — **battle slice landed at `890876b`**:
+      battle tokens carry encounter/combatant IDs plus grid cells, and the
+      scene persists on the encounter. Loot/NPC/door/trap token links follow
+      as those encounter kinds wire up.
+- [x] Breadcrumb graph model in the campaign DB — **foundation landed** (see
+      `location_edges`, `campaign_events`, `solo_state.world_tick`, graph/move/
+      events routes). Town-scale travel graph and location-scale grids remain
+      separate layers.
 - [ ] Character / campaign .db portability (export, import, carry between games).
 - [ ] LLM gateway / queue: one resident model, priority queue (turns first,
       background second), concurrency cap, prompt/result caching.
@@ -104,7 +143,8 @@ is pushed, committed, or PR'd without his explicit approval.
 
 ## Open questions
 
-- [ ] Which encounter type first — battle (proves the 2D→3D switch, combat
-      loop exists) or door/trap (proves the breadcrumb graph)?
+- [x] Which encounter type first — **battle first**: the combat loop already
+      exists, so the encounter lifecycle can be proven without inventing the
+      breadcrumb graph yet. Door/trap follows once the graph model lands.
 - [ ] Map scale numbers — grid sizes to tune in play (location grids
       traversable in a few minutes; town graph carries the bigness).

@@ -1,4 +1,4 @@
-﻿# ============================================================
+# ============================================================
 # As Above, So Below. As Within, So Without.
 # The Future Dictates the Past and the Past is Always Present.
 # ============================================================
@@ -23,6 +23,7 @@ from fastapi import (
 from pydantic import BaseModel, Field
 
 from app.agents.continuity import ContinuityAgent, ContinuityKeeper
+from app.agents.encounter_state import EncounterStateError
 from app.api.deps import get_repo
 from app.api.security import (
     AuditLogger,
@@ -657,15 +658,122 @@ class TurnResponse(BaseModel):
     kind: str = "other"
 
 
+class CampaignEncounterResponse(BaseModel):
+    id: int
+    campaign_id: int
+    kind: str
+    status: str
+    summary: str = ""
+    state: dict = {}
+    location_id: int | None = None
+    seed: int | None = None
+    resolved_at: str | None = None
+
+
+class CampaignEncounterListResponse(BaseModel):
+    campaign_id: int
+    encounters: list[CampaignEncounterResponse] = []
+
+
+class CampaignEncounterCreateRequest(BaseModel):
+    kind: Literal["battle", "loot", "door", "trap", "npc"]
+    status: Literal["pending", "active"] = "pending"
+    summary: str = Field(default="", max_length=1000)
+    state: dict = {}
+    seed: int | None = Field(default=None, ge=0, le=2147483647)
+    location_id: int | None = Field(default=None, ge=1)
+
+
+class CampaignEncounterTransitionRequest(BaseModel):
+    status: Literal["pending", "active", "resolved", "failed", "abandoned"]
+    summary: str | None = Field(default=None, max_length=1000)
+    state: dict | None = None
+
+
+class CampaignGraphNode(BaseModel):
+    id: int
+    name: str
+    type: str
+    parent_id: int | None = None
+    description: str | None = None
+
+
+class CampaignGraphEdge(BaseModel):
+    id: int
+    campaign_id: int
+    from_location_id: int
+    to_location_id: int
+    kind: str
+    label: str = ""
+    travel_ticks: int = 1
+    description: str | None = None
+    state: dict = {}
+
+
+class CampaignGraphResponse(BaseModel):
+    campaign_id: int
+    world_tick: int = 0
+    current_location_id: int | None = None
+    nodes: list[CampaignGraphNode] = []
+    edges: list[CampaignGraphEdge] = []
+    event_count: int = 0
+
+
+class CampaignEdgeCreateRequest(BaseModel):
+    from_location_id: int = Field(..., ge=1)
+    to_location_id: int = Field(..., ge=1)
+    kind: Literal["road", "trail", "door", "stairs", "portal", "other"] = "trail"
+    label: str = Field(default="", max_length=200)
+    travel_ticks: int = Field(default=1, ge=1, le=10_000)
+    description: str | None = Field(default=None, max_length=1000)
+    state: dict = {}
+    bidirectional: bool = False
+
+
+class CampaignEventResponse(BaseModel):
+    id: int
+    campaign_id: int
+    tick: int
+    kind: str
+    summary: str = ""
+    location_id: int | None = None
+    encounter_id: int | None = None
+    data: dict = {}
+    created_at: str = ""
+
+
+class CampaignEventListResponse(BaseModel):
+    campaign_id: int
+    world_tick: int = 0
+    events: list[CampaignEventResponse] = []
+
+
+class CampaignMoveRequest(BaseModel):
+    location_id: int = Field(..., ge=1)
+    summary: str = Field(default="", max_length=500)
+
+
+class CampaignMoveResponse(BaseModel):
+    campaign_id: int
+    location: str
+    location_id: int
+    from_location_id: int | None = None
+    tick: int
+    edge: CampaignGraphEdge | None = None
+    event: CampaignEventResponse
+
+
 class SoloStateResponse(BaseModel):
     campaign_id: int
     name: str
     edition: str
     phase: str
     round: int
+    world_tick: int = 0
     location: str | None = None
     location_id: int | None = None
     active_combatant_id: int | None = None
+    active_encounter: CampaignEncounterResponse | None = None
     combatants: list[dict] = []
     quests: list[dict] = []
     recent_turns: list[dict] = []
@@ -686,6 +794,7 @@ class CombatStartResponse(BaseModel):
     round: int
     combatants: list[dict] = []
     active_combatant: str | None = None
+    encounter_id: int | None = None
 
 
 class CombatEndTurnResponse(BaseModel):
@@ -761,6 +870,243 @@ async def solo_state(
         return SoloStateResponse(**loop.get_state(campaign_id))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/{campaign_id}/graph", response_model=CampaignGraphResponse)
+async def campaign_graph(
+    campaign_id: int,
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+) -> CampaignGraphResponse:
+    """Return the breadcrumb graph: location nodes, travel edges, and clock."""
+    if not repo.campaign_exists(campaign_id):
+        raise HTTPException(status_code=404, detail=f"no campaign {campaign_id}")
+    state = repo.ensure_solo_state(campaign_id)
+    return CampaignGraphResponse(
+        campaign_id=campaign_id,
+        world_tick=state.world_tick,
+        current_location_id=state.current_location_id,
+        nodes=[
+            CampaignGraphNode(
+                id=location.id,
+                name=location.name,
+                type=location.type,
+                parent_id=location.parent_id,
+                description=location.description,
+            )
+            for location in repo.get_locations(campaign_id)
+        ],
+        edges=[
+            CampaignGraphEdge(**edge.to_dict())
+            for edge in repo.get_location_edges(campaign_id)
+        ],
+        event_count=repo.count_events(campaign_id),
+    )
+
+
+@router.post("/{campaign_id}/graph/edges", response_model=CampaignGraphEdge)
+async def campaign_graph_edge(
+    campaign_id: int,
+    request: CampaignEdgeCreateRequest,
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+) -> CampaignGraphEdge:
+    """Create or update a travel edge between two known locations."""
+    if not repo.campaign_exists(campaign_id):
+        raise HTTPException(status_code=404, detail=f"no campaign {campaign_id}")
+    for location_id in (request.from_location_id, request.to_location_id):
+        if repo.get_location(campaign_id, location_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no location {location_id} in campaign {campaign_id}",
+            )
+    try:
+        edge = repo.upsert_location_edge(
+            campaign_id,
+            request.from_location_id,
+            request.to_location_id,
+            kind=request.kind,
+            label=request.label,
+            travel_ticks=request.travel_ticks,
+            description=request.description,
+            state=request.state,
+            bidirectional=request.bidirectional,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return CampaignGraphEdge(**edge.to_dict())
+
+
+@router.post("/{campaign_id}/move", response_model=CampaignMoveResponse)
+async def campaign_move(
+    campaign_id: int,
+    request: CampaignMoveRequest,
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+) -> CampaignMoveResponse:
+    """Move the party to a location, advancing the world clock and event log."""
+    if not repo.campaign_exists(campaign_id):
+        raise HTTPException(status_code=404, detail=f"no campaign {campaign_id}")
+    if repo.get_location(campaign_id, request.location_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"no location {request.location_id} in campaign {campaign_id}",
+        )
+    try:
+        movement = repo.move_to_location(
+            campaign_id, request.location_id, summary=request.summary
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    edge = movement["edge"]
+    return CampaignMoveResponse(
+        campaign_id=campaign_id,
+        location=movement["location"],
+        location_id=movement["location_id"],
+        from_location_id=movement["from_location_id"],
+        tick=movement["tick"],
+        edge=CampaignGraphEdge(**edge.to_dict()) if edge is not None else None,
+        event=CampaignEventResponse(**movement["event"].to_dict()),
+    )
+
+
+@router.get("/{campaign_id}/events", response_model=CampaignEventListResponse)
+async def campaign_events(
+    campaign_id: int,
+    limit: int = Query(50, ge=1, le=200),
+    since_tick: int | None = Query(default=None, ge=0),
+    location_id: int | None = Query(default=None, ge=1),
+    encounter_id: int | None = Query(default=None, ge=1),
+    kind: str | None = Query(default=None, max_length=80),
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+) -> CampaignEventListResponse:
+    """Return the campaign's breadcrumb trail, oldest event first."""
+    if not repo.campaign_exists(campaign_id):
+        raise HTTPException(status_code=404, detail=f"no campaign {campaign_id}")
+    state = repo.ensure_solo_state(campaign_id)
+    return CampaignEventListResponse(
+        campaign_id=campaign_id,
+        world_tick=state.world_tick,
+        events=[
+            CampaignEventResponse(**event.to_dict())
+            for event in repo.list_events(
+                campaign_id,
+                limit=limit,
+                since_tick=since_tick,
+                location_id=location_id,
+                encounter_id=encounter_id,
+                kind=kind,
+            )
+        ],
+    )
+
+
+@router.post("/{campaign_id}/encounters", response_model=CampaignEncounterResponse)
+async def create_campaign_encounter(
+    campaign_id: int,
+    request: CampaignEncounterCreateRequest,
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+) -> CampaignEncounterResponse:
+    """Create any encounter kind (battle, loot, door, trap, npc)."""
+    if not repo.campaign_exists(campaign_id):
+        raise HTTPException(status_code=404, detail=f"no campaign {campaign_id}")
+    if request.location_id is not None and repo.get_location(
+        campaign_id, request.location_id
+    ) is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"no location {request.location_id} in campaign {campaign_id}",
+        )
+    try:
+        encounter = repo.create_encounter(
+            campaign_id,
+            request.kind,
+            summary=request.summary,
+            state=request.state,
+            seed=request.seed,
+            status=request.status,
+            location_id=request.location_id,
+        )
+    except EncounterStateError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        if "already has an active encounter" in str(exc):
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return CampaignEncounterResponse(**encounter.to_dict())
+
+
+@router.post(
+    "/{campaign_id}/encounters/{encounter_id}/transition",
+    response_model=CampaignEncounterResponse,
+)
+async def transition_campaign_encounter(
+    campaign_id: int,
+    encounter_id: int,
+    request: CampaignEncounterTransitionRequest,
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+) -> CampaignEncounterResponse:
+    """Apply one validated lifecycle transition to any encounter kind."""
+    if not repo.campaign_exists(campaign_id):
+        raise HTTPException(status_code=404, detail=f"no campaign {campaign_id}")
+    try:
+        encounter = repo.transition_encounter(
+            campaign_id,
+            encounter_id,
+            request.status,
+            summary=request.summary,
+            state=request.state,
+        )
+    except EncounterStateError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        if "already has an active encounter" in str(exc):
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if "no encounter" in str(exc):
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return CampaignEncounterResponse(**encounter.to_dict())
+
+
+@router.get("/{campaign_id}/encounters", response_model=CampaignEncounterListResponse)
+async def solo_encounters(
+    campaign_id: int,
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+) -> CampaignEncounterListResponse:
+    if not repo.campaign_exists(campaign_id):
+        raise HTTPException(status_code=404, detail=f"no campaign {campaign_id}")
+    return CampaignEncounterListResponse(
+        campaign_id=campaign_id,
+        encounters=[
+            CampaignEncounterResponse(**encounter.to_dict())
+            for encounter in repo.list_encounters(campaign_id)
+        ],
+    )
+
+
+@router.get(
+    "/{campaign_id}/encounters/{encounter_id}",
+    response_model=CampaignEncounterResponse,
+)
+async def solo_encounter(
+    campaign_id: int,
+    encounter_id: int,
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+) -> CampaignEncounterResponse:
+    if not repo.campaign_exists(campaign_id):
+        raise HTTPException(status_code=404, detail=f"no campaign {campaign_id}")
+    encounter = repo.get_encounter(campaign_id, encounter_id)
+    if encounter is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"no encounter {encounter_id} in campaign {campaign_id}",
+        )
+    return CampaignEncounterResponse(**encounter.to_dict())
 
 
 @router.post("/{campaign_id}/combat/start", response_model=CombatStartResponse)

@@ -76,6 +76,8 @@ data class MapTokenDto(
     val y: Int,
     val z: Float = 0.5f,
     val color: String = "#d4af37",
+    @SerialName("encounter_id") val encounterId: Int? = null,
+    @SerialName("combatant_id") val combatantId: Int? = null,
 )
 
 @Serializable
