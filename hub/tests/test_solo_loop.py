@@ -329,7 +329,6 @@ def test_repository_transaction_closes_connection_if_begin_fails(
         def execute(self, sql: str) -> None:
             if sql == "BEGIN IMMEDIATE":
                 raise sqlite3.OperationalError("database is locked")
-            return None
 
         def close(self) -> None:
             self.closed = True
@@ -337,9 +336,8 @@ def test_repository_transaction_closes_connection_if_begin_fails(
     failed = FailedBegin()
     with monkeypatch.context() as patch:
         patch.setattr("app.db.repository.sqlite3.connect", lambda path: failed)
-        with pytest.raises(sqlite3.OperationalError, match="locked"):
-            with repo.transaction():
-                pytest.fail("transaction should not begin")
+        with pytest.raises(sqlite3.OperationalError, match="locked"), repo.transaction():
+            pytest.fail("transaction should not begin")
     assert failed.closed
     # A failed transaction must not leave a context lease behind.
     assert repo.create_campaign("SAMPLE AFTER FAILURE").name == "SAMPLE AFTER FAILURE"
