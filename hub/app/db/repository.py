@@ -2151,8 +2151,14 @@ class CampaignRepository:
         *,
         summary: str | None = None,
         state: dict | None = None,
+        instant: bool = False,
     ) -> Encounter:
-        """Apply one validated lifecycle transition to an existing encounter."""
+        """Apply one validated lifecycle transition to an existing encounter.
+
+        ``instant=True`` resolves a pending trap directly to a terminal state
+        without activating it, so a one-roll hazard never waits behind the
+        active-encounter invariant. The event is logged as ``hazard_resolved``.
+        """
         validate_status(status)
         with self._conn() as conn:
             row = conn.execute(
@@ -2164,7 +2170,9 @@ class CampaignRepository:
                     f"no encounter {encounter_id} in campaign {campaign_id}"
                 )
             current = self._encounter_from_row(dict(row))
-            validate_transition(current.status, status)
+            validate_transition(
+                current.status, status, kind=current.kind, instant=instant
+            )
 
             new_summary = summary if summary is not None else current.summary
             new_state = state if state is not None else current.state
@@ -2197,19 +2205,22 @@ class CampaignRepository:
                 (campaign_id, encounter_id),
             ).fetchone()
             updated = self._encounter_from_row(dict(row))
+            event_data = {
+                "kind": updated.kind,
+                "from": current.status,
+                "to": status,
+            }
+            if instant:
+                event_data["instant"] = True
             self._append_event_on_conn(
                 conn,
                 campaign_id,
-                "encounter_transition",
+                "hazard_resolved" if instant else "encounter_transition",
                 tick=self._world_tick_on_conn(conn, campaign_id),
                 summary=new_summary or f"{updated.kind.title()} {status}",
                 location_id=updated.location_id,
                 encounter_id=updated.id,
-                data={
-                    "kind": updated.kind,
-                    "from": current.status,
-                    "to": status,
-                },
+                data=event_data,
             )
             return updated
 

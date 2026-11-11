@@ -688,6 +688,9 @@ class CampaignEncounterTransitionRequest(BaseModel):
     status: Literal["pending", "active", "resolved", "failed", "abandoned"]
     summary: str | None = Field(default=None, max_length=1000)
     state: dict | None = None
+    # Trap-only carve-out: pending -> resolved/failed in one roll without
+    # taking the campaign's active-encounter slot.
+    instant: bool = False
 
 
 class CampaignGraphNode(BaseModel):
@@ -1059,6 +1062,7 @@ async def transition_campaign_encounter(
             request.status,
             summary=request.summary,
             state=request.state,
+            instant=request.instant,
         )
     except EncounterStateError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

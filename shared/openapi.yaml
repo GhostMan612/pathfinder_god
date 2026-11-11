@@ -2026,6 +2026,10 @@ components:
             type: object
           - type: 'null'
           title: State
+        instant:
+          type: boolean
+          title: Instant
+          default: false
       type: object
       required:
       - status
