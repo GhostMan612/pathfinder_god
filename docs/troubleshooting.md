@@ -10,14 +10,15 @@ Start here before digging into logs. Most problems are one of the five below.
    in `C:\pathfinder_god\hub`.
 2. Same network? The phone must be on the **same Wi-Fi as the laptop**, or join the
    **laptop's own hotspot** (most reliable at the table).
-3. In the app: **Setup → Find hub automatically** → tap your laptop.
+3. In the native app: **Setup → Tether** → enter the laptop LAN URL
+   manually and press **CONNECT**. There is currently no Find hub picker.
 4. Still nothing? Check `tools/command_center/logs/hub.log` on the laptop.
 
 ## 2. "Hub returned 404"
 
 You typed Ollama's port. The hub is `:8000`, Ollama is `:11450` — the phone
-**never** talks to `:11450`. The app auto-corrects this, but fix the URL to
-`http://<laptop-ip>:8000` to be sure.
+**never** talks to `:11450`. The app does **not** auto-correct the port; set the Hub URL to
+`http://<laptop-ip>:8000` explicitly in a debug build.
 
 ## 3. Windows Firewall blocks the phone
 
@@ -48,7 +49,11 @@ backfill run picks it up.
 ## 7. Emulator vs real device
 
 - Emulator on the same machine as the hub: `http://10.0.2.2:8000` (default).
-- Real device: auto-discovery, or the laptop's LAN/hotspot IP with `:8000`.
+- Real device (debug): enter the laptop's actual LAN/hotspot IP with `:8000`.
+  Release APKs require a trusted HTTPS Hub, not unrestricted cleartext HTTP.
+- To compile instrumentation tests: `./gradlew assembleDebugAndroidTest`.
+  A real-device run needs ADB and the `hubBaseUrl` Gradle instrumentation
+  argument; see [native Spoke setup](setup-spoke-android.md).
 
 ## Where logs live
 
