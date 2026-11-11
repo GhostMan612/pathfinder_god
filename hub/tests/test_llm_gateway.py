@@ -141,6 +141,41 @@ async def test_builder_cache_hit_avoids_second_http_call():
 
 
 @pytest.mark.asyncio
+async def test_cache_key_includes_sampling_settings():
+    client = _FakeClient()
+    gateway = LlmGateway(_settings(), client_factory=lambda: client)
+    try:
+        await gateway.generate(
+            "same prompt", task="builder", format="json", temperature=0.6
+        )
+        # Same prompt, different temperature: a fresh generation, not a
+        # cache hit from the first call.
+        await gateway.generate(
+            "same prompt", task="builder", format="json", temperature=0.9
+        )
+        assert client.calls == ["same prompt", "same prompt"]
+        assert gateway.stats()["cache_hits"] == 0
+        # Same prompt and same sampling as the first call: a cache hit.
+        await gateway.generate(
+            "same prompt", task="builder", format="json", temperature=0.6
+        )
+        assert client.calls == ["same prompt", "same prompt"]
+        assert gateway.stats()["cache_hits"] == 1
+        # Same prompt and temperature, different num_predict: fresh again.
+        await gateway.generate(
+            "same prompt",
+            task="builder",
+            format="json",
+            temperature=0.6,
+            num_predict=100,
+        )
+        assert len(client.calls) == 3
+        assert gateway.stats()["cache_hits"] == 1
+    finally:
+        await gateway.close()
+
+
+@pytest.mark.asyncio
 async def test_chat_is_never_cached():
     client = _FakeClient()
     gateway = LlmGateway(_settings(), client_factory=lambda: client)
