@@ -397,6 +397,18 @@ class SoloLoop:
 
         if location_id is not None:
             self.repo.set_current_location(campaign_id, location_id)
+        self.repo.append_event(
+            campaign_id,
+            "campaign_started",
+            summary=f"Campaign started in {location_name}",
+            location_id=location_id,
+            data={
+                "name": name,
+                "edition": edition,
+                "premise": premise,
+                "world_source": world_source,
+            },
+        )
 
         # Hero: the NPC builder returns a valid stat block in all normal
         # cases (LLM, else its marked template fallback).
@@ -668,6 +680,19 @@ class SoloLoop:
         self.repo.record_turn(
             campaign_id, turn_num, actor, action, narration, outcome_dict, dice_rolls
         )
+        self.repo.append_event(
+            campaign_id,
+            "turn",
+            summary=f"Turn {turn_num}: {action[:200]}",
+            location_id=state.current_location_id,
+            data={
+                "turn_num": turn_num,
+                "kind": kind,
+                "phase": state.phase,
+                "source": source,
+                "actor": actor,
+            },
+        )
         self.repo.add_decision(
             campaign_id=campaign_id,
             session_num=max(1, self.repo.get_latest_session_num(campaign_id)),
@@ -920,8 +945,8 @@ class SoloLoop:
         for loc in locations:
             if loc.name.lower() in lowered:
                 if state.current_location_id != loc.id:
-                    self.repo.set_current_location(campaign_id, loc.id)
-                    return loc.name
+                    movement = self.repo.move_to_location(campaign_id, loc.id)
+                    return movement["location"]
                 return None
         return None
 
@@ -1459,6 +1484,7 @@ class SoloLoop:
             "edition": campaign.edition,
             "phase": state.phase,
             "round": state.round_num,
+            "world_tick": state.world_tick,
             "location": self._current_location_name(campaign_id, state),
             "location_id": state.current_location_id,
             "active_combatant_id": state.active_combatant_id,

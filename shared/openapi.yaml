@@ -863,7 +863,221 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /campaign/{campaign_id}/graph:
+    get:
+      tags:
+      - campaign
+      summary: Campaign Graph
+      description: 'Return the breadcrumb graph: location nodes, travel edges, and
+        clock.'
+      operationId: campaign_graph_campaign__campaign_id__graph_get
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Campaign Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignGraphResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /campaign/{campaign_id}/graph/edges:
+    post:
+      tags:
+      - campaign
+      summary: Campaign Graph Edge
+      description: Create or update a travel edge between two known locations.
+      operationId: campaign_graph_edge_campaign__campaign_id__graph_edges_post
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Campaign Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CampaignEdgeCreateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignGraphEdge'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /campaign/{campaign_id}/move:
+    post:
+      tags:
+      - campaign
+      summary: Campaign Move
+      description: Move the party to a location, advancing the world clock and event
+        log.
+      operationId: campaign_move_campaign__campaign_id__move_post
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Campaign Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CampaignMoveRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignMoveResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /campaign/{campaign_id}/events:
+    get:
+      tags:
+      - campaign
+      summary: Campaign Events
+      description: Return the campaign's breadcrumb trail, oldest event first.
+      operationId: campaign_events_campaign__campaign_id__events_get
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Campaign Id
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          default: 50
+          title: Limit
+      - name: since_tick
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+            minimum: 0
+          - type: 'null'
+          title: Since Tick
+      - name: location_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+            minimum: 1
+          - type: 'null'
+          title: Location Id
+      - name: encounter_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+            minimum: 1
+          - type: 'null'
+          title: Encounter Id
+      - name: kind
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            maxLength: 80
+          - type: 'null'
+          title: Kind
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignEventListResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /campaign/{campaign_id}/encounters:
+    post:
+      tags:
+      - campaign
+      summary: Create Campaign Encounter
+      description: Create any encounter kind (battle, loot, door, trap, npc).
+      operationId: create_campaign_encounter_campaign__campaign_id__encounters_post
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Campaign Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CampaignEncounterCreateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignEncounterResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
     get:
       tags:
       - campaign
@@ -886,6 +1100,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CampaignEncounterListResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /campaign/{campaign_id}/encounters/{encounter_id}/transition:
+    post:
+      tags:
+      - campaign
+      summary: Transition Campaign Encounter
+      description: Apply one validated lifecycle transition to any encounter kind.
+      operationId: transition_campaign_encounter_campaign__campaign_id__encounters__encounter_id__transition_post
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Campaign Id
+      - name: encounter_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Encounter Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CampaignEncounterTransitionRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignEncounterResponse'
         '422':
           description: Validation Error
           content:
@@ -1590,6 +1846,103 @@ components:
       required:
       - valid
       title: BuildWorldResponse
+    CampaignEdgeCreateRequest:
+      properties:
+        from_location_id:
+          type: integer
+          minimum: 1.0
+          title: From Location Id
+        to_location_id:
+          type: integer
+          minimum: 1.0
+          title: To Location Id
+        kind:
+          type: string
+          enum:
+          - road
+          - trail
+          - door
+          - stairs
+          - portal
+          - other
+          title: Kind
+          default: trail
+        label:
+          type: string
+          maxLength: 200
+          title: Label
+          default: ''
+        travel_ticks:
+          type: integer
+          maximum: 10000.0
+          minimum: 1.0
+          title: Travel Ticks
+          default: 1
+        description:
+          anyOf:
+          - type: string
+            maxLength: 1000
+          - type: 'null'
+          title: Description
+        state:
+          additionalProperties: true
+          type: object
+          title: State
+          default: {}
+        bidirectional:
+          type: boolean
+          title: Bidirectional
+          default: false
+      type: object
+      required:
+      - from_location_id
+      - to_location_id
+      title: CampaignEdgeCreateRequest
+    CampaignEncounterCreateRequest:
+      properties:
+        kind:
+          type: string
+          enum:
+          - battle
+          - loot
+          - door
+          - trap
+          - npc
+          title: Kind
+        status:
+          type: string
+          enum:
+          - pending
+          - active
+          title: Status
+          default: pending
+        summary:
+          type: string
+          maxLength: 1000
+          title: Summary
+          default: ''
+        state:
+          additionalProperties: true
+          type: object
+          title: State
+          default: {}
+        seed:
+          anyOf:
+          - type: integer
+            maximum: 2147483647.0
+            minimum: 0.0
+          - type: 'null'
+          title: Seed
+        location_id:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Location Id
+      type: object
+      required:
+      - kind
+      title: CampaignEncounterCreateRequest
     CampaignEncounterListResponse:
       properties:
         campaign_id:
@@ -1628,6 +1981,11 @@ components:
           type: object
           title: State
           default: {}
+        location_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Location Id
         seed:
           anyOf:
           - type: integer
@@ -1645,6 +2003,96 @@ components:
       - kind
       - status
       title: CampaignEncounterResponse
+    CampaignEncounterTransitionRequest:
+      properties:
+        status:
+          type: string
+          enum:
+          - pending
+          - active
+          - resolved
+          - failed
+          - abandoned
+          title: Status
+        summary:
+          anyOf:
+          - type: string
+            maxLength: 1000
+          - type: 'null'
+          title: Summary
+        state:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: State
+      type: object
+      required:
+      - status
+      title: CampaignEncounterTransitionRequest
+    CampaignEventListResponse:
+      properties:
+        campaign_id:
+          type: integer
+          title: Campaign Id
+        world_tick:
+          type: integer
+          title: World Tick
+          default: 0
+        events:
+          items:
+            $ref: '#/components/schemas/CampaignEventResponse'
+          type: array
+          title: Events
+          default: []
+      type: object
+      required:
+      - campaign_id
+      title: CampaignEventListResponse
+    CampaignEventResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        campaign_id:
+          type: integer
+          title: Campaign Id
+        tick:
+          type: integer
+          title: Tick
+        kind:
+          type: string
+          title: Kind
+        summary:
+          type: string
+          title: Summary
+          default: ''
+        location_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Location Id
+        encounter_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Encounter Id
+        data:
+          additionalProperties: true
+          type: object
+          title: Data
+          default: {}
+        created_at:
+          type: string
+          title: Created At
+          default: ''
+      type: object
+      required:
+      - id
+      - campaign_id
+      - tick
+      - kind
+      title: CampaignEventResponse
     CampaignExport:
       properties:
         campaign:
@@ -1727,6 +2175,110 @@ components:
       - version
       title: CampaignExport
       description: Complete campaign export for backup/transfer.
+    CampaignGraphEdge:
+      properties:
+        id:
+          type: integer
+          title: Id
+        campaign_id:
+          type: integer
+          title: Campaign Id
+        from_location_id:
+          type: integer
+          title: From Location Id
+        to_location_id:
+          type: integer
+          title: To Location Id
+        kind:
+          type: string
+          title: Kind
+        label:
+          type: string
+          title: Label
+          default: ''
+        travel_ticks:
+          type: integer
+          title: Travel Ticks
+          default: 1
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        state:
+          additionalProperties: true
+          type: object
+          title: State
+          default: {}
+      type: object
+      required:
+      - id
+      - campaign_id
+      - from_location_id
+      - to_location_id
+      - kind
+      title: CampaignGraphEdge
+    CampaignGraphNode:
+      properties:
+        id:
+          type: integer
+          title: Id
+        name:
+          type: string
+          title: Name
+        type:
+          type: string
+          title: Type
+        parent_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Parent Id
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+      type: object
+      required:
+      - id
+      - name
+      - type
+      title: CampaignGraphNode
+    CampaignGraphResponse:
+      properties:
+        campaign_id:
+          type: integer
+          title: Campaign Id
+        world_tick:
+          type: integer
+          title: World Tick
+          default: 0
+        current_location_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Current Location Id
+        nodes:
+          items:
+            $ref: '#/components/schemas/CampaignGraphNode'
+          type: array
+          title: Nodes
+          default: []
+        edges:
+          items:
+            $ref: '#/components/schemas/CampaignGraphEdge'
+          type: array
+          title: Edges
+          default: []
+        event_count:
+          type: integer
+          title: Event Count
+          default: 0
+      type: object
+      required:
+      - campaign_id
+      title: CampaignGraphResponse
     CampaignImport:
       properties:
         campaign:
@@ -1822,6 +2374,54 @@ components:
           default: true
       type: object
       title: CampaignImport
+    CampaignMoveRequest:
+      properties:
+        location_id:
+          type: integer
+          minimum: 1.0
+          title: Location Id
+        summary:
+          type: string
+          maxLength: 500
+          title: Summary
+          default: ''
+      type: object
+      required:
+      - location_id
+      title: CampaignMoveRequest
+    CampaignMoveResponse:
+      properties:
+        campaign_id:
+          type: integer
+          title: Campaign Id
+        location:
+          type: string
+          title: Location
+        location_id:
+          type: integer
+          title: Location Id
+        from_location_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: From Location Id
+        tick:
+          type: integer
+          title: Tick
+        edge:
+          anyOf:
+          - $ref: '#/components/schemas/CampaignGraphEdge'
+          - type: 'null'
+        event:
+          $ref: '#/components/schemas/CampaignEventResponse'
+      type: object
+      required:
+      - campaign_id
+      - location
+      - location_id
+      - tick
+      - event
+      title: CampaignMoveResponse
     CampaignNote:
       properties:
         prompt:
@@ -3021,6 +3621,10 @@ components:
         round:
           type: integer
           title: Round
+        world_tick:
+          type: integer
+          title: World Tick
+          default: 0
         location:
           anyOf:
           - type: string

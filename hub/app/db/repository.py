@@ -35,6 +35,10 @@ logger = logging.getLogger(__name__)
 # and the entity ledger, not in this debugging aid.
 _RAW_LOG_MAX_CHARS = 100_000
 
+#: Traversable link kinds in the breadcrumb graph. ``trail`` is the lazy edge
+#: recorded the first time the party travels between two known locations.
+EDGE_KINDS = ("road", "trail", "door", "stairs", "portal", "other")
+
 
 @dataclass
 class Campaign:
@@ -150,6 +154,7 @@ class SoloState:
     active_combatant_id: int | None = None
     turn_order: list[int] | None = None
     next_turn_num: int = 1
+    world_tick: int = 0
 
 
 @dataclass
@@ -160,6 +165,7 @@ class Encounter:
     status: str
     summary: str = ""
     state: dict = field(default_factory=dict)
+    location_id: int | None = None
     seed: int | None = None
     resolved_at: str | None = None
 
@@ -171,8 +177,61 @@ class Encounter:
             "status": self.status,
             "summary": self.summary,
             "state": self.state,
+            "location_id": self.location_id,
             "seed": self.seed,
             "resolved_at": self.resolved_at,
+        }
+
+
+@dataclass
+class LocationEdge:
+    id: int
+    campaign_id: int
+    from_location_id: int
+    to_location_id: int
+    kind: str = "trail"
+    label: str = ""
+    travel_ticks: int = 1
+    description: str | None = None
+    state: dict = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "campaign_id": self.campaign_id,
+            "from_location_id": self.from_location_id,
+            "to_location_id": self.to_location_id,
+            "kind": self.kind,
+            "label": self.label,
+            "travel_ticks": self.travel_ticks,
+            "description": self.description,
+            "state": self.state,
+        }
+
+
+@dataclass
+class CampaignEvent:
+    id: int
+    campaign_id: int
+    tick: int
+    kind: str
+    summary: str = ""
+    location_id: int | None = None
+    encounter_id: int | None = None
+    data: dict = field(default_factory=dict)
+    created_at: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "campaign_id": self.campaign_id,
+            "tick": self.tick,
+            "kind": self.kind,
+            "summary": self.summary,
+            "location_id": self.location_id,
+            "encounter_id": self.encounter_id,
+            "data": self.data,
+            "created_at": self.created_at,
         }
 
 
@@ -265,6 +324,29 @@ class CampaignRepository:
                     )
                 except sqlite3.OperationalError:
                     pass
+                # World clock and encounter location were added with the
+                # breadcrumb graph. ALTER is idempotent-by-exception so the
+                # same _init_db path upgrades a live campaign.db in place.
+                try:
+                    conn.execute(
+                        "ALTER TABLE solo_state ADD COLUMN world_tick "
+                        "INTEGER NOT NULL DEFAULT 0"
+                    )
+                except sqlite3.OperationalError:
+                    pass
+                try:
+                    conn.execute(
+                        "ALTER TABLE encounters ADD COLUMN location_id "
+                        "INTEGER REFERENCES locations(id) ON DELETE SET NULL"
+                    )
+                except sqlite3.OperationalError:
+                    pass
+                # schema.sql cannot index encounters.location_id before this
+                # ALTER runs on an old database, so create it here.
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_encounters_location "
+                    "ON encounters(campaign_id, location_id)"
+                )
                 # Older campaign.db files carry UNIQUE(campaign_id, name) on
                 # combatants, which collapsed duplicate monsters into one row:
                 # upserting a second "Goblin" overwrote the first one's HP/AC.
@@ -826,22 +908,29 @@ class CampaignRepository:
             )
             return cur.fetchone()[0]
 
+    @staticmethod
+    def _location_from_row(row: dict) -> Location:
+        values = dict(row)
+        values["facts"] = json.loads(values.pop("facts_json") or "[]")
+        values.pop("created_at", None)
+        values.pop("updated_at", None)
+        return Location(**values)
+
     def get_locations(self, campaign_id: int) -> list[Location]:
         with self._conn() as conn:
             rows = conn.execute(
                 "SELECT * FROM locations WHERE campaign_id = ? ORDER BY name",
                 (campaign_id,),
             ).fetchall()
-            # SELECT * returns the *_json columns too, which the dataclass does
-            # not accept. Decode them into their real fields and drop the rest.
-            out = []
-            for r in rows:
-                values = dict(r)
-                values["facts"] = json.loads(values.pop("facts_json") or "[]")
-                values.pop("created_at", None)
-                values.pop("updated_at", None)
-                out.append(Location(**values))
-            return out
+            return [self._location_from_row(dict(r)) for r in rows]
+
+    def get_location(self, campaign_id: int, location_id: int) -> Location | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM locations WHERE campaign_id = ? AND id = ?",
+                (campaign_id, location_id),
+            ).fetchone()
+            return self._location_from_row(dict(row)) if row else None
 
     # ──────────────────────────────────────────────────────────────
     # Items
@@ -1502,6 +1591,7 @@ class CampaignRepository:
         current_location_id: int | None = None,
         active_combatant_id: int | None = None,
         turn_order: list[int] | None = None,
+        world_tick: int | None = None,
         clear_active: bool = False,
     ) -> SoloState:
         """Patch solo_state fields; only the given fields change."""
@@ -1523,12 +1613,13 @@ class CampaignRepository:
             )
         )
         new_order = turn_order if turn_order is not None else (state.turn_order or [])
+        new_tick = world_tick if world_tick is not None else state.world_tick
         with self._conn() as conn:
             conn.execute(
                 """
                 UPDATE solo_state SET phase = ?, round_num = ?,
                     current_location_id = ?, active_combatant_id = ?,
-                    turn_order_json = ?
+                    turn_order_json = ?, world_tick = ?
                 WHERE campaign_id = ?
                 """,
                 (
@@ -1537,6 +1628,7 @@ class CampaignRepository:
                     new_location,
                     new_active,
                     json.dumps(new_order),
+                    new_tick,
                     campaign_id,
                 ),
             )
@@ -1547,10 +1639,396 @@ class CampaignRepository:
             current_location_id=new_location,
             active_combatant_id=new_active,
             turn_order=new_order,
+            next_turn_num=state.next_turn_num,
+            world_tick=new_tick,
         )
 
     def set_current_location(self, campaign_id: int, location_id: int) -> SoloState:
         return self.update_solo_state(campaign_id, current_location_id=location_id)
+
+    # ── Breadcrumb graph and campaign event log ──────────────────────────
+
+    @staticmethod
+    def _edge_from_row(row: dict) -> LocationEdge:
+        values = dict(row)
+        values["state"] = json.loads(values.pop("state_json") or "{}")
+        values.pop("created_at", None)
+        values.pop("updated_at", None)
+        return LocationEdge(**values)
+
+    @staticmethod
+    def _require_location(conn, campaign_id: int, location_id: int) -> dict:
+        row = conn.execute(
+            "SELECT id, name FROM locations WHERE campaign_id = ? AND id = ?",
+            (campaign_id, location_id),
+        ).fetchone()
+        if row is None:
+            raise ValueError(
+                f"no location {location_id} in campaign {campaign_id}"
+            )
+        return dict(row)
+
+    def _upsert_location_edge_on_conn(
+        self,
+        conn,
+        campaign_id: int,
+        from_location_id: int,
+        to_location_id: int,
+        *,
+        kind: str,
+        label: str,
+        travel_ticks: int,
+        description: str | None,
+        state: dict,
+    ) -> LocationEdge:
+        self._require_location(conn, campaign_id, from_location_id)
+        self._require_location(conn, campaign_id, to_location_id)
+        row = conn.execute(
+            """
+            INSERT INTO location_edges
+                (campaign_id, from_location_id, to_location_id, kind, label,
+                 travel_ticks, description, state_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(campaign_id, from_location_id, to_location_id)
+            DO UPDATE SET
+                kind = excluded.kind,
+                label = excluded.label,
+                travel_ticks = excluded.travel_ticks,
+                description = excluded.description,
+                state_json = excluded.state_json,
+                updated_at = datetime('now')
+            RETURNING *
+            """,
+            (
+                campaign_id,
+                from_location_id,
+                to_location_id,
+                kind,
+                label,
+                travel_ticks,
+                description,
+                json.dumps(state),
+            ),
+        ).fetchone()
+        return self._edge_from_row(dict(row))
+
+    def upsert_location_edge(
+        self,
+        campaign_id: int,
+        from_location_id: int,
+        to_location_id: int,
+        *,
+        kind: str = "trail",
+        label: str = "",
+        travel_ticks: int = 1,
+        description: str | None = None,
+        state: dict | None = None,
+        bidirectional: bool = False,
+    ) -> LocationEdge:
+        """Create or update one directed edge between two campaign locations.
+
+        ``bidirectional=True`` also writes the reverse edge with the same
+        properties. Lazy trail edges use the same upsert, so repeated travel
+        never duplicates graph rows.
+        """
+        if from_location_id == to_location_id:
+            raise ValueError("a location edge cannot connect a location to itself")
+        if kind not in EDGE_KINDS:
+            raise ValueError(
+                f"unknown edge kind {kind!r}; expected one of: "
+                + ", ".join(EDGE_KINDS)
+            )
+        if int(travel_ticks) < 1:
+            raise ValueError("travel_ticks must be at least 1")
+        with self._conn() as conn:
+            self._ensure_campaign(conn, campaign_id)
+            edge = self._upsert_location_edge_on_conn(
+                conn,
+                campaign_id,
+                from_location_id,
+                to_location_id,
+                kind=kind,
+                label=label,
+                travel_ticks=int(travel_ticks),
+                description=description,
+                state=state or {},
+            )
+            if bidirectional:
+                self._upsert_location_edge_on_conn(
+                    conn,
+                    campaign_id,
+                    to_location_id,
+                    from_location_id,
+                    kind=kind,
+                    label=label,
+                    travel_ticks=int(travel_ticks),
+                    description=description,
+                    state=state or {},
+                )
+            return edge
+
+    def get_location_edges(
+        self, campaign_id: int, location_id: int | None = None
+    ) -> list[LocationEdge]:
+        with self._conn() as conn:
+            if location_id is None:
+                rows = conn.execute(
+                    "SELECT * FROM location_edges WHERE campaign_id = ? "
+                    "ORDER BY id",
+                    (campaign_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM location_edges WHERE campaign_id = ? "
+                    "AND (from_location_id = ? OR to_location_id = ?) "
+                    "ORDER BY id",
+                    (campaign_id, location_id, location_id),
+                ).fetchall()
+            return [self._edge_from_row(dict(row)) for row in rows]
+
+    @staticmethod
+    def _world_tick_on_conn(conn, campaign_id: int) -> int:
+        row = conn.execute(
+            "SELECT world_tick FROM solo_state WHERE campaign_id = ?",
+            (campaign_id,),
+        ).fetchone()
+        return int(row["world_tick"]) if row else 0
+
+    def _append_event_on_conn(
+        self,
+        conn,
+        campaign_id: int,
+        kind: str,
+        *,
+        tick: int,
+        summary: str = "",
+        location_id: int | None = None,
+        encounter_id: int | None = None,
+        data: dict | None = None,
+    ) -> CampaignEvent:
+        if not kind or len(kind) > 80:
+            raise ValueError("event kind must be 1-80 characters")
+        if tick < 0:
+            raise ValueError("event tick cannot be negative")
+        if location_id is not None:
+            self._require_location(conn, campaign_id, location_id)
+        if encounter_id is not None:
+            row = conn.execute(
+                "SELECT id FROM encounters WHERE campaign_id = ? AND id = ?",
+                (campaign_id, encounter_id),
+            ).fetchone()
+            if row is None:
+                raise ValueError(
+                    f"no encounter {encounter_id} in campaign {campaign_id}"
+                )
+        row = conn.execute(
+            """
+            INSERT INTO campaign_events
+                (campaign_id, tick, kind, summary, location_id, encounter_id,
+                 data_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            RETURNING *
+            """,
+            (
+                campaign_id,
+                tick,
+                kind,
+                summary,
+                location_id,
+                encounter_id,
+                json.dumps(data or {}),
+            ),
+        ).fetchone()
+        values = dict(row)
+        values["data"] = json.loads(values.pop("data_json") or "{}")
+        return CampaignEvent(**values)
+
+    def append_event(
+        self,
+        campaign_id: int,
+        kind: str,
+        *,
+        tick: int | None = None,
+        summary: str = "",
+        location_id: int | None = None,
+        encounter_id: int | None = None,
+        data: dict | None = None,
+    ) -> CampaignEvent:
+        """Append one immutable event at ``tick`` (default: current world tick)."""
+        with self._conn() as conn:
+            self._ensure_campaign(conn, campaign_id)
+            if tick is None:
+                tick = self._world_tick_on_conn(conn, campaign_id)
+            return self._append_event_on_conn(
+                conn,
+                campaign_id,
+                kind,
+                tick=int(tick),
+                summary=summary,
+                location_id=location_id,
+                encounter_id=encounter_id,
+                data=data,
+            )
+
+    def list_events(
+        self,
+        campaign_id: int,
+        *,
+        limit: int = 50,
+        since_tick: int | None = None,
+        location_id: int | None = None,
+        encounter_id: int | None = None,
+        kind: str | None = None,
+    ) -> list[CampaignEvent]:
+        """Return the most recent events, ordered oldest-first for replay."""
+        limit = max(1, min(int(limit), 200))
+        clauses = ["campaign_id = ?"]
+        params: list[object] = [campaign_id]
+        if since_tick is not None:
+            clauses.append("tick >= ?")
+            params.append(int(since_tick))
+        if location_id is not None:
+            clauses.append("location_id = ?")
+            params.append(int(location_id))
+        if encounter_id is not None:
+            clauses.append("encounter_id = ?")
+            params.append(int(encounter_id))
+        if kind is not None:
+            clauses.append("kind = ?")
+            params.append(kind)
+        params.append(limit)
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM campaign_events WHERE "
+                + " AND ".join(clauses)
+                + " ORDER BY tick DESC, id DESC LIMIT ?",
+                params,
+            ).fetchall()
+            events = []
+            for row in rows:
+                values = dict(row)
+                values["data"] = json.loads(values.pop("data_json") or "{}")
+                events.append(CampaignEvent(**values))
+            events.reverse()
+            return events
+
+    def count_events(self, campaign_id: int) -> int:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM campaign_events WHERE campaign_id = ?",
+                (campaign_id,),
+            ).fetchone()
+            return int(row[0])
+
+    def move_to_location(
+        self,
+        campaign_id: int,
+        to_location_id: int,
+        *,
+        summary: str = "",
+        data: dict | None = None,
+    ) -> dict:
+        """Move the party to a known location, advancing the world clock.
+
+        An existing directed edge supplies ``travel_ticks``. If the party has
+        never traveled this route before, a discovered trail edge is recorded
+        so the breadcrumb graph accumulates as the campaign does.
+        """
+        with self._conn() as conn:
+            self._ensure_campaign(conn, campaign_id)
+            target = self._require_location(conn, campaign_id, to_location_id)
+            conn.execute(
+                "INSERT INTO solo_state (campaign_id) VALUES (?) "
+                "ON CONFLICT(campaign_id) DO NOTHING",
+                (campaign_id,),
+            )
+            state_row = conn.execute(
+                "SELECT current_location_id, world_tick FROM solo_state "
+                "WHERE campaign_id = ?",
+                (campaign_id,),
+            ).fetchone()
+            from_location_id = state_row["current_location_id"]
+            current_tick = int(state_row["world_tick"] or 0)
+            if from_location_id == to_location_id:
+                raise ValueError(
+                    f"party is already at location {to_location_id}"
+                )
+
+            edge: LocationEdge | None = None
+            if from_location_id is not None:
+                row = conn.execute(
+                    "SELECT * FROM location_edges WHERE campaign_id = ? "
+                    "AND from_location_id = ? AND to_location_id = ?",
+                    (campaign_id, from_location_id, to_location_id),
+                ).fetchone()
+                if row is not None:
+                    edge = self._edge_from_row(dict(row))
+                else:
+                    edge = self._upsert_location_edge_on_conn(
+                        conn,
+                        campaign_id,
+                        from_location_id,
+                        to_location_id,
+                        kind="trail",
+                        label="",
+                        travel_ticks=1,
+                        description="Discovered by travel.",
+                        state={},
+                    )
+                    # A discovered route is usable in both directions, but
+                    # never overwrite an explicit reverse edge (a road may
+                    # already describe the way back with different ticks).
+                    reverse = conn.execute(
+                        "SELECT id FROM location_edges WHERE campaign_id = ? "
+                        "AND from_location_id = ? AND to_location_id = ?",
+                        (campaign_id, to_location_id, from_location_id),
+                    ).fetchone()
+                    if reverse is None:
+                        self._upsert_location_edge_on_conn(
+                            conn,
+                            campaign_id,
+                            to_location_id,
+                            from_location_id,
+                            kind="trail",
+                            label="",
+                            travel_ticks=1,
+                            description="Discovered by travel.",
+                            state={},
+                        )
+
+            travel_ticks = edge.travel_ticks if edge is not None else 1
+            new_tick = current_tick + max(1, travel_ticks)
+            conn.execute(
+                "UPDATE solo_state SET current_location_id = ?, world_tick = ? "
+                "WHERE campaign_id = ?",
+                (to_location_id, new_tick, campaign_id),
+            )
+            payload = {
+                "from_location_id": from_location_id,
+                "to_location_id": to_location_id,
+                "edge_id": edge.id if edge is not None else None,
+                "travel_ticks": travel_ticks,
+            }
+            if data:
+                payload["detail"] = data
+            event = self._append_event_on_conn(
+                conn,
+                campaign_id,
+                "move",
+                tick=new_tick,
+                summary=summary or f"Traveled to {target['name']}",
+                location_id=to_location_id,
+                data=payload,
+            )
+            return {
+                "campaign_id": campaign_id,
+                "location": target["name"],
+                "location_id": to_location_id,
+                "from_location_id": from_location_id,
+                "tick": new_tick,
+                "edge": edge,
+                "event": event,
+            }
 
     # ── Encounter lifecycle ─────────────────────────────────────
 
@@ -1571,12 +2049,27 @@ class CampaignRepository:
         state: dict | None = None,
         seed: int | None = None,
         status: str = "pending",
+        location_id: int | None = None,
     ) -> Encounter:
-        """Create an encounter in ``pending`` (or explicitly ``active``) state."""
+        """Create an encounter in ``pending`` (or explicitly ``active``) state.
+
+        When ``location_id`` is omitted the encounter attaches to the party's
+        current location, so every encounter is a node on the breadcrumb trail.
+        Creation appends an ``encounter_created`` event at the current tick.
+        """
         validate_kind(kind)
         validate_status(status)
         with self._conn() as conn:
             self._ensure_campaign(conn, campaign_id)
+            if location_id is not None:
+                self._require_location(conn, campaign_id, location_id)
+            else:
+                row = conn.execute(
+                    "SELECT current_location_id FROM solo_state "
+                    "WHERE campaign_id = ?",
+                    (campaign_id,),
+                ).fetchone()
+                location_id = row["current_location_id"] if row else None
             if status == "active":
                 active = conn.execute(
                     "SELECT id FROM encounters "
@@ -1591,12 +2084,14 @@ class CampaignRepository:
                 row = conn.execute(
                     """
                     INSERT INTO encounters
-                        (campaign_id, kind, status, summary, state_json, seed)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                        (campaign_id, location_id, kind, status, summary,
+                         state_json, seed)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     RETURNING *
                     """,
                     (
                         campaign_id,
+                        location_id,
                         kind,
                         status,
                         summary,
@@ -1608,7 +2103,18 @@ class CampaignRepository:
                 raise ValueError(
                     f"campaign {campaign_id} already has an active encounter"
                 ) from exc
-            return self._encounter_from_row(dict(row))
+            encounter = self._encounter_from_row(dict(row))
+            self._append_event_on_conn(
+                conn,
+                campaign_id,
+                "encounter_created",
+                tick=self._world_tick_on_conn(conn, campaign_id),
+                summary=summary or f"{kind.title()} encounter created",
+                location_id=location_id,
+                encounter_id=encounter.id,
+                data={"kind": kind, "status": status},
+            )
+            return encounter
 
     def get_encounter(self, campaign_id: int, encounter_id: int) -> Encounter | None:
         with self._conn() as conn:
@@ -1690,7 +2196,22 @@ class CampaignRepository:
                 "SELECT * FROM encounters WHERE campaign_id = ? AND id = ?",
                 (campaign_id, encounter_id),
             ).fetchone()
-            return self._encounter_from_row(dict(row))
+            updated = self._encounter_from_row(dict(row))
+            self._append_event_on_conn(
+                conn,
+                campaign_id,
+                "encounter_transition",
+                tick=self._world_tick_on_conn(conn, campaign_id),
+                summary=new_summary or f"{updated.kind.title()} {status}",
+                location_id=updated.location_id,
+                encounter_id=updated.id,
+                data={
+                    "kind": updated.kind,
+                    "from": current.status,
+                    "to": status,
+                },
+            )
+            return updated
 
     def resolve_active_encounter(
         self,

@@ -262,6 +262,9 @@ CREATE TABLE IF NOT EXISTS solo_state (
     active_combatant_id INTEGER,
     turn_order_json TEXT NOT NULL DEFAULT '[]',
     next_turn_num INTEGER NOT NULL DEFAULT 1,
+    -- World clock. Every campaign event is stamped with the tick at which it
+    -- happened; travel advances it by the traversed edge's travel_ticks.
+    world_tick INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -273,6 +276,7 @@ CREATE TABLE IF NOT EXISTS solo_state (
 CREATE TABLE IF NOT EXISTS encounters (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    location_id INTEGER REFERENCES locations(id) ON DELETE SET NULL,
     kind TEXT NOT NULL CHECK(kind IN ('battle','loot','door','trap','npc')),
     status TEXT NOT NULL DEFAULT 'pending'
         CHECK(status IN ('pending','active','resolved','failed','abandoned')),
@@ -284,6 +288,40 @@ CREATE TABLE IF NOT EXISTS encounters (
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Breadcrumb graph: locations are nodes, traversable links are directed edges.
+-- A campaign starts with no edges; the first traversal of a known location
+-- records a discovered trail so the party's route accumulates as play happens.
+CREATE TABLE IF NOT EXISTS location_edges (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    from_location_id INTEGER NOT NULL REFERENCES locations(id) ON DELETE CASCADE,
+    to_location_id INTEGER NOT NULL REFERENCES locations(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL DEFAULT 'trail'
+        CHECK(kind IN ('road','trail','door','stairs','portal','other')),
+    label TEXT NOT NULL DEFAULT '',
+    travel_ticks INTEGER NOT NULL DEFAULT 1 CHECK(travel_ticks >= 1),
+    description TEXT,
+    state_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(campaign_id, from_location_id, to_location_id),
+    CHECK(from_location_id != to_location_id)
+);
+
+-- Event log = campaign memory. Rows are immutable; world state at a tick is the
+-- log replayed through that tick. tick 0 is campaign creation.
+CREATE TABLE IF NOT EXISTS campaign_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    tick INTEGER NOT NULL CHECK(tick >= 0),
+    kind TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    location_id INTEGER REFERENCES locations(id) ON DELETE SET NULL,
+    encounter_id INTEGER REFERENCES encounters(id) ON DELETE SET NULL,
+    data_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_combatants_campaign ON combatants(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_turns_campaign ON campaign_turns(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_turns_num ON campaign_turns(campaign_id, turn_num);
@@ -291,6 +329,16 @@ CREATE INDEX IF NOT EXISTS idx_encounters_campaign
     ON encounters(campaign_id, status);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_encounters_one_active
     ON encounters(campaign_id) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_edges_campaign
+    ON location_edges(campaign_id, from_location_id);
+CREATE INDEX IF NOT EXISTS idx_edges_target
+    ON location_edges(campaign_id, to_location_id);
+CREATE INDEX IF NOT EXISTS idx_events_timeline
+    ON campaign_events(campaign_id, tick, id);
+CREATE INDEX IF NOT EXISTS idx_events_location
+    ON campaign_events(campaign_id, location_id, tick);
+CREATE INDEX IF NOT EXISTS idx_events_encounter
+    ON campaign_events(campaign_id, encounter_id, tick);
 
 CREATE TRIGGER IF NOT EXISTS trigger_combatants_updated
 AFTER UPDATE ON combatants
@@ -308,6 +356,12 @@ CREATE TRIGGER IF NOT EXISTS trigger_encounters_updated
 AFTER UPDATE ON encounters
 BEGIN
     UPDATE encounters SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trigger_location_edges_updated
+AFTER UPDATE ON location_edges
+BEGIN
+    UPDATE location_edges SET updated_at = datetime('now') WHERE id = NEW.id;
 END;
 
 -- ──────────────────────────────────────────────────────────────
