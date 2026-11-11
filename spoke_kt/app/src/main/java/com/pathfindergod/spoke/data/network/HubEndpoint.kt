@@ -12,7 +12,10 @@ object HubEndpoint {
     const val DEFAULT_BASE_URL = "http://10.0.2.2:8000"
 
     fun normalize(raw: String): String {
-        val input = raw.trim().trimEnd('/')
+        // Preserve trailing scheme slashes until URI validation: trimming
+        // "http://" first turns it into "http:" and can disguise a bad URL
+        // as the valid host "http".
+        val input = raw.trim()
         if (input.isEmpty()) return "$DEFAULT_BASE_URL/"
         val candidate = if (input.contains("://")) input else "http://$input"
         val uri = try {
