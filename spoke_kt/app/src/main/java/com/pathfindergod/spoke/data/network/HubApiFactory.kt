@@ -58,17 +58,10 @@ object HubApiFactory {
             .build()
             .create(HubApi::class.java)
 
-    private fun client(): OkHttpClient = client ?: OkHttpClient.Builder()
-        .connectTimeout(CONNECT_SECONDS, TimeUnit.SECONDS)
-        .readTimeout(READ_SECONDS, TimeUnit.SECONDS)
-        .writeTimeout(WRITE_SECONDS, TimeUnit.SECONDS)
-        // An HTTPS Hub must not silently downgrade to HTTP via redirect.
-        .followSslRedirects(false)
-        .connectionPool(
-            ConnectionPool(MAX_IDLE_CONNECTIONS, KEEP_ALIVE_MINUTES, TimeUnit.MINUTES),
-        )
-        .build()
-        .also { client = it }
+    val okHttpClient: OkHttpClient
+        get() = client()
+
+    private fun client(): OkHttpClient = client ?: HubTlsClient.createOkHttpClient().also { client = it }
 
     private fun normalize(baseUrl: String): String = HubEndpoint.normalize(baseUrl)
 }

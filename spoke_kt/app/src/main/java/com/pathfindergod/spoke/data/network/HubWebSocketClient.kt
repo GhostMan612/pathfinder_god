@@ -71,12 +71,7 @@ fun interface GmStreamSource {
 }
 
 class HubWebSocketClient(
-    private val client: OkHttpClient = OkHttpClient.Builder()
-        .pingInterval(15, TimeUnit.SECONDS)
-        .retryOnConnectionFailure(true)
-        // Prevent WSS -> WS downgrade across server redirects.
-        .followSslRedirects(false)
-        .build(),
+    private val client: OkHttpClient = HubTlsClient.sharedClient,
 ) : GmStreamSource {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 

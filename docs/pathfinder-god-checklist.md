@@ -186,6 +186,15 @@ is pushed, committed, or PR'd without his explicit approval.
       htmx-ready page + Three.js 0.170.0 island, viewport from current square.
 - [x] Android P0 checks: real-phone LAN cleartext passed on B160V (Phase 1
       item 7); full UI flow still unverified.
+- [x] **B5-HTTPS — Release TLS for Pathfinder God Hub** (`feat/https-release-tls`, 11 Nov 2026):
+      Mandatory HTTPS for release builds with zero modification to `network_security_config.xml`
+      (cleartext remains locked to false, emulator `10.0.2.2` remains the only exception).
+      Self-signed 10-year RSA 2048 cert generated on laptop (`hub/scripts/make_hub_cert.py`)
+      covering localhost, 127.0.0.1, and detected LAN IPv4s.
+      OkHttp SPKI SHA-256 public key pinning in `HubTlsClient.kt` (`HUB_CERT_PIN`).
+      Hub uvicorn TLS support (`PFGOD_TLS_ENABLED`, `PFGOD_TLS_CERTFILE`, `PFGOD_TLS_KEYFILE`)
+      with fail-fast validation at startup, mDNS `tls=1` advertising, and container healthcheck
+      supporting HTTPS and HTTP.
 - [x] Blueprint docs updates (`MASTER_PROMPT.md`, this checklist, `FOR_MUSE.md`)
       — Phase 1 item 8.
 

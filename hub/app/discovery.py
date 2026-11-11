@@ -29,7 +29,7 @@ def _service_name() -> str:
     return f"PathfinderGod-{safe}.{SERVICE_TYPE}"
 
 
-def start_advertisement(port: int, version: str, model: str) -> bool:
+def start_advertisement(port: int, version: str, model: str, tls: bool = False) -> bool:
     """Start the mDNS advertisement in a background thread. Returns True if live."""
     global _advertiser
     if _advertiser is not None:
@@ -47,16 +47,19 @@ def start_advertisement(port: int, version: str, model: str) -> bool:
             logger.warning("No LAN IPv4 found — skipping mDNS advertisement")
             zc.close()
             return False
+        properties = {
+            b"version": version.encode("utf-8", "replace"),
+            b"model": model.encode("utf-8", "replace"),
+            b"app": b"pathfinder_god",
+        }
+        if tls:
+            properties[b"tls"] = b"1"
         info = ServiceInfo(
             SERVICE_TYPE,
             _service_name(),
             addresses=addresses,
             port=port,
-            properties={
-                b"version": version.encode("utf-8", "replace"),
-                b"model": model.encode("utf-8", "replace"),
-                b"app": b"pathfinder_god",
-            },
+            properties=properties,
         )
         zc.register_service(info)
         _advertiser = (zc, info)
