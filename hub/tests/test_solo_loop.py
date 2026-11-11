@@ -23,8 +23,8 @@ from app.agents.solo_loop import (
     hero_default_ac,
 )
 from app.api.deps import get_repo
-from app.main import app
 from app.db.repository import CampaignRepository
+from app.main import app
 
 TEST_API_KEY = "pfg_test_key_12345"
 
