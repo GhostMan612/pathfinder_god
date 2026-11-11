@@ -2231,7 +2231,7 @@ class SoloLoop:
             self.repo.clear_non_hero_combatants(campaign_id)
 
             # Heroes first, in party order. Existing heroes keep HP/conditions.
-            hero_ids = self._ensure_hero_combatants(campaign_id, rng, party_level)
+            self._ensure_hero_combatants(campaign_id, rng, party_level)
 
             monster_ids: list[int] = []
             for spec in monster_specs:
