@@ -48,6 +48,7 @@ from app.agents.combat_tracker import (
     wounded_value,
 )
 from app.agents.dice_utils import roll_dice
+from app.agents.encounter_stage import attach_stage_scene, stage_event
 from app.agents.json_builder import generate_validated_json
 from app.config import get_settings
 from app.db.repository import CampaignRepository
@@ -724,6 +725,8 @@ class SoloLoop:
                 emit, {"type": "encounter", **encounter_result}
             )
             emitted_encounter = True
+            if encounter_result.get("stage") is not None:
+                await _emit_turn_event(emit, encounter_result["stage"])
 
         outcome, outcome_source = await self._structured_outcome(
             campaign_id, action, kind, state, combatants, quests, chronicle
@@ -980,6 +983,7 @@ class SoloLoop:
 
         instant = False
         activated = False
+        stage: dict | None = None
         if (
             kind == "trap"
             and self._is_instant_trap(action)
@@ -1007,6 +1011,14 @@ class SoloLoop:
                     state=merged_state,
                 )
                 activated = True
+                scene = attach_stage_scene(self.repo, campaign_id, encounter)
+                if scene is not None:
+                    stage = stage_event(encounter, scene)
+                    refreshed = self.repo.get_encounter(
+                        campaign_id, encounter.id
+                    )
+                    if refreshed is not None:
+                        encounter = refreshed
                 notes.append(
                     f"{kind.title()} encounter active (id {encounter.id})."
                 )
@@ -1032,6 +1044,7 @@ class SoloLoop:
             "encounter": encounter.to_dict(),
             "activated": activated,
             "instant": instant,
+            "stage": stage,
             "note": notes[-1],
         }
 

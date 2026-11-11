@@ -77,13 +77,16 @@ async def ask_endpoint(
 # ──────────────────────────────────────────────────────────────
 
 class StreamEvent(BaseModel):
-    type: str  # start | chunk | end | error
+    type: str  # start | chunk | encounter_stage | end | error
     backend: str | None = None
     mode: str | None = None
     edition: str | None = None
     text: str | None = None
     message: str | None = None
     sources: list[dict] = []
+    encounter_id: int | None = None
+    kind: str | None = None
+    scene: dict | None = None
 
 
 class SoloTurnStreamRequest(BaseModel):
@@ -164,8 +167,29 @@ async def stream_endpoint(
             history=request.history,
             campaign_id=request.campaign_id,
         ):
+            stage = orchestrator.take_stage_event()
+            if stage is not None:
+                await websocket.send_json(
+                    StreamEvent(
+                        type="encounter_stage",
+                        encounter_id=stage.get("encounter_id"),
+                        kind=stage.get("kind"),
+                        scene=stage.get("scene"),
+                    ).model_dump()
+                )
             await websocket.send_json(
                 StreamEvent(type="chunk", text=chunk, backend=backend).model_dump()
+            )
+
+        stage = orchestrator.take_stage_event()
+        if stage is not None:
+            await websocket.send_json(
+                StreamEvent(
+                    type="encounter_stage",
+                    encounter_id=stage.get("encounter_id"),
+                    kind=stage.get("kind"),
+                    scene=stage.get("scene"),
+                ).model_dump()
             )
 
         # Citations come from the rows stream() already retrieved. This used to call

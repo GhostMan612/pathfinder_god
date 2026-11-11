@@ -78,6 +78,7 @@ data class MapTokenDto(
     val color: String = "#d4af37",
     @SerialName("encounter_id") val encounterId: Int? = null,
     @SerialName("combatant_id") val combatantId: Int? = null,
+    @SerialName("item_id") val itemId: Int? = null,
 )
 
 @Serializable

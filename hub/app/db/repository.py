@@ -294,6 +294,11 @@ class CampaignRepository:
         if schema_path.exists():
             with self._conn() as conn:
                 conn.executescript(schema_path.read_text(encoding="utf-8"))
+                conn.execute("PRAGMA user_version = 1")
+                conn.execute(
+                    "INSERT INTO meta (key, value) VALUES ('schema_version', '1') "
+                    "ON CONFLICT(key) DO NOTHING"
+                )
                 # Older campaign.db files predate the evergreen campaign summary
                 # column; ALTER idempotently so reused DBs gain it in place.
                 try:
@@ -2301,6 +2306,11 @@ class CampaignRepository:
             current = self._encounter_from_row(dict(row))
             state = dict(current.state)
             state["map"] = map_state
+            # The 3D stage reads state.scene without a second fetch. It is the
+            # same object persisted under state.map.scene, not a second scene
+            # path.
+            if isinstance(map_state.get("scene"), dict):
+                state["scene"] = map_state["scene"]
             conn.execute(
                 "UPDATE encounters SET state_json = ?, "
                 "updated_at = datetime('now') "

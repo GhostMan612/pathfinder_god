@@ -36,12 +36,14 @@ logger = logging.getLogger(__name__)
 CELL_SIZE = 50
 
 PROP_TYPES = ("crate", "brazier", "pillar", "chest", "barrel", "altar")
-TOKEN_KINDS = ("hero", "monster", "npc", "loot")
+TOKEN_KINDS = ("hero", "monster", "npc", "loot", "door", "trap")
 TOKEN_COLORS = {
     "hero": "#3b82f6",
     "monster": "#dc2626",
     "npc": "#22c55e",
     "loot": "#eab308",
+    "door": "#8b5cf6",
+    "trap": "#f97316",
 }
 
 
@@ -78,6 +80,9 @@ class MapToken:
     # and combat state instead of matching by display name later.
     encounter_id: int | None = None
     combatant_id: int | None = None
+    # Loot tokens point at the items row they represent. There is no loot
+    # combatant, so item_id is the addressable entity for that kind.
+    item_id: int | None = None
 
 
 @dataclass
@@ -658,12 +663,48 @@ class MapMakerAgent:
                     )
                 )
 
+            # Doors and traps are scene geometry first; the token form gives
+            # the encounter linker a stable, addressable handle without a
+            # second door/trap registry.
+            for idx_d, door in enumerate(doors):
+                tokens.append(
+                    MapToken(
+                        id=f"door-{idx_d + 1}",
+                        name=f"Door {idx_d + 1}",
+                        kind="door",
+                        x=door.x,
+                        y=door.y,
+                        z=round(max(1, heightmap[door.y][door.x]) * 0.5, 2),
+                        color=TOKEN_COLORS["door"],
+                    )
+                )
+            trap_features = [
+                secret
+                for secret in layout.secret_features
+                if "trap" in secret.type.lower()
+            ]
+            for idx_t, trap in enumerate(trap_features):
+                tokens.append(
+                    MapToken(
+                        id=f"trap-{idx_t + 1}",
+                        name=trap.name or f"Trap {idx_t + 1}",
+                        kind="trap",
+                        x=trap.x,
+                        y=trap.y,
+                        z=round(max(1, heightmap[trap.y][trap.x]) * 0.5, 2),
+                        color=TOKEN_COLORS["trap"],
+                    )
+                )
+
             reachable = cls._reachable_from((spawn.x, spawn.y), walkable)
             required_pts = {(spawn.x, spawn.y), (exit_pt.x, exit_pt.y)}
             for rm in layout.rooms:
                 required_pts.add(cls._room_center(rm))
             for tok in tokens:
-                required_pts.add((tok.x, tok.y))
+                # Door and trap handles sit on walls or secret cells; they are
+                # not traversal waypoints and must not mark the map disconnected.
+                if tok.kind not in ("door", "trap"):
+                    required_pts.add((tok.x, tok.y))
             connected = required_pts.issubset(reachable)
 
         fog = MapFog(color="#0a0d14", density=0.02) if layout.rooms else None
@@ -835,7 +876,7 @@ class MapMakerAgent:
     @staticmethod
     def link_tokens_to_combatants(
         scene: MapScene,
-        encounter_id: int,
+        encounter_id: int | None,
         combatants: list[Any],
     ) -> int:
         """Attach encounter/combatant IDs to matching scene tokens.
@@ -863,9 +904,122 @@ class MapMakerAgent:
             queue = available.get((token.kind, token.name))
             if not queue:
                 continue
-            token.encounter_id = encounter_id
+            if encounter_id is not None:
+                token.encounter_id = encounter_id
             token.combatant_id = queue.popleft()
             linked += 1
+        return linked
+
+    @staticmethod
+    def link_tokens_to_entities(
+        scene: MapScene,
+        *,
+        location_id: int | None,
+        encounters: list[Any],
+        items: list[dict],
+        npcs: list[Any],
+        combatants: list[Any] | None = None,
+        active_encounter: Any | None = None,
+    ) -> int:
+        """Link non-combat tokens to the campaign entities they represent.
+
+        Battle tokens already link through ``link_tokens_to_combatants``. This
+        pass adds the remaining kinds without a second registry: loot tokens
+        point at ``items`` rows, NPC tokens point at their ``npcs`` row and
+        optional NPC encounter, and door/trap tokens point at the pending or
+        active encounter of the same kind at the same location. Matching is
+        FIFO by display name/kind so duplicate names keep distinct IDs.
+        """
+        battle_id = (
+            active_encounter.id
+            if active_encounter is not None and active_encounter.kind == "battle"
+            else None
+        )
+        linked = 0
+        if combatants:
+            linked += MapMakerAgent.link_tokens_to_combatants(
+                scene, battle_id, combatants
+            )
+
+        item_queues: dict[str, deque[int]] = {}
+        for item in items:
+            if location_id is not None and item.get("location_id") != location_id:
+                continue
+            name = str(item.get("name") or "").strip()
+            item_id = item.get("id")
+            if name and item_id is not None:
+                item_queues.setdefault(name, deque()).append(int(item_id))
+
+        npc_queues: dict[str, deque[Any]] = {}
+        for npc in npcs:
+            name = str(getattr(npc, "name", "") or "").strip()
+            if name:
+                npc_queues.setdefault(name, deque()).append(npc)
+
+        encounters_by_kind: dict[str, deque[Any]] = {}
+        npc_by_id: dict[int, Any] = {}
+        npc_by_name: dict[str, Any] = {}
+        for encounter in encounters:
+            if location_id is not None and encounter.location_id != location_id:
+                continue
+            if encounter.status not in ("pending", "active"):
+                continue
+            encounters_by_kind.setdefault(encounter.kind, deque()).append(encounter)
+            if encounter.kind == "npc":
+                state = encounter.state or {}
+                npc_id = state.get("npc_id")
+                npc_name = str(state.get("npc_name") or "").strip()
+                if isinstance(npc_id, int):
+                    npc_by_id.setdefault(npc_id, encounter)
+                if npc_name:
+                    npc_by_name.setdefault(npc_name.lower(), encounter)
+
+        for token in scene.tokens:
+            already_linked = any(
+                value is not None
+                for value in (token.encounter_id, token.combatant_id, token.item_id)
+            )
+            if token.kind == "loot":
+                item_queue = item_queues.get(token.name)
+                if item_queue and token.item_id is None:
+                    token.item_id = item_queue.popleft()
+                loot_encounter = next(
+                    (
+                        candidate
+                        for candidate in encounters_by_kind.get("loot", ())
+                        if candidate.state.get("claimed") is not True
+                    ),
+                    None,
+                )
+                if loot_encounter is not None and token.encounter_id is None:
+                    token.encounter_id = loot_encounter.id
+            elif token.kind == "npc":
+                npc = None
+                npc_queue = npc_queues.get(token.name)
+                if npc_queue:
+                    npc = npc_queue.popleft()
+                if npc is None:
+                    for name, queue in npc_queues.items():
+                        if name.lower() == token.name.lower() and queue:
+                            npc = queue.popleft()
+                            break
+                if npc is not None and token.encounter_id is None:
+                    encounter = npc_by_id.get(getattr(npc, "id", -1))
+                    if encounter is None:
+                        encounter = npc_by_name.get(token.name.lower())
+                    if encounter is not None:
+                        token.encounter_id = encounter.id
+            elif token.kind in ("door", "trap"):
+                queue = encounters_by_kind.get(token.kind)
+                if queue and token.encounter_id is None:
+                    token.encounter_id = queue.popleft().id
+
+            now_linked = any(
+                value is not None
+                for value in (token.encounter_id, token.combatant_id, token.item_id)
+            )
+            if now_linked and not already_linked:
+                linked += 1
         return linked
 
     async def build(

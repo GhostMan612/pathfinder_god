@@ -136,7 +136,14 @@ class TestPlayableMapAndTokens:
         for tok in scene.tokens:
             assert scene.walkable[tok.y][tok.x] == 1
             assert (tok.x, tok.y) in reachable
-            assert tok.kind in ("hero", "monster", "npc", "loot")
+            assert tok.kind in (
+                "hero",
+                "monster",
+                "npc",
+                "loot",
+                "door",
+                "trap",
+            )
             assert tok.z > 0
 
     def test_links_encounters_npcs_and_loot_to_3d_tokens(self):
@@ -151,15 +158,18 @@ class TestPlayableMapAndTokens:
         )
         by_kind: dict[str, list[str]] = {}
         coords: set[tuple[int, int]] = set()
+        entity_tokens = 0
         for tok in scene.tokens:
             by_kind.setdefault(tok.kind, []).append(tok.name)
-            coords.add((tok.x, tok.y))
             assert scene.walkable[tok.y][tok.x] == 1
+            if tok.kind in ("hero", "monster", "npc", "loot"):
+                coords.add((tok.x, tok.y))
+                entity_tokens += 1
         assert by_kind["hero"] == ["SAMPLE HERO"]
         assert by_kind["monster"] == ["SAMPLE GOBLIN", "SAMPLE WOLF"]
         assert by_kind["npc"] == ["SAMPLE ELDER"]
         assert by_kind["loot"] == ["Runed Greatsword", "Ruby Chalice"]
-        assert len(coords) == len(scene.tokens)
+        assert len(coords) == entity_tokens
         hero_tok = next(t for t in scene.tokens if t.kind == "hero")
         assert (hero_tok.x, hero_tok.y) == (scene.spawn.x, scene.spawn.y)
 

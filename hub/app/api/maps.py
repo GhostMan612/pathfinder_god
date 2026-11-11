@@ -99,13 +99,14 @@ class CorridorResponse(BaseModel):
 class TokenResponse(BaseModel):
     id: str
     name: str
-    kind: str = Field(pattern="^(hero|monster|npc|loot)$")
+    kind: str = Field(pattern="^(hero|monster|npc|loot|door|trap)$")
     x: int
     y: int
     z: float = 0.5
     color: str = "#d4af37"
     encounter_id: int | None = None
     combatant_id: int | None = None
+    item_id: int | None = None
 
 
 class SceneResponse(BaseModel):
@@ -207,17 +208,33 @@ async def generate_map(
     linked_count = 0
     if request.campaign_id is not None and result.scene is not None:
         active_encounter = repo.get_active_encounter(request.campaign_id)
-        if active_encounter is not None and active_encounter.kind == "battle":
-            linked_count = MapMakerAgent.link_tokens_to_combatants(
-                result.scene,
-                active_encounter.id,
-                repo.get_combatants(request.campaign_id, active_only=True),
-            )
+        solo_state = repo.get_solo_state(request.campaign_id)
+        location_id = (
+            active_encounter.location_id
+            if active_encounter is not None
+            else (solo_state.current_location_id if solo_state else None)
+        )
+        combatants = (
+            repo.get_combatants(request.campaign_id, active_only=True)
+            if active_encounter is not None
+            and active_encounter.kind == "battle"
+            else repo.get_combatants(request.campaign_id)
+        )
+        linked_count = MapMakerAgent.link_tokens_to_entities(
+            result.scene,
+            location_id=location_id,
+            encounters=repo.list_encounters(request.campaign_id, limit=200),
+            items=repo.get_items(request.campaign_id),
+            npcs=repo.get_npcs(request.campaign_id),
+            combatants=combatants,
+            active_encounter=active_encounter,
+        )
 
     scene = _scene_response(result.scene) if result.scene is not None else None
     if scene is not None and active_encounter is not None:
-        # Persist the map on the encounter so reopening the encounter does not
-        # require regenerating it, and so token links survive this request.
+        # Persist the map on the active encounter so reopening the encounter
+        # does not require regenerating it, and so token links survive this
+        # request. Non-battle kinds use the same persistence shape as battle.
         repo.attach_encounter_map(
             request.campaign_id,
             active_encounter.id,
@@ -230,6 +247,8 @@ async def generate_map(
                     token.model_dump()
                     for token in scene.tokens
                     if token.combatant_id is not None
+                    or token.encounter_id is not None
+                    or token.item_id is not None
                 ],
             },
         )

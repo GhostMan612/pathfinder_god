@@ -22,6 +22,7 @@ from collections.abc import AsyncGenerator
 from dataclasses import asdict, dataclass, is_dataclass
 from typing import ClassVar, Self
 
+from app.agents.encounter_stage import attach_stage_scene, stage_event
 from app.agents.encounter_state import EncounterStateError
 from app.agents.npc_compiler import NPC_COMPILER_TOOLS, NPCCompilerAgent
 from app.agents.rules_lawyer import (
@@ -283,6 +284,16 @@ class LLMOrchestrator:
         # Rows retrieved by the most recent stream()/generate() call, so the
         # caller can derive citations without a second identical FTS5 query.
         self.last_context: list[dict] = []
+        # Set by an encounter activation during the agentic tool loop. The WS
+        # layer drains it after the current stream step and sends one
+        # encounter_stage frame before the narration chunks.
+        self.last_stage_event: dict | None = None
+
+    def take_stage_event(self) -> dict | None:
+        """Return and clear the pending 3D-stage frame, if any."""
+        stage = self.last_stage_event
+        self.last_stage_event = None
+        return stage
 
     async def close(self) -> None:
         """Release the httpx clients this orchestrator owns.
@@ -639,6 +650,8 @@ class LLMOrchestrator:
                 except Exception:
                     args = {}
             result = await self.handle_tool_call(name, args, campaign_id)
+            if isinstance(result, dict) and result.get("stage"):
+                self.last_stage_event = result["stage"]
             # Tool result as 'tool' role (Ollama expects role=tool, content=json)
             messages.append({"role": "tool", "content": json.dumps(_tool_result_dict(result), ensure_ascii=False), "name": name})
 
@@ -826,26 +839,38 @@ class LLMOrchestrator:
 
         activated = False
         note = ""
+        stage: dict | None = None
         if arguments.get("activate", True):
             try:
                 encounter = self.repo.transition_encounter(
                     campaign_id, encounter.id, "active"
                 )
                 activated = True
+                scene = attach_stage_scene(self.repo, campaign_id, encounter)
+                if scene is not None:
+                    stage = stage_event(encounter, scene)
+                    refreshed = self.repo.get_encounter(
+                        campaign_id, encounter.id
+                    )
+                    if refreshed is not None:
+                        encounter = refreshed
             except (EncounterStateError, ValueError) as exc:
                 note = str(exc)
         return {
             "encounter": encounter.to_dict(),
             "activated": activated,
+            "stage": stage,
             "note": note,
         }
 
     def _transition_encounter_tool(self, campaign_id: int, arguments: dict) -> dict:
         """Apply one validated lifecycle transition via the encounter service."""
+        encounter_id = int(arguments["encounter_id"])
+        previous = self.repo.get_encounter(campaign_id, encounter_id)
         try:
             encounter = self.repo.transition_encounter(
                 campaign_id,
-                int(arguments["encounter_id"]),
+                encounter_id,
                 str(arguments["status"]),
                 summary=arguments.get("summary"),
                 state=arguments.get("state"),
@@ -853,7 +878,19 @@ class LLMOrchestrator:
             )
         except (EncounterStateError, ValueError) as exc:
             return {"error": str(exc)}
-        return {"encounter": encounter.to_dict()}
+        stage: dict | None = None
+        if (
+            encounter.status == "active"
+            and previous is not None
+            and previous.status == "pending"
+        ):
+            scene = attach_stage_scene(self.repo, campaign_id, encounter)
+            if scene is not None:
+                stage = stage_event(encounter, scene)
+                refreshed = self.repo.get_encounter(campaign_id, encounter.id)
+                if refreshed is not None:
+                    encounter = refreshed
+        return {"encounter": encounter.to_dict(), "stage": stage}
 
     async def handle_tool_call(self, tool_name: str, arguments: dict, campaign_id: int = 1) -> dict:
         """Execute a tool call and return result."""
@@ -972,16 +1009,34 @@ class LLMOrchestrator:
                 active_encounter = None
                 linked_count = 0
                 if result.valid and scene is not None:
-                    candidate = self.repo.get_active_encounter(campaign_id)
-                    if candidate is not None and candidate.kind == "battle":
-                        active_encounter = candidate
-                        linked_count = MapMakerAgent.link_tokens_to_combatants(
-                            scene,
-                            candidate.id,
-                            self.repo.get_combatants(
-                                campaign_id, active_only=True
-                            ),
+                    active_encounter = self.repo.get_active_encounter(campaign_id)
+                    solo_state = self.repo.get_solo_state(campaign_id)
+                    location_id = (
+                        active_encounter.location_id
+                        if active_encounter is not None
+                        else (
+                            solo_state.current_location_id
+                            if solo_state is not None
+                            else None
                         )
+                    )
+                    combatants = (
+                        self.repo.get_combatants(campaign_id, active_only=True)
+                        if active_encounter is not None
+                        and active_encounter.kind == "battle"
+                        else self.repo.get_combatants(campaign_id)
+                    )
+                    linked_count = MapMakerAgent.link_tokens_to_entities(
+                        scene,
+                        location_id=location_id,
+                        encounters=self.repo.list_encounters(
+                            campaign_id, limit=200
+                        ),
+                        items=self.repo.get_items(campaign_id),
+                        npcs=self.repo.get_npcs(campaign_id),
+                        combatants=combatants,
+                        active_encounter=active_encounter,
+                    )
                 scene_payload = scene.to_dict() if scene is not None else None
                 if scene_payload is not None and active_encounter is not None:
                     self.repo.attach_encounter_map(
@@ -996,6 +1051,8 @@ class LLMOrchestrator:
                                 token
                                 for token in scene_payload["tokens"]
                                 if token.get("combatant_id") is not None
+                                or token.get("encounter_id") is not None
+                                or token.get("item_id") is not None
                             ],
                         },
                     )
