@@ -9,7 +9,9 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import retrofit2.http.Body
+import retrofit2.http.GET
 import retrofit2.http.POST
+import retrofit2.http.Path
 
 @Serializable
 data class StrikeRequest(
@@ -152,7 +154,102 @@ data class CombatSceneResponse(
     val scene: String,
 )
 
+@Serializable
+data class AskRequest(
+    val query: String,
+    val edition: String = "both",
+    val mode: String? = null,
+    val history: List<List<String>> = emptyList(),
+    @SerialName("campaign_id") val campaignId: Int = 1,
+)
+
+@Serializable
+data class AskResponse(
+    val answer: String,
+    val backend: String = "ollama",
+    val mode: String = "",
+    val edition: String = "both",
+    val sources: List<Map<String, JsonElement>> = emptyList(),
+)
+
+@Serializable
+data class CreateCampaignRequest(
+    val name: String,
+    val edition: String = "2e",
+    val premise: String = "",
+    @SerialName("hero_prompt") val heroPrompt: String? = null,
+)
+
+@Serializable
+data class CreateCampaignResponse(
+    @SerialName("campaign_id") val campaignId: Int,
+    val name: String,
+    val edition: String,
+    val location: String? = null,
+    val quest: String? = null,
+    val hero: String? = null,
+    @SerialName("opening_narration") val openingNarration: String,
+    val source: String = "fallback",
+)
+
+@Serializable
+data class TurnRequest(
+    val action: String,
+    val actor: String = "player",
+    val seed: Int? = null,
+)
+
+@Serializable
+data class TurnResponse(
+    @SerialName("campaign_id") val campaignId: Int,
+    @SerialName("turn_num") val turnNum: Int,
+    val narration: String,
+    @SerialName("dice_rolls") val diceRolls: List<Map<String, JsonElement>> = emptyList(),
+    @SerialName("hp_changes") val hpChanges: List<Map<String, JsonElement>> = emptyList(),
+    val conditions: List<Map<String, JsonElement>> = emptyList(),
+    @SerialName("quest_updates") val questUpdates: List<Map<String, JsonElement>> = emptyList(),
+    val location: String? = null,
+    val phase: String = "exploration",
+    val round: Int = 0,
+    @SerialName("active_combatant") val activeCombatant: String? = null,
+    val choices: List<String> = emptyList(),
+    val seed: Int = 0,
+    val source: String = "fallback",
+    val kind: String = "other",
+)
+
+@Serializable
+data class SoloStateResponse(
+    @SerialName("campaign_id") val campaignId: Int,
+    val name: String,
+    val edition: String,
+    val phase: String,
+    val round: Int,
+    val location: String? = null,
+    @SerialName("location_id") val locationId: Int? = null,
+    @SerialName("active_combatant_id") val activeCombatantId: Int? = null,
+    val combatants: List<Map<String, JsonElement>> = emptyList(),
+    val quests: List<Map<String, JsonElement>> = emptyList(),
+    @SerialName("recent_turns") val recentTurns: List<Map<String, JsonElement>> = emptyList(),
+    val chronicle: String = "",
+)
+
 interface HubApi {
+    @POST("ask")
+    suspend fun ask(@Body request: AskRequest): AskResponse
+
+    @POST("campaign/create")
+    suspend fun createSoloCampaign(@Body request: CreateCampaignRequest): CreateCampaignResponse
+
+    @POST("campaign/{campaign_id}/turn")
+    suspend fun takeSoloTurn(
+        @Path("campaign_id") campaignId: Int,
+        @Body request: TurnRequest,
+    ): TurnResponse
+
+    @GET("campaign/{campaign_id}/state")
+    suspend fun getSoloState(@Path("campaign_id") campaignId: Int): SoloStateResponse
+
     @POST("combat/resolve-strike")
     suspend fun resolveStrike(@Body request: StrikeRequest): StrikeResponse
 

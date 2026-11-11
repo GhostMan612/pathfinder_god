@@ -31,6 +31,15 @@ data class StreamAskRequest(
     val history: List<List<String>> = emptyList(),
 )
 
+@Serializable
+data class StreamTurnRequest(
+    val type: String = "turn",
+    @SerialName("campaign_id") val campaignId: Int,
+    val action: String,
+    val actor: String = "player",
+    val seed: Int? = null,
+)
+
 /** One frame from the Hub: start | chunk | end | error. */
 @Serializable
 data class StreamEvent(
@@ -41,14 +50,32 @@ data class StreamEvent(
     val text: String? = null,
     val message: String? = null,
     val sources: List<JsonElement> = emptyList(),
+    @SerialName("campaign_id") val campaignId: Int? = null,
+    @SerialName("turn_num") val turnNum: Int? = null,
+    val phase: String? = null,
+    val round: Int? = null,
+    @SerialName("dice_rolls") val diceRolls: List<Map<String, JsonElement>> = emptyList(),
+    @SerialName("hp_changes") val hpChanges: List<Map<String, JsonElement>> = emptyList(),
+    val conditions: List<Map<String, JsonElement>> = emptyList(),
+    val result: TurnResponse? = null,
 )
+
+fun interface GmStreamSource {
+    fun streamTurn(
+        url: String,
+        campaignId: Int,
+        action: String,
+        actor: String,
+        seed: Int?,
+    ): Flow<StreamEvent>
+}
 
 class HubWebSocketClient(
     private val client: OkHttpClient = OkHttpClient.Builder()
         .pingInterval(15, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build(),
-) {
+) : GmStreamSource {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
     // Written by the callbackFlow producer and read from other threads.
@@ -117,6 +144,60 @@ class HubWebSocketClient(
                 }
             }
         }
+
+    override fun streamTurn(
+        url: String,
+        campaignId: Int,
+        action: String,
+        actor: String,
+        seed: Int?,
+    ): Flow<StreamEvent> = callbackFlow {
+        val request = Request.Builder().url(url).build()
+        val listener = object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                val payload = json.encodeToString(
+                    StreamTurnRequest.serializer(),
+                    StreamTurnRequest(
+                        campaignId = campaignId,
+                        action = action,
+                        actor = actor,
+                        seed = seed,
+                    ),
+                )
+                webSocket.send(payload)
+            }
+
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                val event = runCatching {
+                    json.decodeFromString(StreamEvent.serializer(), text)
+                }.getOrNull()
+                if (event != null) {
+                    trySend(event)
+                    _events.tryEmit(event)
+                }
+            }
+
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                webSocket.close(1000, null)
+            }
+
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                close(t)
+            }
+
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                close()
+            }
+        }
+        val ws = client.newWebSocket(request, listener)
+        socket = ws
+        awaitClose {
+            if (socket === ws) {
+                ws.close(1000, "collector gone")
+                socket = null
+            }
+        }
+    }
 
     fun send(text: String): Boolean {
         val active = socket ?: return false
