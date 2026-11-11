@@ -17,7 +17,7 @@ import io
 import json
 import logging
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from app.agents.json_builder import generate_validated_json
@@ -132,6 +132,10 @@ class MapScene:
     exit: MapPoint | None = None
     tokens: list[MapToken] = field(default_factory=list)
     connected: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the complete wire/scene shape, including token links."""
+        return asdict(self)
 
 
 @dataclass

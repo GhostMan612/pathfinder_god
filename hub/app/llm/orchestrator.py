@@ -853,74 +853,7 @@ class LLMOrchestrator:
                                 campaign_id, active_only=True
                             ),
                         )
-                scene_payload = (
-                    {
-                        "grid": {
-                            "w": scene.grid.w,
-                            "h": scene.grid.h,
-                            "tile_m": scene.grid.tile_m,
-                        },
-                        "heightmap": scene.heightmap,
-                        "zones": [
-                            {"name": z.name, "biome": z.biome, "rect": list(z.rect)}
-                            for z in scene.zones
-                        ],
-                        "props": [
-                            {"type": p.type, "x": p.x, "y": p.y, "rot": p.rot}
-                            for p in scene.props
-                        ],
-                        "lights": [
-                            {
-                                "x": l.x,
-                                "y": l.y,
-                                "color": l.color,
-                                "radius_m": l.radius_m,
-                            }
-                            for l in scene.lights
-                        ],
-                        "walkable": scene.walkable,
-                        "doors": [
-                            {
-                                "x": d.x,
-                                "y": d.y,
-                                "orientation": d.orientation,
-                                "kind": d.kind,
-                            }
-                            for d in scene.doors
-                        ],
-                        "corridors": [
-                            {"cells": [[cx, cy] for cx, cy in c.cells]}
-                            for c in scene.corridors
-                        ],
-                        "spawn": (
-                            {"x": scene.spawn.x, "y": scene.spawn.y}
-                            if scene.spawn is not None
-                            else None
-                        ),
-                        "exit": (
-                            {"x": scene.exit.x, "y": scene.exit.y}
-                            if scene.exit is not None
-                            else None
-                        ),
-                        "tokens": [
-                            {
-                                "id": t.id,
-                                "name": t.name,
-                                "kind": t.kind,
-                                "x": t.x,
-                                "y": t.y,
-                                "z": t.z,
-                                "color": t.color,
-                                "encounter_id": t.encounter_id,
-                                "combatant_id": t.combatant_id,
-                            }
-                            for t in scene.tokens
-                        ],
-                        "connected": scene.connected,
-                    }
-                    if scene is not None
-                    else None
-                )
+                scene_payload = scene.to_dict() if scene is not None else None
                 if scene_payload is not None and active_encounter is not None:
                     self.repo.attach_encounter_map(
                         campaign_id,
