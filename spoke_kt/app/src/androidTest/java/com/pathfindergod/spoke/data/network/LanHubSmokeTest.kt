@@ -15,8 +15,7 @@ class LanHubSmokeTest {
 
     @Test
     fun hubAtLaptopLanIpIsReachableOverCleartextHttp() {
-        val laptopLanIp = "10.1.10.64"
-        val url = URL("http://$laptopLanIp:8000/health")
+        val url = URL("${TestHubUrl.resolve()}/health")
         val conn = url.openConnection() as HttpURLConnection
         conn.connectTimeout = 5000
         conn.readTimeout = 5000

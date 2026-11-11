@@ -13,6 +13,7 @@ import com.pathfindergod.spoke.a11y.ComposeTestActivity
 import com.pathfindergod.spoke.data.combat.CombatSceneProducer
 import com.pathfindergod.spoke.data.local.AppDatabase
 import com.pathfindergod.spoke.data.network.HubApiFactory
+import com.pathfindergod.spoke.data.network.TestHubUrl
 import com.pathfindergod.spoke.data.repository.EncounterRepository
 import com.pathfindergod.spoke.ui.designsystem.GodTags
 import com.pathfindergod.spoke.ui.theme.PathfinderGodTheme
@@ -29,11 +30,12 @@ class CombatTrackerSmokeTest {
     @Test
     fun combatTrackerRendersAndAdvancesTurn() {
         val context = composeRule.activity
+        val baseUrl = TestHubUrl.resolve(context)
         val repository = EncounterRepository(
             AppDatabase.get(context.applicationContext),
-            HubApiFactory.get("http://10.1.10.64:8000/"),
+            HubApiFactory.get(baseUrl),
         )
-        val producer = CombatSceneProducer(baseUrlProvider = { "http://10.1.10.64:8000/" })
+        val producer = CombatSceneProducer(baseUrlProvider = { baseUrl })
         val viewModel = CombatViewModel(repository, producer)
         viewModel.addCombatant(
             Combatant(
