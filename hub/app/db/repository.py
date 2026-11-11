@@ -459,6 +459,15 @@ class CampaignRepository:
             ).fetchone()
             return row is not None
 
+    def list_campaigns(self) -> list[dict]:
+        """Return every campaign, newest first, for the browser face."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, name, edition, summary, created_at, updated_at"
+                " FROM campaigns ORDER BY updated_at DESC, id DESC"
+            ).fetchall()
+            return [dict(r) for r in rows]
+
     def reset_campaign(self, campaign_id: int) -> None:
         with self._conn() as conn:
             conn.execute("DELETE FROM campaigns WHERE id = ?", (campaign_id,))

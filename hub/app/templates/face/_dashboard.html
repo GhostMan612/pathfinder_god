@@ -1,0 +1,114 @@
+<div class="dashboard">
+  <div class="stat-row">
+    <div class="stat">
+      <span class="stat-label">Location</span>
+      <strong>{{ location.name if location else "Unknown" }}</strong>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Phase</span>
+      <strong>{{ state.phase }}</strong>
+    </div>
+    <div class="stat">
+      <span class="stat-label">World tick</span>
+      <strong>{{ state.world_tick }}</strong>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Active encounter</span>
+      <strong>{{ active_encounter.kind if active_encounter else "None" }}</strong>
+    </div>
+  </div>
+
+  <div class="dashboard-grid">
+    <section class="subpanel">
+      <h3>Party</h3>
+      {% for p in party %}
+        {% set c = combatant_by_name.get(p.name) %}
+        <article class="party-card">
+          <div class="party-line">
+            <strong>{{ p.name }}</strong>
+            <span class="muted small">
+              {{ p.class or "Adventurer" }}{% if p.level %} · level {{ p.level }}{% endif %}
+            </span>
+          </div>
+          {% if c %}
+            <div class="hp-line small">
+              <span>HP {{ c.hp }} / {{ c.max_hp }}</span>
+              <span class="muted">AC {{ c.ac }}</span>
+            </div>
+            <div class="hp-bar"><span style="width: {{ (c.hp / c.max_hp * 100) if c.max_hp else 0 }}%"></span></div>
+            {% if c.conditions %}
+              <div class="conditions small">
+                {% for condition in c.conditions %}
+                  <span class="condition">{{ condition.name if condition.name is defined else condition }}</span>
+                {% endfor %}
+              </div>
+            {% endif %}
+          {% else %}
+            <p class="muted small">No combatant row yet.</p>
+          {% endif %}
+        </article>
+      {% else %}
+        <p class="muted small">No party members. Import a character or add one through the hub API.</p>
+      {% endfor %}
+    </section>
+
+    <section class="subpanel">
+      <h3>Encounter</h3>
+      {% if active_encounter %}
+        <p><span class="pill">{{ active_encounter.kind }}</span> <span class="pill">{{ active_encounter.status }}</span></p>
+        <p>{{ active_encounter.summary or "No summary." }}</p>
+      {% else %}
+        <p class="muted small">No active encounter. Door, trap, NPC, loot, and battle beats activate from your turns.</p>
+      {% endif %}
+    </section>
+
+    <section class="subpanel">
+      <h3>Quests</h3>
+      {% for q in quests %}
+        <article class="quest">
+          <strong>{{ q.name }}</strong>
+          {% if q.objectives %}
+            <ul class="compact">
+              {% for objective in q.objectives %}
+                <li class="{% if objective.completed %}done{% endif %}">
+                  {{ objective.text if objective.text is defined else objective }}
+                </li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+        </article>
+      {% else %}
+        <p class="muted small">No active quests.</p>
+      {% endfor %}
+    </section>
+
+    <section class="subpanel">
+      <h3>Inventory</h3>
+      <ul class="compact inventory">
+        {% for item in items %}
+          <li>
+            <strong>{{ item.name }}</strong>
+            <span class="muted small">{{ item.type }}{% if item.level %} · level {{ item.level }}{% endif %}</span>
+          </li>
+        {% else %}
+          <li class="muted small">No items.</li>
+        {% endfor %}
+      </ul>
+    </section>
+  </div>
+
+  <section class="subpanel events-panel">
+    <h3>Recent events</h3>
+    <ul class="event-list">
+      {% for event in events %}
+        <li>
+          <span class="event-tick">tick {{ event.tick }}</span>
+          <span class="event-kind">{{ event.kind }}</span>
+          <span>{{ event.summary }}</span>
+        </li>
+      {% else %}
+        <li class="muted small">No events yet.</li>
+      {% endfor %}
+    </ul>
+  </section>
+</div>

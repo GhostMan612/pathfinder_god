@@ -1,0 +1,83 @@
+{% extends "face/base.html" %}
+{% block title %}{{ campaign.name }} — Pathfinder God{% endblock %}
+
+{% block content %}
+<header class="topbar">
+  <div>
+    <p class="eyebrow">Campaign {{ campaign.id }} · {{ campaign.edition }}</p>
+    <h1>{{ campaign.name }}</h1>
+    <p class="muted">{{ campaign.summary or "No chronicle yet. Take a turn and the table starts writing one." }}</p>
+  </div>
+  <div class="top-actions">
+    <a class="button" href="/stage?campaign_id={{ campaign.id }}">Open 3D stage</a>
+  </div>
+</header>
+
+<div class="play-grid">
+  <section id="dashboard" class="panel"
+           hx-get="/play/campaign/{{ campaign.id }}/dashboard"
+           hx-trigger="pfg-turn-complete from:body"
+           hx-swap="outerHTML">
+    {% include "face/_dashboard.html" %}
+  </section>
+
+  <section class="panel turn-panel">
+    <div class="panel-head">
+      <h2>Take a turn</h2>
+      <span class="pill">{{ state.phase }} · round {{ state.round_num }} · tick {{ state.world_tick }}</span>
+    </div>
+
+    <form id="turn-form"
+          data-campaign-id="{{ campaign.id }}"
+          data-actor="{{ actor }}">
+      <label class="sr-only" for="action">What do you do?</label>
+      <textarea id="action" name="action" rows="3" maxlength="4000"
+                placeholder="I open the door and listen before stepping through."
+                required></textarea>
+      <div class="suggestions" aria-label="Example actions">
+        <button type="button" class="chip" data-action="I look around the current location.">Look around</button>
+        <button type="button" class="chip" data-action="I open the door.">Open door</button>
+        <button type="button" class="chip" data-action="I search the room for loot.">Search loot</button>
+        <button type="button" class="chip" data-action="I talk to the nearest NPC.">Talk</button>
+        <button type="button" class="chip" data-action="I attack the nearest monster.">Attack</button>
+      </div>
+      <div class="form-row">
+        <button class="primary" type="submit">Resolve turn</button>
+        <span id="turn-status" class="muted small">Deterministic dice and HP; the LLM only narrates.</span>
+      </div>
+    </form>
+
+    <div id="turn-log" class="turn-log" aria-live="polite"></div>
+
+    <div class="map-wrap">
+      <div class="panel-head">
+        <h2>Scene</h2>
+        <span id="scene-label" class="muted small">No active scene</span>
+      </div>
+      <canvas id="face-map" width="480" height="300" aria-label="Current encounter map"></canvas>
+    </div>
+
+    <div id="face-scene" data-scene="{{ scene_json|e }}" hidden></div>
+  </section>
+</div>
+
+<section class="panel recent-turns">
+  <div class="panel-head">
+    <h2>Recent turns</h2>
+    <span class="muted small">Newest first</span>
+  </div>
+  <ol class="turn-list">
+    {% for t in turns %}
+      <li>
+        <div class="turn-meta">Turn {{ t.turn_num }} · {{ t.actor }}</div>
+        <div class="turn-action">{{ t.action }}</div>
+        {% if t.narration %}
+          <div class="turn-narration">{{ t.narration[:420] }}{% if t.narration|length > 420 %}…{% endif %}</div>
+        {% endif %}
+      </li>
+    {% else %}
+      <li class="muted">No turns recorded yet.</li>
+    {% endfor %}
+  </ol>
+</section>
+{% endblock %}
