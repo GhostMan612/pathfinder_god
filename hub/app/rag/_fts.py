@@ -1,3 +1,8 @@
+# ============================================================
+# As Above, So Below. As Within, So Without.
+# The Future Dictates the Past and the Past is Always Present.
+# ============================================================
+
 """Shared FTS5 MATCH query construction.
 
 Two call sites built their own escaping and diverged: `retriever.py` OR-joined

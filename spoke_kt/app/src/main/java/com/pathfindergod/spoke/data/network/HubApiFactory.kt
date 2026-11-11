@@ -68,13 +68,5 @@ object HubApiFactory {
         .build()
         .also { client = it }
 
-    private fun normalize(baseUrl: String): String {
-        val trimmed = baseUrl.trim().trimEnd('/')
-        if (trimmed.isEmpty()) return "http://10.0.2.2:8000/"
-        // A bare "192.168.x.x:8000" typed in Settings has no scheme, and
-        // Retrofit rejects a schemeless base URL. Default to cleartext
-        // http; https is kept when the user typed it.
-        val rooted = if (trimmed.contains("://")) trimmed else "http://$trimmed"
-        return "$rooted/"
-    }
+    private fun normalize(baseUrl: String): String = HubEndpoint.normalize(baseUrl)
 }

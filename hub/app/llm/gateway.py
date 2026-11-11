@@ -88,7 +88,15 @@ class LlmGateway:
             if ticket.future.done():
                 self._semaphore.release()
                 continue
-            ticket.future.set_result(None)
+            try:
+                ticket.future.set_result(None)
+            except asyncio.InvalidStateError:
+                # Defensive: the waiter was cancelled between the done()
+                # check and set_result. Release the permit we acquired for
+                # it and keep dispatching instead of dying here and
+                # deadlocking the queue.
+                self._semaphore.release()
+                continue
 
     @asynccontextmanager
     async def _slot(self, priority: int):
@@ -108,6 +116,14 @@ class LlmGateway:
         except asyncio.CancelledError:
             if not future.done():
                 future.cancel()
+            if future.done() and not future.cancelled():
+                # The dispatcher already handed us a slot: it acquired the
+                # semaphore and set this future's result, but the
+                # cancellation landed before we resumed, so we never reach
+                # the yield whose finally releases the permit. Release it
+                # here or the gateway deadlocks once max_inflight is
+                # exhausted.
+                self._semaphore.release()
             self._waiting = max(0, self._waiting - 1)
             self._cancelled += 1
             logger.info(
@@ -132,8 +148,24 @@ class LlmGateway:
         system: str,
         task: str,
         fmt: str | None,
+        temperature: float,
+        num_predict: int,
     ) -> str:
-        raw = "\x00".join((model, prompt, system, task, fmt or ""))
+        # Sampling is part of the key: two builder calls with the same
+        # prompt but different temperature / num_predict must not share
+        # a cached result. repr(float(...)) and int(...) normalize the
+        # formatting so equivalent settings hash identically.
+        raw = "\x00".join(
+            (
+                model,
+                prompt,
+                system,
+                task,
+                fmt or "",
+                repr(float(temperature)),
+                str(int(num_predict)),
+            )
+        )
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def _cache_get(self, key: str) -> str | None:
@@ -204,7 +236,9 @@ class LlmGateway:
         model = model or self._s.ollama_model
         cache_key = None
         if task in CACHEABLE_TASKS:
-            cache_key = self._cache_key(model, prompt, system, task, format)
+            cache_key = self._cache_key(
+                model, prompt, system, task, format, temperature, num_predict
+            )
             cached = self._cache_get(cache_key)
             if cached is not None:
                 return cached

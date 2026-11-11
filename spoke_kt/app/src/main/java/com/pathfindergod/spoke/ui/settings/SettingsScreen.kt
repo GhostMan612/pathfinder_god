@@ -7,6 +7,7 @@ package com.pathfindergod.spoke.ui.settings
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -38,6 +39,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pathfindergod.spoke.R
 import com.pathfindergod.spoke.data.local.AppPreferences
+import com.pathfindergod.spoke.data.network.HubEndpoint
 import com.pathfindergod.spoke.service.AudioService
 import com.pathfindergod.spoke.service.HubConnectionStatus
 import com.pathfindergod.spoke.service.HubForegroundService
@@ -63,6 +65,7 @@ fun SettingsScreen(onOpenCredits: () -> Unit) {
     val prefs = remember { AppPreferences(context) }
     val audio = remember { AudioService.get(context) }
     var url by rememberSaveable { mutableStateOf(prefs.baseUrl()) }
+    var hubUrlError by rememberSaveable { mutableStateOf<Int?>(null) }
     var music by rememberSaveable { mutableStateOf(prefs.musicEnabled()) }
     var sfx by rememberSaveable { mutableStateOf(prefs.sfxEnabled()) }
     var haptics by rememberSaveable { mutableStateOf(prefs.hapticsEnabled()) }
@@ -93,17 +96,47 @@ fun SettingsScreen(onOpenCredits: () -> Unit) {
         ) {
             GodTextField(
                 value = url,
-                onValueChange = { url = it },
+                onValueChange = {
+                    url = it
+                    hubUrlError = null
+                },
                 placeholder = AppPreferences.DEFAULT_BASE_URL,
                 modifier = Modifier.fillMaxWidth().padding(top = Spacing.sm),
             )
+            Text(
+                text = stringResource(R.string.settings_hub_transport_notice),
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary,
+                modifier = Modifier.padding(top = Spacing.xs),
+            )
+            hubUrlError?.let { res ->
+                Text(
+                    text = stringResource(res),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = CritRed,
+                    modifier = Modifier.padding(top = Spacing.xs),
+                )
+            }
             GodPrimaryButton(
                 text = stringResource(R.string.settings_connect),
                 onClickLabel = stringResource(R.string.a11y_settings_connect),
                 onClick = {
+                    val endpoint = try {
+                        HubEndpoint.normalize(url)
+                    } catch (_: IllegalArgumentException) {
+                        hubUrlError = R.string.settings_hub_url_invalid
+                        return@GodPrimaryButton
+                    }
+                    val debugBuild = context.applicationInfo.flags and
+                        ApplicationInfo.FLAG_DEBUGGABLE != 0
+                    if (!debugBuild && HubEndpoint.requiresHttpsInRelease(endpoint)) {
+                        hubUrlError = R.string.settings_hub_url_requires_https
+                        return@GodPrimaryButton
+                    }
                     audio.buttonPress()
-                    prefs.updateBaseUrl(url)
+                    prefs.updateBaseUrl(endpoint)
                     url = prefs.baseUrl()
+                    hubUrlError = null
                     restartLink(context, prefs.streamUrl())
                 },
                 testTag = GodTags.SETTINGS_CONNECT,

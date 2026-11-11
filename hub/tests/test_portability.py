@@ -19,6 +19,8 @@ import pytest
 
 from app.db.portability import (
     PortabilityError,
+    _remap_id_list,
+    _remap_json,
     export_campaign_db,
     export_character_db,
     import_campaign_db,
@@ -266,6 +268,72 @@ def test_campaign_db_import_rejects_corrupt_file(tmp_path: Path) -> None:
         import_campaign_db(repo, str(bad), replace_existing=False)
 
 
+def test_campaign_db_import_rejects_meta_less_file(tmp_path: Path) -> None:
+    repo = CampaignRepository(str(tmp_path / "campaign.db"))
+    seeded = _seed_campaign(repo)
+    export_path = tmp_path / "campaign_export.db"
+    export_path.write_bytes(export_campaign_db(repo, seeded["campaign"].id))
+    with closing(sqlite3.connect(export_path)) as conn:
+        conn.execute("DROP TABLE meta")
+        conn.commit()
+
+    # A missing meta table must be a clean PortabilityError, not a raw
+    # sqlite3.OperationalError from the SELECT.
+    with pytest.raises(PortabilityError, match="meta"):
+        import_campaign_db(repo, str(export_path), replace_existing=False)
+
+
+def test_character_export_matches_name_as_whole_word(tmp_path: Path) -> None:
+    repo = CampaignRepository(str(tmp_path / "campaign.db"))
+    campaign = repo.create_campaign("SAMPLE CAMPAIGN")
+    repo.upsert_party_member(campaign.id, "Al")
+    repo.upsert_item(
+        campaign.id, "SAMPLE ALWAYS BLADE", notes="also carried always"
+    )
+    repo.upsert_item(
+        campaign.id, "SAMPLE AL BLADE", notes="claimed by Al after the fight"
+    )
+    repo.insert_session_notes(
+        campaign.id,
+        [
+            (1, "gm", "Al was here"),
+            (1, "gm", "also ran the whole way"),
+        ],
+    )
+
+    payload = export_character_db(repo, campaign.id, "Al")
+    character_path = tmp_path / "al.db"
+    character_path.write_bytes(payload)
+
+    with closing(sqlite3.connect(character_path)) as conn:
+        item_names = [
+            row[0] for row in conn.execute("SELECT name FROM items").fetchall()
+        ]
+        note_contents = [
+            row[0]
+            for row in conn.execute("SELECT content FROM session_notes").fetchall()
+        ]
+    # "Al" as a whole word matches; "also" / "always" must not.
+    assert item_names == ["SAMPLE AL BLADE"]
+    assert note_contents == ["Al was here"]
+
+
+def test_remap_json_nulls_unmapped_refs() -> None:
+    maps = {"npcs": {5: 9}, "combatants": {1: 10, 2: 20}}
+    assert _remap_json({"npc_id": 5}, maps) == {"npc_id": 9}
+    assert _remap_json({"npc_id": 99}, maps) == {"npc_id": None}
+    assert _remap_json({"npc_id": "5"}, maps) == {"npc_id": "9"}
+    assert _remap_json({"npc_id": "99"}, maps) == {"npc_id": None}
+    assert _remap_json({"combatant_ids": [1, 2, 99]}, maps) == {
+        "combatant_ids": [10, 20]
+    }
+    assert _remap_json({"note": "nothing to remap"}, maps) == {
+        "note": "nothing to remap"
+    }
+    assert _remap_id_list("[1, 2, 99]", maps["combatants"]) == "[10, 20]"
+    assert _remap_id_list(None, maps["combatants"]) is None
+
+
 def test_character_db_round_trip_and_conflict_rejection(tmp_path: Path) -> None:
     repo = CampaignRepository(str(tmp_path / "campaign.db"))
     seeded = _seed_campaign(repo)
@@ -292,6 +360,52 @@ def test_character_db_round_trip_and_conflict_rejection(tmp_path: Path) -> None:
 
     with pytest.raises(PortabilityError, match="already exists"):
         import_character_db(repo, target.id, str(character_path))
+
+
+def test_character_db_preserves_item_ownership(tmp_path: Path) -> None:
+    repo = CampaignRepository(str(tmp_path / "campaign.db"))
+    campaign = repo.create_campaign("SAMPLE CAMPAIGN")
+    repo.upsert_npc(campaign.id, "Al", disposition="friendly")
+    repo.upsert_party_member(campaign.id, "Al", player_name="SAMPLE PLAYER")
+    repo.upsert_item(campaign.id, "AL BLADE", type_="weapon", holder_name="Al")
+    repo.upsert_item(campaign.id, "AL CHARM", type_="other", notes="a gift for Al")
+
+    payload = export_character_db(repo, campaign.id, "Al")
+    character_path = tmp_path / "al.db"
+    character_path.write_bytes(payload)
+
+    with closing(sqlite3.connect(character_path)) as conn:
+        npc_rows = conn.execute("SELECT id, name FROM npcs").fetchall()
+        assert len(npc_rows) == 1 and npc_rows[0][1] == "Al"
+        file_npc_id = npc_rows[0][0]
+        items = {
+            row[0]: row[1]
+            for row in conn.execute("SELECT name, holder_id FROM items").fetchall()
+        }
+        # The blade keeps its holder (the npc travels in the file); the
+        # charm was only matched by its notes, so its holder is null.
+        assert items["AL BLADE"] == file_npc_id
+        assert items["AL CHARM"] is None
+
+    target = repo.create_campaign("TARGET CAMPAIGN")
+    result = import_character_db(repo, target.id, str(character_path))
+    assert result["npc_id"] is not None
+
+    with closing(sqlite3.connect(repo.db_path)) as conn:
+        npc_id = conn.execute(
+            "SELECT id FROM npcs WHERE campaign_id = ? AND name = ?",
+            (target.id, "Al"),
+        ).fetchone()[0]
+        assert npc_id == result["npc_id"]
+        holders = {
+            row[0]: row[1]
+            for row in conn.execute(
+                "SELECT name, holder_id FROM items WHERE campaign_id = ?",
+                (target.id,),
+            ).fetchall()
+        }
+        assert holders["AL BLADE"] == npc_id
+        assert holders["AL CHARM"] is None
 
 
 @pytest.mark.asyncio

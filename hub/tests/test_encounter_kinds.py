@@ -296,6 +296,50 @@ async def test_friendly_npc_resolution_updates_disposition(
     assert repo.get_npc(campaign.id, "SAMPLE MERCHANT").disposition == "friendly"
 
 
+async def test_npc_resolution_records_encounter_location(tmp_path: Path) -> None:
+    repo, campaign, town, loop = _setup(tmp_path)
+    repo.upsert_npc(campaign.id, "SAMPLE MERCHANT", disposition="friendly")
+    _active_encounter(
+        repo,
+        campaign,
+        town,
+        "npc",
+        {
+            "npc_id": None,
+            "npc_name": "SAMPLE MERCHANT",
+            "disposition": "friendly",
+            "topic": "trade",
+        },
+    )
+
+    result = await loop.take_turn(
+        campaign.id, "I talk to the merchant", seed=20
+    )
+
+    assert result.encounter is not None
+    assert result.encounter["status"] == "resolved"
+    # The encounter happened at the town, so the npc row now says so too.
+    assert repo.get_npc(campaign.id, "SAMPLE MERCHANT").location_id == town
+
+
+def test_upsert_npc_location_is_set_and_preserved(tmp_path: Path) -> None:
+    repo, campaign, town, _loop = _setup(tmp_path)
+    other_town = repo.upsert_location(campaign.id, "SAMPLE VILLAGE", type_="settlement")
+
+    repo.upsert_npc(campaign.id, "SAMPLE MERCHANT", location_id=town)
+    assert repo.get_npc(campaign.id, "SAMPLE MERCHANT").location_id == town
+
+    # A later upsert that does not mention a location must not wipe it.
+    repo.upsert_npc(campaign.id, "SAMPLE MERCHANT", disposition="friendly")
+    assert repo.get_npc(campaign.id, "SAMPLE MERCHANT").location_id == town
+
+    # An upsert that does mention a location moves the npc.
+    repo.upsert_npc(campaign.id, "SAMPLE MERCHANT", location_id=other_town)
+    assert (
+        repo.get_npc(campaign.id, "SAMPLE MERCHANT").location_id == other_town
+    )
+
+
 async def test_hostile_npc_resolution_fails_and_persists(
     tmp_path: Path,
 ) -> None:
