@@ -191,6 +191,7 @@ class TurnResult:
     seed: int
     source: str  # "llm" | "fallback"
     kind: str = "other"
+    encounter: dict | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -209,6 +210,7 @@ class TurnResult:
             "seed": self.seed,
             "source": self.source,
             "kind": self.kind,
+            "encounter": self.encounter,
         }
 
 
@@ -246,6 +248,101 @@ _SKILL_RE = re.compile(
 _MOVE_RE = re.compile(r"\b(move|go|enter|leave|travel|walk|run|head|flee|retreat|advance)\b", re.IGNORECASE)
 _TALK_RE = re.compile(r"\b(talk|speak|say|ask|tell|negotiate|persuade|greet|question)\b", re.IGNORECASE)
 _REST_RE = re.compile(r"\b(rest|sleep|camp|recover|heal|bandage|treat wounds)\b", re.IGNORECASE)
+
+# Encounter detection is deliberately verb-first and separate from the turn
+# classifier: "I open the door" is an exploration action, but it must still
+# create the door encounter before the normal resolver runs.
+_DOOR_ACTION_RE = re.compile(
+    r"\b(?:open(?:s|ed|ing)?|unlock(?:s|ed|ing)?|knock(?:s|ed|ing)?\s+on|"
+    r"push(?:es|ed|ing)?|enter(?:s|ed|ing)?|force(?:s|d|ing)?)\b"
+    r"[^.!?]{0,60}\b(?P<target>doors?|gates?|portals?)\b",
+    re.IGNORECASE,
+)
+_LOOT_ACTION_RE = re.compile(
+    r"\b(?:search(?:es|ed|ing)?|loot(?:s|ed|ing)?|open(?:s|ed|ing)?|"
+    r"pry(?:ing|ies|ied)?|ransack(?:s|ed|ing)?|inspect(?:s|ed|ing)?)\b"
+    r"[^.!?]{0,60}\b"
+    r"(?P<target>chests?|coffers?|caches?|piles?|satchels?|crates?|corpses?)\b",
+    re.IGNORECASE,
+)
+_TRAP_ACTION_RE = re.compile(
+    r"\b(?:disarm(?:s|ed|ing)?|trigger(?:s|ed|ing)?|"
+    r"step(?:s|ped|ping)?\s+on|avoid(?:s|ed|ing)?|detect(?:s|ed|ing)?|"
+    r"find|spot(?:s|ted|ting)?)\b[^.!?]{0,60}"
+    r"\b(?P<target>traps?|snares?|tripwires?)\b",
+    re.IGNORECASE,
+)
+_TRAP_ONE_ROLL_RE = re.compile(
+    r"\b(?:disarm(?:s|ed|ing)?|trigger(?:s|ed|ing)?|"
+    r"step(?:s|ped|ping)?\s+on|avoid(?:s|ed|ing)?)\b",
+    re.IGNORECASE,
+)
+_TRAP_MULTI_RE = re.compile(
+    r"\b(begin|start|continue|work\s+on|take\s+(?:my|the)\s+time|"
+    r"carefully|slowly)\b",
+    re.IGNORECASE,
+)
+_NPC_ACTION_RE = re.compile(
+    r"\b(?:talk(?:s|ed|ing)?|speak(?:s|ing)?|greet(?:s|ed|ing)?|"
+    r"ask(?:s|ed|ing)?|hail(?:s|ed|ing)?|question(?:s|ed|ing)?|"
+    r"address(?:es|ed|ing)?)\b"
+    r"(?:\s+(?:to|with|at))?\s+(?P<target>[^,.!?]{1,60})",
+    re.IGNORECASE,
+)
+_NPC_NON_TARGETS = {
+    "about",
+    "directions",
+    "for",
+    "hello",
+    "hi",
+    "hey",
+    "information",
+    "news",
+    "question",
+    "questions",
+    "the weather",
+    "weather",
+}
+
+
+def _clean_encounter_target(raw: str | None) -> str | None:
+    """Trim a detected NPC phrase to the name/noun the player addressed."""
+    if not raw:
+        return None
+    target = raw.strip(" .!?")
+    target = re.split(
+        r"\b(?:about|for|regarding)\b", target, maxsplit=1, flags=re.IGNORECASE
+    )[0]
+    target = re.sub(r"^(?:the|a|an)\s+", "", target, flags=re.IGNORECASE)
+    target = target.strip(" .!?")
+    if not target or target.lower() in _NPC_NON_TARGETS:
+        return None
+    return target
+
+
+def detect_encounter_action(action: str) -> tuple[str, str | None] | None:
+    """Return ``(kind, target)`` when a player action names an encounter.
+
+    Pure and regex-based, matching the style of ``classify_action``. The
+    function never consults the database; the caller refines the target against
+    the campaign's entities and creates the encounter through the repository.
+    """
+    text = action or ""
+    match = _DOOR_ACTION_RE.search(text)
+    if match:
+        return "door", match.group("target").lower()
+    match = _LOOT_ACTION_RE.search(text)
+    if match:
+        return "loot", match.group("target").lower()
+    match = _TRAP_ACTION_RE.search(text)
+    if match:
+        return "trap", match.group("target").lower()
+    match = _NPC_ACTION_RE.search(text)
+    if match:
+        target = _clean_encounter_target(match.group("target"))
+        if target:
+            return "npc", target
+    return None
 
 
 def classify_action(action: str) -> str:
@@ -548,6 +645,8 @@ class SoloLoop:
         notes: list[str] = []
         emitted_dice = 0
         emitted_hp = 0
+        emitted_encounter = False
+        encounter_result: dict | None = None
 
         # Start-of-turn recovery for the active combatant, if they are dying.
         # PF2e: the recovery check happens at the start of the creature's
@@ -556,6 +655,11 @@ class SoloLoop:
             active = self.repo.get_combatant(campaign_id, state.active_combatant_id)
             if active is not None and dying_value(active.conditions or []) > 0:
                 await self._run_recovery(campaign_id, active, rng, notes)
+
+        # ── Deterministic encounter detection (words, not the LLM) ──
+        encounter_result = self._apply_encounter_detection(
+            campaign_id, action, state, rng, dice_rolls, notes
+        )
 
         # ── Deterministic resolution (never the LLM) ──
         target_name, state = await self._resolve_deterministic(
@@ -583,6 +687,11 @@ class SoloLoop:
                 emit, {"type": "hp", "hp_changes": list(hp_changes)}
             )
             emitted_hp = len(hp_changes)
+        if encounter_result is not None:
+            await _emit_turn_event(
+                emit, {"type": "encounter", **encounter_result}
+            )
+            emitted_encounter = True
 
         outcome, outcome_source = await self._structured_outcome(
             campaign_id, action, kind, state, combatants, quests, chronicle
@@ -616,6 +725,13 @@ class SoloLoop:
                     )
                     if refined_target and not target_name:
                         target_name = refined_target
+                # The first pass ran before the LLM refined an unplaced turn.
+                # Re-run detection against the refined state so a late
+                # classification cannot skip a door/NPC/loot/trap trigger.
+                if encounter_result is None:
+                    encounter_result = self._apply_encounter_detection(
+                        campaign_id, action, state, rng, dice_rolls, notes
+                    )
             if outcome.target and not target_name:
                 target_name = outcome.target
             if outcome.quest_update is not None and outcome.quest_update.completed:
@@ -648,6 +764,10 @@ class SoloLoop:
                 emit, {"type": "hp", "hp_changes": list(hp_changes)}
             )
             emitted_hp = len(hp_changes)
+        if encounter_result is not None and not emitted_encounter:
+            await _emit_turn_event(
+                emit, {"type": "encounter", **encounter_result}
+            )
 
         # ── Initiative advance + end-of-turn conditions (combat only) ──
         if state.phase == "combat":
@@ -735,6 +855,11 @@ class SoloLoop:
             seed=turn_seed,
             source=source,
             kind=kind,
+            encounter=(
+                encounter_result["encounter"]
+                if encounter_result is not None
+                else None
+            ),
         )
         for chunk in _narration_chunks(narration):
             await _emit_turn_event(emit, {"type": "narration", "text": chunk})
@@ -756,6 +881,177 @@ class SoloLoop:
                 {"combatant": c.name, **cond} for cond in (c.conditions or [])
             )
         return conditions
+
+    # ── Encounter detection ───────────────────────────────────
+
+    def _apply_encounter_detection(
+        self,
+        campaign_id: int,
+        action: str,
+        state: Any,
+        rng: random.Random,
+        dice_rolls: list[dict],
+        notes: list[str],
+    ) -> dict | None:
+        """Create or advance the encounter named by the player's action.
+
+        Detection is additive: the turn's normal deterministic resolution still
+        runs, and a missing map door or NPC never fails the turn. Door, NPC,
+        loot, and trap records all go through the same repository service the
+        REST routes and GM tools use.
+        """
+        detected = detect_encounter_action(action)
+        if detected is None:
+            return None
+        kind, target = detected
+        location_id = state.current_location_id
+        encounter = self._find_open_encounter(
+            campaign_id, kind, location_id, target
+        )
+        if encounter is None:
+            encounter = self.repo.create_encounter(
+                campaign_id,
+                kind,
+                summary=action[:1000],
+                location_id=location_id,
+                state=self._encounter_state_for(
+                    campaign_id, kind, target, location_id
+                ),
+            )
+            notes.append(
+                f"{kind.title()} encounter created (id {encounter.id})."
+            )
+        else:
+            notes.append(f"Continuing {kind} encounter {encounter.id}.")
+
+        instant = False
+        activated = False
+        if (
+            kind == "trap"
+            and self._is_instant_trap(action)
+            and encounter.status == "pending"
+        ):
+            dc = self._trap_dc(encounter)
+            success = self._roll_skill_check(
+                rng, dice_rolls, notes, dc=dc, label="Trap check"
+            )
+            status = "resolved" if success else "failed"
+            encounter = self.repo.transition_encounter(
+                campaign_id,
+                encounter.id,
+                status,
+                summary=action[:1000],
+                instant=True,
+            )
+            instant = True
+            notes.append(f"Trap {status} without taking the active slot.")
+        elif encounter.status == "pending":
+            try:
+                encounter = self.repo.transition_encounter(
+                    campaign_id,
+                    encounter.id,
+                    "active",
+                    summary=action[:1000],
+                )
+                activated = True
+                notes.append(
+                    f"{kind.title()} encounter active (id {encounter.id})."
+                )
+            except ValueError as exc:
+                notes.append(f"{kind.title()} encounter pending: {exc}")
+        else:
+            notes.append(
+                f"{kind.title()} encounter already active (id {encounter.id})."
+            )
+
+        return {
+            "encounter": encounter.to_dict(),
+            "activated": activated,
+            "instant": instant,
+            "note": notes[-1],
+        }
+
+    def _find_open_encounter(
+        self,
+        campaign_id: int,
+        kind: str,
+        location_id: int | None,
+        target: str | None,
+    ) -> Any | None:
+        """Return an existing pending/active encounter for this story beat."""
+        for encounter in self.repo.list_encounters(campaign_id, limit=200):
+            if encounter.kind != kind:
+                continue
+            if encounter.location_id != location_id:
+                continue
+            if encounter.status not in ("pending", "active"):
+                continue
+            if kind == "npc" and target:
+                existing = str(encounter.state.get("target") or "")
+                if existing and existing.lower() != target.lower():
+                    continue
+            return encounter
+        return None
+
+    def _encounter_state_for(
+        self,
+        campaign_id: int,
+        kind: str,
+        target: str | None,
+        location_id: int | None,
+    ) -> dict:
+        """Attach a known NPC or map door when one is present; never required."""
+        state: dict[str, Any] = {}
+        if target:
+            state["target"] = target
+        if kind == "npc" and target:
+            match = next(
+                (
+                    c
+                    for c in self.repo.get_combatants(campaign_id)
+                    if c.kind == "npc"
+                    and target.lower() in c.name.lower()
+                ),
+                None,
+            )
+            if match is not None:
+                state["npc_id"] = match.id
+                state["npc_name"] = match.name
+                state["target"] = match.name
+        elif kind == "door":
+            door = self._door_from_recent_map(campaign_id, location_id)
+            if door is not None:
+                state["door"] = door
+        return state
+
+    def _door_from_recent_map(
+        self, campaign_id: int, location_id: int | None
+    ) -> dict | None:
+        """Find a persisted map door at this location, if a scene exists."""
+        for encounter in self.repo.list_encounters(campaign_id, limit=200):
+            if encounter.location_id != location_id:
+                continue
+            map_state = encounter.state.get("map") or {}
+            scene = map_state.get("scene") or {}
+            doors = scene.get("doors") or map_state.get("doors") or []
+            if doors:
+                return dict(doors[0])
+        return None
+
+    @staticmethod
+    def _trap_dc(encounter: Any) -> int:
+        """Use the trap's authored DC when present, else the skill-check DC."""
+        try:
+            return max(1, int(encounter.state.get("dc") or SKILL_CHECK_DC))
+        except (TypeError, ValueError):
+            return SKILL_CHECK_DC
+
+    @staticmethod
+    def _is_instant_trap(action: str) -> bool:
+        """A one-roll trap attempt, unless the player is starting a long disarm."""
+        return bool(_TRAP_ONE_ROLL_RE.search(action)) and not bool(
+            _TRAP_MULTI_RE.search(action)
+        )
 
     @staticmethod
     def _default_choices(kind: str, phase: str) -> list[str]:
@@ -881,6 +1177,26 @@ class SoloLoop:
             "damage": result.damage_dealt,
         }
 
+    def _roll_skill_check(
+        self,
+        rng: random.Random,
+        dice_rolls: list[dict],
+        notes: list[str],
+        *,
+        dc: int = SKILL_CHECK_DC,
+        label: str = "Skill check",
+    ) -> bool:
+        """Roll one d20 skill check into the turn's shared dice stream."""
+        d20 = rng.randint(1, 20)
+        total = d20 + HERO_SKILL_MODIFIER
+        dice_rolls.append({"notation": "d20", "rolls": [d20], "total": total})
+        success = total >= dc
+        notes.append(
+            f"{label}: d20 {d20} + {HERO_SKILL_MODIFIER} = {total} vs DC {dc} — "
+            + ("success." if success else "failure.")
+        )
+        return success
+
     def _resolve_skill(
         self,
         action: str,
@@ -888,14 +1204,7 @@ class SoloLoop:
         dice_rolls: list[dict],
         notes: list[str],
     ) -> None:
-        d20 = rng.randint(1, 20)
-        total = d20 + HERO_SKILL_MODIFIER
-        dice_rolls.append({"notation": "d20", "rolls": [d20], "total": total})
-        success = total >= SKILL_CHECK_DC
-        notes.append(
-            f"Skill check: d20 {d20} + {HERO_SKILL_MODIFIER} = {total} vs DC {SKILL_CHECK_DC} — "
-            + ("success." if success else "failure.")
-        )
+        self._roll_skill_check(rng, dice_rolls, notes)
 
     def _resolve_rest(
         self,

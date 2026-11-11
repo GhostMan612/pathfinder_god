@@ -3920,6 +3920,12 @@ components:
           type: array
           title: Choices
           default: []
+        encounter:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Encounter
         seed:
           type: integer
           title: Seed

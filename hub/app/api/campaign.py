@@ -653,6 +653,7 @@ class TurnResponse(BaseModel):
     round: int
     active_combatant: str | None = None
     choices: list[str] = []
+    encounter: dict | None = None
     seed: int
     source: str = "fallback"
     kind: str = "other"
