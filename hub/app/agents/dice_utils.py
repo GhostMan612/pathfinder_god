@@ -108,8 +108,6 @@ class DiceRoller:
         terms = []
         cursor = 0
         for m in term_regex.finditer(cleaned):
-            # finditer() skips unmatched characters, so expressions like
-            # 2d6++3 or d6+ used to be silently accepted as valid rolls.
             if m.start() != cursor:
                 raise ValueError(f"invalid dice notation: {notation}")
             sign = -1 if m.group(1) == "-" else 1
