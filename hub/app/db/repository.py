@@ -799,28 +799,26 @@ class CampaignRepository:
         level: int | None = None,
         ancestry: str | None = None,
         class_: str | None = None,
+        location_id: int | None = None,
         disposition: str = "unknown",
         notes: str | None = None,
         session_num: int | None = None,
     ) -> int:
         with self._conn() as conn:
-            # Get location_id if parent_name provided
-            location_id = None
-            # (caller can pass location_id directly if needed)
-
             self._ensure_campaign(conn, campaign_id)
 
             cur = conn.execute(
                 """
                 INSERT INTO npcs (campaign_id, name, alias, role, level, ancestry, class,
-                                 disposition, notes, first_seen_session, last_seen_session)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                 location_id, disposition, notes, first_seen_session, last_seen_session)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(campaign_id, name) DO UPDATE SET
                     alias = excluded.alias,
                     role = excluded.role,
                     level = excluded.level,
                     ancestry = excluded.ancestry,
                     class = excluded.class,
+                    location_id = COALESCE(excluded.location_id, npcs.location_id),
                     disposition = excluded.disposition,
                     notes = excluded.notes,
                     last_seen_session = excluded.last_seen_session,
@@ -835,6 +833,7 @@ class CampaignRepository:
                     level,
                     ancestry,
                     class_,
+                    location_id,
                     disposition,
                     notes,
                     session_num,

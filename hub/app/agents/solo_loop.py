@@ -1375,7 +1375,11 @@ class SoloLoop:
 
         state["disposition"] = new_disposition
         self._set_npc_disposition(
-            campaign_id, name, new_disposition, notes[-1]
+            campaign_id,
+            name,
+            new_disposition,
+            notes[-1],
+            location_id=encounter.location_id,
         )
         return self._transition_with_state(
             campaign_id,
@@ -1387,12 +1391,21 @@ class SoloLoop:
         )
 
     def _set_npc_disposition(
-        self, campaign_id: int, name: str, disposition: str, note: str
+        self,
+        campaign_id: int,
+        name: str,
+        disposition: str,
+        note: str,
+        location_id: int | None = None,
     ) -> None:
         npc = self._find_npc(campaign_id, name)
         if npc is None:
             self.repo.upsert_npc(
-                campaign_id, name, disposition=disposition, notes=note
+                campaign_id,
+                name,
+                disposition=disposition,
+                notes=note,
+                location_id=location_id,
             )
             return
         existing_notes = npc.notes or ""
@@ -1405,6 +1418,7 @@ class SoloLoop:
             level=npc.level,
             ancestry=npc.ancestry,
             class_=npc.class_,
+            location_id=location_id if location_id is not None else npc.location_id,
             disposition=disposition,
             notes=combined or None,
             session_num=npc.last_seen_session,
