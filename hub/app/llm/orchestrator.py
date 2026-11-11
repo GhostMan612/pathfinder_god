@@ -1104,7 +1104,11 @@ class LLMOrchestrator:
             elif tool_name == "get_campaign_context":
                 return self.continuity_keeper.get_campaign_context(arguments["campaign_id"])
             elif tool_name == "search_sessions":
-                return self.continuity_keeper.search_sessions(
+                # The recall path does synchronous urllib embedding calls
+                # (up to 10s x 3 attempts when Ollama is down). Run it in
+                # a worker thread so the GM event loop is never blocked.
+                return await asyncio.to_thread(
+                    self.continuity_keeper.search_sessions,
                     arguments["query"],
                     arguments.get("campaign_id", 1),
                     arguments.get("limit", 5),
