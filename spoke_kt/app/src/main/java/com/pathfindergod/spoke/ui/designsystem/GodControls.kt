@@ -80,13 +80,12 @@ fun GodFab(
     FloatingActionButton(
         onClick = onClick,
         containerColor = CrimsonPrimary,
-        modifier = modifier,
+        modifier = if (testTag == null) modifier else modifier.testTag(testTag),
     ) {
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
             tint = GoldAccent,
-            modifier = if (testTag == null) Modifier else Modifier.testTag(testTag),
         )
     }
 }

@@ -25,10 +25,10 @@ abstract class RulesDatabase : RoomDatabase() {
         fun open(
             context: Context,
             factory: SupportSQLiteOpenHelper.Factory = NgaSQLiteOpenHelperFactory(),
+            name: String = FILE_NAME,
         ): RulesDatabase =
-            Room.databaseBuilder(context, RulesDatabase::class.java, FILE_NAME)
+            Room.databaseBuilder(context, RulesDatabase::class.java, name)
                 .openHelperFactory(factory)
-                .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
 
         @Volatile

@@ -37,6 +37,7 @@ class CharacterForgeSmokeTest {
         composeRule.setContent {
             CharacterListScreen(viewModel = viewModel, onSelect = {})
         }
+        composeRule.waitForIdle()
 
         composeRule.onNodeWithTag(GodTags.HERO_FORGE_FAB).performClick()
         composeRule.onNodeWithText(context.getString(R.string.character_forge_title)).assertExists()
