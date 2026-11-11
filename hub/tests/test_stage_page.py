@@ -61,3 +61,27 @@ def test_stage_scene_contract_matches_scene_response(authenticated_client):
     script = authenticated_client.get("/stage/stage.js")
     for field in ("grid", "walkable", "doors", "tokens", "spawn", "exit"):
         assert f"scene.{field}" in script.text or f"scene?.{field}" in script.text
+
+
+def test_stage_reconnect_only_allows_current_socket_to_update_ui(
+    authenticated_client,
+) -> None:
+    """Source-level regression; browser event-order testing remains separate."""
+    source = authenticated_client.get("/stage/stage.js").text
+    assert "const previous = ws;" in source
+    assert "ws = null;" in source
+    assert "const socket = new WebSocket(url);" in source
+    assert "if (ws !== socket) return;" in source
+    assert "if (ws === socket) setStatus('WebSocket error.');" in source
+    assert "socket.send(JSON.stringify({" in source
+    assert "ws.send(JSON.stringify({" not in source
+
+
+def test_stage_stream_log_is_bounded_and_escaped(
+    authenticated_client,
+) -> None:
+    source = authenticated_client.get("/stage/stage.js").text
+    assert "const MAX_LOG_CHARS = 16_384;" in source
+    assert "next.slice(0, MAX_LOG_CHARS)" in source
+    assert "logEl.textContent = " in source
+    assert "logEl.innerHTML" not in source
