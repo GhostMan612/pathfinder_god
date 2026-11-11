@@ -10,7 +10,6 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import com.pathfindergod.spoke.a11y.ComposeTestActivity
-import com.pathfindergod.spoke.data.combat.CombatSceneProducer
 import com.pathfindergod.spoke.data.local.AppDatabase
 import com.pathfindergod.spoke.data.network.HubApiFactory
 import com.pathfindergod.spoke.data.repository.EncounterRepository
@@ -29,12 +28,14 @@ class CombatTrackerSmokeTest {
     @Test
     fun combatTrackerRendersAndAdvancesTurn() {
         val context = composeRule.activity
+        // This is an OFFLINE Compose/UI regression test. Do not publish
+        // synthetic combat scenes to the real Hub or mutate campaign 1.
+        // Dedicated LAN health checks live in LanHubSmokeTest instead.
         val repository = EncounterRepository(
             AppDatabase.get(context.applicationContext),
-            HubApiFactory.get("http://10.1.10.64:8000/"),
+            HubApiFactory.get("http://10.0.2.2:8000"),
         )
-        val producer = CombatSceneProducer(baseUrlProvider = { "http://10.1.10.64:8000/" })
-        val viewModel = CombatViewModel(repository, producer)
+        val viewModel = CombatViewModel(repository)
         viewModel.addCombatant(
             Combatant(
                 id = "hero-1",

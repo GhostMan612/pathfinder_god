@@ -59,9 +59,10 @@ jobs:
       - name: Verify Git LFS rulebook extract is real, not a pointer
         working-directory: spoke_kt
         run: test "$(head -c 15 app/src/main/assets/rules/pathfinder_rag.db)" = "SQLite format 3" || (echo "::error::rules DB is a Git LFS pointer. actions/checkout lfs:true did not materialize it." && exit 1)
-      - name: Assemble debug APK
+      - name: Assemble debug APK and instrumented test APK
         working-directory: spoke_kt
-        run: ./gradlew assembleDebug --no-daemon --console=plain
+        # Compile androidTest sources in CI; only a connected device can run them.
+        run: ./gradlew assembleDebug assembleDebugAndroidTest --no-daemon --console=plain
       - name: Upload debug APK artifact
         uses: actions/upload-artifact@v4
         with:
