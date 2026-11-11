@@ -52,6 +52,16 @@ class Settings(BaseSettings):
     ollama_temperature: float = 0.3
     ollama_timeout_s: float = 600.0
 
+    # --- LLM gateway / queue ---
+    # One resident model on the laptop: the semaphore serializes generations.
+    # Interactive turns use priority 0; background builders use priority 1.
+    llm_gateway_max_inflight: int = 1
+    llm_gateway_queue_limit: int = 100
+    # Builder/JSON/rules summaries are deterministic and validated, so a short
+    # cache is safe. Chat/GM/narration tasks are never cached.
+    llm_gateway_cache_ttl_s: float = 600.0
+    llm_gateway_cache_max_entries: int = 256
+
     # --- Task model routing (different agents earn different models) ---
     # The hub has two strong small models installed. qwen2.5:3b carries the
     # live GM chat because it is the only one that reliably performs the

@@ -19,12 +19,11 @@ import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
-import httpx
-
-logger = logging.getLogger(__name__)
-
 from ..config import Settings
 from ..rag.search import RuleHit
+from .gateway import get_gateway
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -59,8 +58,9 @@ def _raw_excerpts(hits: list[RuleHit]) -> str:
 class LLMRouter:
     """Routes a prompt through the local-only fallback, streaming or buffered."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, gateway=None) -> None:
         self._s = settings
+        self._gateway = gateway or get_gateway()
 
 
     async def complete(
@@ -69,9 +69,13 @@ class LLMRouter:
         *,
         system: str = "You are a precise Pathfinder GM with local 1e and 2e knowledge.",
         hits: list[RuleHit] | None = None,
+        task: str = "chat",
+        priority: int = 0,
     ) -> LLMResult:
         """Return a full answer, walking the fallback chain until one works."""
-        text = await self._ollama(prompt, system)
+        text = await self._ollama(
+            prompt, system, task=task, priority=priority
+        )
         # Guard on content, not just None. _ollama returns
         # resp.json().get("response", ""), which is "" when Ollama answers 200
         # with an empty body, and "" is not None - so complete() returned an
@@ -92,13 +96,17 @@ class LLMRouter:
         *,
         system: str = "You are a precise Pathfinder GM with local 1e and 2e knowledge.",
         hits: list[RuleHit] | None = None,
+        task: str = "chat",
+        priority: int = 0,
     ) -> AsyncIterator[tuple[str, str]]:
         """Yield ``(backend, chunk)`` tuples as text arrives.
 
         The first tuple's ``backend`` tells the client which tier answered.
         """
         got_any = False
-        async for chunk in self._ollama_stream(prompt, system):
+        async for chunk in self._ollama_stream(
+            prompt, system, task=task, priority=priority
+        ):
             got_any = True
             yield ("ollama", chunk)
         if got_any:
@@ -113,58 +121,42 @@ class LLMRouter:
             "num_predict": self._s.ollama_num_predict,
         }
 
-    async def _ollama(self, prompt: str, system: str) -> str | None:
-        url = f"{self._s.ollama_host}/api/generate"
-        payload = {
-            "model": self._s.ollama_model,
-            "prompt": prompt,
-            "system": system,
-            "stream": False,
-            "options": self._ollama_options(),
-        }
+    async def _ollama(
+        self,
+        prompt: str,
+        system: str,
+        *,
+        task: str,
+        priority: int,
+    ) -> str | None:
         try:
-            async with httpx.AsyncClient(timeout=self._s.ollama_timeout_s, trust_env=False) as client:
-                resp = await client.post(url, json=payload)
-            if resp.status_code == 200:
-                return resp.json().get("response", "")
-            print(f"[Ollama] HTTP {resp.status_code}")
+            text = await self._gateway.generate(
+                prompt,
+                system=system,
+                model=self._s.ollama_model,
+                temperature=self._s.ollama_temperature,
+                num_predict=self._s.ollama_num_predict,
+                task=task,
+                priority=priority,
+            )
+            return text if text and text.strip() else None
         except Exception as exc:
             print(f"[Ollama] error: {exc}")
-        return None
+            return None
 
-    async def _ollama_stream(self, prompt: str, system: str) -> AsyncIterator[str]:
-        import json
-        import traceback
-
-        url = f"{self._s.ollama_host}/api/generate"
-        payload = {
-            "model": self._s.ollama_model,
-            "prompt": prompt,
-            "system": system,
-            "stream": True,
-            "options": self._ollama_options(),
-        }
+    async def _ollama_stream(
+        self, prompt: str, system: str, *, task: str, priority: int
+    ) -> AsyncIterator[str]:
         try:
-            async with httpx.AsyncClient(timeout=self._s.ollama_timeout_s, trust_env=False) as client, client.stream("POST", url, json=payload) as resp:
-                if resp.status_code != 200:
-                    err = await resp.aread()
-                    print(f"[Ollama] stream HTTP {resp.status_code}: {err.decode('utf-8', errors='ignore')}")
-                    return
-                async for line in resp.aiter_lines():
-                    if not line:
-                        continue
-                    try:
-                        obj = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    chunk = obj.get("response")
-                    if chunk:
-                        yield chunk
-                    if obj.get("done"):
-                        break
+            async for chunk in self._gateway.stream(
+                prompt,
+                system=system,
+                model=self._s.ollama_model,
+                temperature=self._s.ollama_temperature,
+                num_predict=self._s.ollama_num_predict,
+                task=task,
+                priority=priority,
+            ):
+                yield chunk
         except Exception as exc:
-            print("\n--- OLLAMA CRASH LOG ---")
-            print(f"Target URL: {url}")
-            print(f"Error Details: {exc}")
-            traceback.print_exc()
-            print("------------------------\n")
+            print(f"[Ollama] stream error: {exc}")

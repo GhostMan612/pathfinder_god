@@ -130,14 +130,12 @@ async def check_database(repo: CampaignRepository) -> tuple[bool, str]:
 
 
 async def check_ollama(settings) -> tuple[bool, str]:
-    """Check Ollama connectivity."""
-    import httpx
+    """Check Ollama connectivity through the shared gateway."""
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            r = await client.get(f"{settings.ollama_host}/api/tags")
-            if r.status_code == 200:
-                return True, "ok"
-            return False, f"HTTP {r.status_code}"
+        from app.llm.gateway import get_gateway
+
+        await get_gateway().tags()
+        return True, "ok"
     except Exception as e:
         return False, str(e)
 

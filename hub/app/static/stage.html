@@ -1,0 +1,65 @@
+<!doctype html>
+<!--
+  Pathfinder God — minimal 3D encounter stage.
+
+  No build step, no framework. Three.js is pinned at 0.170.0 (jsDelivr).
+  The 3D view is intentionally local: it renders the encounter from the
+  character's current 5-ft square, while the rest of the world is a wireframe
+  breadcrumb trail. The whole world is never generated in 3D at once.
+
+  The JS island lives in /stage/stage.js so the hub CSP can keep inline script
+  disabled; Three.js is the one pinned CDN allow-list entry.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pathfinder God — Encounter Stage</title>
+  <style>
+    :root { color-scheme: dark; --gold:#d4af37; --ink:#0b0d12; --panel:#141925; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, sans-serif; background:var(--ink); color:#e8e3d3; }
+    header { padding:14px 18px; border-bottom:1px solid #2a3142; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+    header h1 { font-size:16px; margin:0; color:var(--gold); letter-spacing:.08em; text-transform:uppercase; }
+    label { font-size:12px; color:#9aa4b8; display:flex; gap:6px; align-items:center; }
+    input, button { font:inherit; }
+    input { background:#0f1420; color:#e8e3d3; border:1px solid #303a4f; border-radius:6px; padding:6px 8px; width:110px; }
+    button { background:#20283a; color:#e8e3d3; border:1px solid #3a4761; border-radius:6px; padding:7px 11px; cursor:pointer; }
+    button:hover { border-color:var(--gold); }
+    main { display:grid; grid-template-columns:minmax(280px, 1fr) minmax(320px, 1.2fr); gap:14px; padding:14px; }
+    .panel { background:var(--panel); border:1px solid #2a3142; border-radius:10px; padding:12px; min-height:360px; }
+    .panel h2 { font-size:12px; letter-spacing:.12em; text-transform:uppercase; color:#9aa4b8; margin:0 0 10px; }
+    #grid2d { width:100%; height:auto; image-rendering:pixelated; background:#080a0f; border-radius:6px; }
+    #three-mount { width:100%; height:420px; background:#05070b; border-radius:6px; overflow:hidden; }
+    #status { font-size:12px; color:#9aa4b8; min-height:1.4em; }
+    #log { white-space:pre-wrap; font-size:12px; color:#c9d2e3; max-height:100px; overflow:auto; margin-top:8px; }
+    @media (max-width: 800px) { main { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Encounter Stage</h1>
+    <label>Campaign <input id="campaign-id" type="number" min="1" value="1"></label>
+    <label>API key <input id="api-key" type="password" autocomplete="off" placeholder="optional"></label>
+    <button id="connect">Connect / take turn</button>
+    <button id="fetch-scene">Fetch current scene</button>
+    <span id="status">Not connected.</span>
+  </header>
+
+  <main>
+    <section class="panel">
+      <h2>2D grid</h2>
+      <canvas id="grid2d" width="480" height="400"></canvas>
+      <div id="log"></div>
+    </section>
+
+    <section class="panel">
+      <h2>3D view — current 5-ft square</h2>
+      <div id="three-mount" aria-label="Three.js mount point"></div>
+      <p style="font-size:12px;color:#9aa4b8">Look around from the current square only. Distant breadcrumbs are wireframes.</p>
+    </section>
+  </main>
+
+  <script type="module" src="/stage/stage.js"></script>
+</body>
+</html>
