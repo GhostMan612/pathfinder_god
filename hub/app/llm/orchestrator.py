@@ -828,9 +828,16 @@ class LLMOrchestrator:
                 from app.agents.map_maker import MapMakerAgent
 
                 agent = MapMakerAgent(self.npc_compiler.ollama)
+                c_heroes, c_monsters, c_npcs, c_loot = (
+                    MapMakerAgent.entities_from_campaign(self.repo, campaign_id)
+                )
                 result = await agent.build(
                     arguments["prompt"],
                     grid_enabled=bool(arguments.get("grid_enabled", True)),
+                    heroes=arguments.get("heroes") or (c_heroes if c_heroes else None),
+                    monsters=arguments.get("monsters") or (c_monsters if c_monsters else None),
+                    npcs=arguments.get("npcs") or (c_npcs if c_npcs else None),
+                    loot=arguments.get("loot") or (c_loot if c_loot else None),
                 )
                 scene = result.scene
                 return {
@@ -869,6 +876,43 @@ class LLMOrchestrator:
                                 {"x": l.x, "y": l.y, "color": l.color, "radius_m": l.radius_m}
                                 for l in scene.lights
                             ],
+                            "walkable": scene.walkable,
+                            "doors": [
+                                {
+                                    "x": d.x,
+                                    "y": d.y,
+                                    "orientation": d.orientation,
+                                    "kind": d.kind,
+                                }
+                                for d in scene.doors
+                            ],
+                            "corridors": [
+                                {"cells": [[cx, cy] for cx, cy in c.cells]}
+                                for c in scene.corridors
+                            ],
+                            "spawn": (
+                                {"x": scene.spawn.x, "y": scene.spawn.y}
+                                if scene.spawn is not None
+                                else None
+                            ),
+                            "exit": (
+                                {"x": scene.exit.x, "y": scene.exit.y}
+                                if scene.exit is not None
+                                else None
+                            ),
+                            "tokens": [
+                                {
+                                    "id": t.id,
+                                    "name": t.name,
+                                    "kind": t.kind,
+                                    "x": t.x,
+                                    "y": t.y,
+                                    "z": t.z,
+                                    "color": t.color,
+                                }
+                                for t in scene.tokens
+                            ],
+                            "connected": scene.connected,
                         }
                         if scene
                         else None

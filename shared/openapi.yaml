@@ -350,7 +350,7 @@ paths:
       tags:
       - rules
       summary: List Missed
-      description: Queued misses, oldest first — feed for chunked backfill runs.
+      description: "Queued misses, oldest first \u2014 feed for chunked backfill runs."
       operationId: list_missed_rules_missed_get
       parameters:
       - name: limit
@@ -1874,6 +1874,17 @@ components:
       required:
       - name
       title: ConditionItem
+    CorridorResponse:
+      properties:
+        cells:
+          items:
+            items:
+              type: integer
+            type: array
+          type: array
+          title: Cells
+      type: object
+      title: CorridorResponse
     CreateCampaignRequest:
       properties:
         name:
@@ -1999,6 +2010,27 @@ components:
       - ollama
       - checks
       title: DetailedHealthResponse
+    DoorResponse:
+      properties:
+        x:
+          type: integer
+          title: X
+        y:
+          type: integer
+          title: Y
+        orientation:
+          type: string
+          title: Orientation
+          default: ew
+        kind:
+          type: string
+          title: Kind
+          default: wood
+      type: object
+      required:
+      - x
+      - y
+      title: DoorResponse
     EncounterMonsterResponse:
       properties:
         name:
@@ -2341,6 +2373,39 @@ components:
           type: boolean
           title: Grid Enabled
           default: true
+        campaign_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Campaign Id
+        heroes:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Heroes
+        monsters:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Monsters
+        npcs:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Npcs
+        loot:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Loot
       type: object
       required:
       - prompt
@@ -2634,6 +2699,19 @@ components:
       required:
       - name
       title: PartyMemberRequest
+    PointResponse:
+      properties:
+        x:
+          type: integer
+          title: X
+        y:
+          type: integer
+          title: Y
+      type: object
+      required:
+      - x
+      - y
+      title: PointResponse
     PropResponse:
       properties:
         type:
@@ -2755,6 +2833,40 @@ components:
           anyOf:
           - $ref: '#/components/schemas/FogResponse'
           - type: 'null'
+        walkable:
+          items:
+            items:
+              type: integer
+            type: array
+          type: array
+          title: Walkable
+        doors:
+          items:
+            $ref: '#/components/schemas/DoorResponse'
+          type: array
+          title: Doors
+        corridors:
+          items:
+            $ref: '#/components/schemas/CorridorResponse'
+          type: array
+          title: Corridors
+        spawn:
+          anyOf:
+          - $ref: '#/components/schemas/PointResponse'
+          - type: 'null'
+        exit:
+          anyOf:
+          - $ref: '#/components/schemas/PointResponse'
+          - type: 'null'
+        tokens:
+          items:
+            $ref: '#/components/schemas/TokenResponse'
+          type: array
+          title: Tokens
+        connected:
+          type: boolean
+          title: Connected
+          default: true
       type: object
       required:
       - grid
@@ -2922,6 +3034,40 @@ components:
       - summary
       - event_count
       title: SummarizeSessionResponse
+    TokenResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        kind:
+          type: string
+          pattern: ^(hero|monster|npc|loot)$
+          title: Kind
+        x:
+          type: integer
+          title: X
+        y:
+          type: integer
+          title: Y
+        z:
+          type: number
+          title: Z
+          default: 0.5
+        color:
+          type: string
+          title: Color
+          default: '#d4af37'
+      type: object
+      required:
+      - id
+      - name
+      - kind
+      - x
+      - y
+      title: TokenResponse
     TranscribeResponse:
       properties:
         text:
