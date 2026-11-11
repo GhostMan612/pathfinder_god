@@ -311,6 +311,7 @@
     <string name="settings_pit">3D Pit</string>
     <string name="settings_hub_url">Hub URL</string>
     <string name="settings_hub_url_invalid">Enter a valid Hub address (http:// or https://, host and optional port).</string>
+    <string name="settings_hub_url_emulator_only">10.0.2.2 only works on Android emulators. On your phone, enter your laptop\'s LAN address or an HTTPS Hub URL.</string>
     <string name="settings_hub_url_requires_https">This build requires HTTPS for remote Hub connections. Use a trusted TLS endpoint.</string>
     <string name="settings_hub_transport_notice">HTTP is permitted for LAN development builds. Production connections require HTTPS; the emulator exception is 10.0.2.2.</string>
     <string name="settings_connect">CONNECT</string>
