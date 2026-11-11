@@ -141,21 +141,42 @@ async def check_ollama(settings) -> tuple[bool, str]:
 
 
 async def check_rules_db(settings) -> tuple[bool, str]:
-    """Check rules database accessibility."""
+    """Require a readable rules source with a supported schema before reporting ready."""
+    from app.rag.search import Retriever
+
+    def _probe() -> str | None:
+        for path in settings.db_paths:
+            if not path.is_file():
+                continue
+            conn = Retriever._connect(path)
+            if conn is None:
+                continue
+            try:
+                tables = Retriever._tables(conn)
+                has_rules = "rules" in tables and Retriever._has_column(
+                    conn, "rules", "raw_content"
+                )
+                has_chunks = "chunks" in tables and all(
+                    Retriever._has_column(conn, "chunks", column)
+                    for column in ("source", "content")
+                )
+                has_items = "items" in tables and all(
+                    Retriever._has_column(conn, "items", column)
+                    for column in ("name", "content")
+                )
+                if has_rules or has_chunks or has_items:
+                    return path.name
+            except Exception:
+                continue
+            finally:
+                conn.close()
+        return None
+
     try:
-        # app.rag.retriever.Retriever takes a CampaignRepository. The
-        # (db_paths, rag_limit=) constructor is app.rag.search.Retriever, so this
-        # raised TypeError on every call and the probe reported the rules DB as
-        # permanently unhealthy.
-        from app.rag.search import Retriever
-        retriever = Retriever(settings.db_paths, rag_limit=1)
-        # Retriever.search is fully synchronous (sqlite on the 58 MB corpus).
-        # A readiness probe runs on a timer, so calling it inline put a
-        # recurring multi-hundred-ms stall into the event loop for every client.
-        hits = await anyio.to_thread.run_sync(
-            lambda: retriever.search("test", edition="2e", limit=1)
-        )
-        return True, f"ok ({len(hits)} hits)"
+        source = await anyio.to_thread.run_sync(_probe)
+        if source is None:
+            return False, "no readable rules database with a supported schema"
+        return True, f"ok ({source})"
     except Exception as e:
         return False, str(e)
 
