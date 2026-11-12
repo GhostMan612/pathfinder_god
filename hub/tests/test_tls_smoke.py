@@ -75,14 +75,14 @@ def test_tls_smoke_https_and_http_refusal(tmp_path: Path, monkeypatch):
 
     try:
         # 1. Assert GET /health returns 200 over HTTPS with verification disabled in test client
-        with httpx.Client(verify=False, timeout=5.0) as client:
+        with httpx.Client(verify=False, timeout=5.0, trust_env=False) as client:
             resp = client.get(f"https://127.0.0.1:{port}/health")
             assert resp.status_code == 200
             data = resp.json()
             assert data["status"] == "ok"
 
         # 2. Assert plain HTTP to the TLS port is refused (connection error, not 200 or redirect)
-        with pytest.raises((httpx.RequestError, httpx.RemoteProtocolError)), httpx.Client(timeout=5.0) as client:
+        with pytest.raises((httpx.RequestError, httpx.RemoteProtocolError)), httpx.Client(timeout=5.0, trust_env=False) as client:
             client.get(f"http://127.0.0.1:{port}/health")
 
     finally:
