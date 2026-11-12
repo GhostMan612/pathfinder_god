@@ -1775,6 +1775,7 @@ class SoloLoop:
             damage_roll=damage_total,
             target_hp=target.hp,
             target_temp_hp=target.temp_hp,
+            natural_roll=d20,
         )
         conditions = list(target.conditions or [])
         dead = False

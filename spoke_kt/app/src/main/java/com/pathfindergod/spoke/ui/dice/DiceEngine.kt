@@ -179,14 +179,28 @@ class DiceEngine(private val random: Random = Random.Default) {
     }
 
     fun degreeOfSuccess(record: RollRecord, targetNumber: Int): DegreeOfSuccess {
-        val best = record.kept.maxOrNull() ?: 0
-        val result = best + record.modifier
-        return when {
-            best >= 20 -> DegreeOfSuccess.CRITICAL_SUCCESS
-            best <= 1 -> DegreeOfSuccess.CRITICAL_FAILURE
-            result >= targetNumber + CRITICAL_MARGIN -> DegreeOfSuccess.CRITICAL_SUCCESS
-            result >= targetNumber -> DegreeOfSuccess.SUCCESS
+        val margin = record.total - targetNumber
+        val baseDegree = when {
+            margin >= CRITICAL_MARGIN -> DegreeOfSuccess.CRITICAL_SUCCESS
+            margin >= 0 -> DegreeOfSuccess.SUCCESS
+            margin <= -CRITICAL_MARGIN -> DegreeOfSuccess.CRITICAL_FAILURE
             else -> DegreeOfSuccess.FAILURE
+        }
+        // In PF2e Remaster, a natural 20 improves the degree of success by one step,
+        // and a natural 1 worsens the degree of success by one step.
+        // They do not unconditionally force critical outcomes.
+        return when (record.impact) {
+            Impact.CRITICAL_SUCCESS -> when (baseDegree) {
+                DegreeOfSuccess.CRITICAL_FAILURE -> DegreeOfSuccess.FAILURE
+                DegreeOfSuccess.FAILURE -> DegreeOfSuccess.SUCCESS
+                DegreeOfSuccess.SUCCESS, DegreeOfSuccess.CRITICAL_SUCCESS -> DegreeOfSuccess.CRITICAL_SUCCESS
+            }
+            Impact.CRITICAL_FAILURE -> when (baseDegree) {
+                DegreeOfSuccess.CRITICAL_SUCCESS -> DegreeOfSuccess.SUCCESS
+                DegreeOfSuccess.SUCCESS -> DegreeOfSuccess.FAILURE
+                DegreeOfSuccess.FAILURE, DegreeOfSuccess.CRITICAL_FAILURE -> DegreeOfSuccess.CRITICAL_FAILURE
+            }
+            Impact.NORMAL -> baseDegree
         }
     }
 

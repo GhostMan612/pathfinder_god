@@ -287,3 +287,126 @@ class TestPersistentDamageFlatCheck:
         assert damage >= 1, "flat check never failed in 200 attempts"
         assert any(c["name"] == "Dying" and c["value"] == 1 for c in updated)
         assert "Dying 1." in notes
+
+    def test_strike_natural_20_shifts_critical_failure_to_failure(self):
+        """Natural 20 against an extreme AC (-10 margin) improves to Failure, not Critical Success."""
+        result = CombatTrackerAgent.resolve_strike(
+            attack_roll=20,
+            target_ac=35,  # margin = -15 (base: Critical Failure)
+            damage_roll=8,
+            target_hp=20,
+            natural_roll=20,
+        )
+        assert result.outcome == "Failure"
+        assert result.damage_dealt == 0
+        assert result.new_hp == 20
+        assert result.notes == "Miss."
+
+    def test_strike_natural_20_shifts_failure_to_success(self):
+        """Natural 20 with failure margin (-1 to -9) improves to Success."""
+        result = CombatTrackerAgent.resolve_strike(
+            attack_roll=20,
+            target_ac=25,  # margin = -5 (base: Failure)
+            damage_roll=8,
+            target_hp=20,
+            natural_roll=20,
+        )
+        assert result.outcome == "Success"
+        assert result.damage_dealt == 8
+        assert result.new_hp == 12
+        assert result.notes == "Hit."
+
+    def test_strike_natural_20_shifts_success_to_critical_success(self):
+        """Natural 20 with normal hit margin (0 to +9) improves to Critical Success with doubled damage."""
+        result = CombatTrackerAgent.resolve_strike(
+            attack_roll=20,
+            target_ac=20,  # margin = 0 (base: Success)
+            damage_roll=8,
+            target_hp=30,
+            natural_roll=20,
+        )
+        assert result.outcome == "Critical Success"
+        assert result.damage_dealt == 16  # 8 * 2
+        assert result.new_hp == 14
+        assert result.notes == "Critical hit! Damage doubled."
+
+    def test_strike_natural_20_caps_at_critical_success(self):
+        """Natural 20 with margin >= +10 stays Critical Success."""
+        result = CombatTrackerAgent.resolve_strike(
+            attack_roll=25,
+            target_ac=15,  # margin = +10 (base: Critical Success)
+            damage_roll=8,
+            target_hp=30,
+            natural_roll=20,
+        )
+        assert result.outcome == "Critical Success"
+        assert result.damage_dealt == 16
+        assert result.new_hp == 14
+
+    def test_strike_natural_1_shifts_critical_success_to_success(self):
+        """Natural 1 with massive modifier (+10 margin) worsens from Crit Success to plain Success."""
+        result = CombatTrackerAgent.resolve_strike(
+            attack_roll=31,  # 1 + 30
+            target_ac=20,  # margin = +11 (base: Critical Success)
+            damage_roll=8,
+            target_hp=20,
+            natural_roll=1,
+        )
+        assert result.outcome == "Success"
+        assert result.damage_dealt == 8
+        assert result.new_hp == 12
+        assert result.notes == "Hit."
+
+    def test_strike_natural_1_shifts_success_to_failure(self):
+        """Natural 1 with meeting AC worsens from Success to Failure."""
+        result = CombatTrackerAgent.resolve_strike(
+            attack_roll=16,  # 1 + 15
+            target_ac=16,  # margin = 0 (base: Success)
+            damage_roll=8,
+            target_hp=20,
+            natural_roll=1,
+        )
+        assert result.outcome == "Failure"
+        assert result.damage_dealt == 0
+        assert result.new_hp == 20
+        assert result.notes == "Miss."
+
+    def test_strike_natural_1_shifts_failure_to_critical_failure(self):
+        """Natural 1 with failure margin (-1 to -9) worsens to Critical Failure."""
+        result = CombatTrackerAgent.resolve_strike(
+            attack_roll=11,  # 1 + 10
+            target_ac=16,  # margin = -5 (base: Failure)
+            damage_roll=8,
+            target_hp=20,
+            natural_roll=1,
+        )
+        assert result.outcome == "Critical Failure"
+        assert result.damage_dealt == 0
+        assert result.new_hp == 20
+        assert result.notes == "Critical miss."
+
+    def test_strike_natural_1_caps_at_critical_failure(self):
+        """Natural 1 with margin <= -10 stays Critical Failure."""
+        result = CombatTrackerAgent.resolve_strike(
+            attack_roll=6,  # 1 + 5
+            target_ac=20,  # margin = -14 (base: Critical Failure)
+            damage_roll=8,
+            target_hp=20,
+            natural_roll=1,
+        )
+        assert result.outcome == "Critical Failure"
+        assert result.damage_dealt == 0
+        assert result.new_hp == 20
+        assert result.notes == "Critical miss."
+
+    def test_strike_omitted_natural_roll_preserves_pure_margin(self):
+        """When natural_roll is None, resolution relies strictly on numerical margin."""
+        result = CombatTrackerAgent.resolve_strike(
+            attack_roll=20,
+            target_ac=20,
+            damage_roll=5,
+            target_hp=10,
+            natural_roll=None,
+        )
+        assert result.outcome == "Success"
+        assert result.damage_dealt == 5

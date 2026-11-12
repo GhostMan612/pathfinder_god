@@ -85,6 +85,10 @@ SOLO_LOOP_TOOLS = [
                     "damage_roll": {"type": "integer"},
                     "target_hp": {"type": "integer"},
                     "target_temp_hp": {"type": "integer", "default": 0},
+                    "natural_roll": {
+                        "type": "integer",
+                        "description": "Unmodified d20 roll (1-20) if available to apply PF2e natural 20/1 degree adjustment.",
+                    },
                 },
                 "required": ["attack_roll", "target_ac", "damage_roll", "target_hp"],
             },
@@ -943,6 +947,9 @@ class LLMOrchestrator:
                     damage_roll=int(arguments["damage_roll"]),
                     target_hp=int(arguments["target_hp"]),
                     target_temp_hp=int(arguments.get("target_temp_hp", 0) or 0),
+                    natural_roll=int(arguments["natural_roll"])
+                    if arguments.get("natural_roll") is not None
+                    else None,
                 )
                 return _tool_result_dict(result)
             elif tool_name == "end_turn":
