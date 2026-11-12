@@ -86,6 +86,7 @@ object HubTlsClient {
         pin: String = HUB_CERT_PIN,
         pingIntervalSeconds: Long = WS_PING_SECONDS,
         retryOnConnectionFailure: Boolean = true,
+        interceptors: List<okhttp3.Interceptor> = emptyList(),
         vararg hosts: String,
     ): OkHttpClient {
         val trustManager = createTrustManager(pin)
@@ -98,7 +99,7 @@ object HubTlsClient {
             .writeTimeout(WRITE_SECONDS, TimeUnit.SECONDS)
             .pingInterval(pingIntervalSeconds, TimeUnit.SECONDS)
             .retryOnConnectionFailure(retryOnConnectionFailure)
-            // An HTTPS Hub must not silently downgrade to HTTP via redirect.
+            .followRedirects(false)
             .followSslRedirects(false)
             .connectionPool(
                 ConnectionPool(MAX_IDLE_CONNECTIONS, KEEP_ALIVE_MINUTES, TimeUnit.MINUTES),
@@ -108,6 +109,10 @@ object HubTlsClient {
             // via DHCP while CertificatePinner & PinnedTrustManager enforce exact public key identity.
             .hostnameVerifier { _, _ -> true }
             .certificatePinner(certificatePinner)
+
+        for (interceptor in interceptors) {
+            builder.addInterceptor(interceptor)
+        }
 
         // Install pass-through cleaner so self-signed certs pass to CertificatePinner without
         // being rejected by the platform root cleaner.

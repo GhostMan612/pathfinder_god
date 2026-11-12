@@ -5,28 +5,48 @@
 
 package com.pathfindergod.spoke.data.network
 
-import java.util.concurrent.TimeUnit
+import com.pathfindergod.spoke.data.security.CredentialVault
+import com.pathfindergod.spoke.data.security.SpokeCredentialVault
 import kotlinx.serialization.json.Json
-import okhttp3.ConnectionPool
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
 
 object HubApiFactory {
-    private const val CONNECT_SECONDS = 10L
-    private const val READ_SECONDS = 60L
-    private const val WRITE_SECONDS = 30L
-    private const val KEEP_ALIVE_MINUTES = 5L
-    private const val MAX_IDLE_CONNECTIONS = 4
-
     private val json = Json { ignoreUnknownKeys = true }
 
     @Volatile
     private var client: OkHttpClient? = null
 
     @Volatile
+    private var vault: CredentialVault? = null
+
+    @Volatile
     private var cached: Pair<String, HubApi>? = null
+
+    fun init(credentialVault: CredentialVault) {
+        synchronized(this) {
+            vault = credentialVault
+            client?.let { http ->
+                http.dispatcher.cancelAll()
+                http.connectionPool.evictAll()
+            }
+            client = null
+            cached = null
+        }
+    }
+
+    fun refreshClient() {
+        synchronized(this) {
+            cached = null
+            client?.let { http ->
+                http.dispatcher.cancelAll()
+                http.connectionPool.evictAll()
+            }
+            client = null
+        }
+    }
 
     fun get(baseUrl: String): HubApi {
         val url = normalize(baseUrl)
@@ -53,7 +73,7 @@ object HubApiFactory {
     private fun build(url: String): HubApi =
         Retrofit.Builder()
             .baseUrl(url)
-            .client(client())
+            .client(client(url))
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
             .create(HubApi::class.java)
@@ -61,7 +81,22 @@ object HubApiFactory {
     val okHttpClient: OkHttpClient
         get() = client()
 
-    private fun client(): OkHttpClient = client ?: HubTlsClient.createOkHttpClient().also { client = it }
+    private fun client(targetUrl: String? = null): OkHttpClient = client ?: synchronized(this) {
+        client ?: run {
+            val activeVault = vault ?: SpokeCredentialVault.instanceOrNull()
+            val interceptors = mutableListOf<okhttp3.Interceptor>()
+            if (activeVault != null) {
+                interceptors.add(ApiKeyInterceptor(activeVault))
+            }
+            val endpoint = targetUrl ?: activeVault?.getHubUrl()
+            val pin = endpoint?.let { activeVault?.getCertificatePin(it) }?.trim()?.takeIf { it.isNotEmpty() }
+                ?: HubTlsClient.HUB_CERT_PIN
+            HubTlsClient.createOkHttpClient(
+                pin = pin,
+                interceptors = interceptors,
+            ).also { client = it }
+        }
+    }
 
     private fun normalize(baseUrl: String): String = HubEndpoint.normalize(baseUrl)
 }
