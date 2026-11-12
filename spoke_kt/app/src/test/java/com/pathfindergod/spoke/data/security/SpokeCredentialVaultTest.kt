@@ -9,6 +9,10 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.nio.file.Files
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import javax.crypto.KeyGenerator
 import org.junit.After
@@ -291,5 +295,93 @@ class SpokeCredentialVaultTest {
         val reloaded = SpokeCredentialVault(tempDir, keyProvider)
         assertEquals(VaultState.READY, reloaded.getState())
         assertEquals("original-key", reloaded.getApiKey("https://hub.example.com:8000"))
+    }
+
+    @Test
+    fun restorationFailureLeavesBackupIntactAndPreventsSubsequentSave() {
+        val backupFile = File(tempDir, "${SpokeCredentialVault.VAULT_FILE_NAME}.bak")
+        val vaultFile = File(tempDir, SpokeCredentialVault.VAULT_FILE_NAME)
+
+        val tempVault = SpokeCredentialVault(tempDir, keyProvider)
+        tempVault.setCredentials(
+            hubUrl = "https://hub.example.com:8000",
+            apiKey = "precious-backup-key",
+        )
+        assertTrue(vaultFile.exists())
+        vaultFile.renameTo(backupFile)
+        assertTrue(backupFile.exists())
+        assertFalse(vaultFile.exists())
+
+        vaultFile.writeBytes(byteArrayOf(1, 2, 3, 4))
+
+        val vaultWithFailedRestoration = SpokeCredentialVault(
+            storageDir = tempDir,
+            keyProvider = keyProvider,
+            fileRenamer = { _, _ -> false },
+        )
+
+        assertEquals(VaultState.CORRUPT, vaultWithFailedRestoration.getState())
+        assertNull(vaultWithFailedRestoration.getApiKey())
+
+        assertThrows(VaultCorruptedException::class.java) {
+            vaultWithFailedRestoration.setCredentials(
+                hubUrl = "https://hub.example.com:8000",
+                apiKey = "destructive-overwrite",
+            )
+        }
+
+        assertTrue(backupFile.exists())
+
+        val recoveredVault = SpokeCredentialVault(tempDir, keyProvider)
+        assertEquals(VaultState.READY, recoveredVault.getState())
+        assertEquals("precious-backup-key", recoveredVault.getApiKey("https://hub.example.com:8000"))
+    }
+
+    @Test
+    fun listenerFailureDoesNotRollbackSuccessfullyCommittedVault() {
+        val explodingListener: () -> Unit = {
+            throw RuntimeException("Simulated observer crash")
+        }
+        vault.setChangeListener(explodingListener)
+
+        vault.setCredentials(
+            hubUrl = "https://hub.example.com:8000",
+            apiKey = "committed-key",
+        )
+
+        assertEquals(VaultState.READY, vault.getState())
+        assertEquals("committed-key", vault.getApiKey("https://hub.example.com:8000"))
+
+        val vaultFile = File(tempDir, SpokeCredentialVault.VAULT_FILE_NAME)
+        assertTrue(vaultFile.exists())
+
+        val reloaded = SpokeCredentialVault(tempDir, keyProvider)
+        assertEquals(VaultState.READY, reloaded.getState())
+        assertEquals("committed-key", reloaded.getApiKey("https://hub.example.com:8000"))
+    }
+
+    @Test
+    fun notificationsDispatchedOutsideVaultLockPreventDeadlock() {
+        val vaultLockAcquiredDuringNotification = AtomicBoolean(false)
+        vault.setChangeListener {
+            val executor = Executors.newSingleThreadExecutor()
+            val future = executor.submit(Callable {
+                vault.getApiKey()
+            })
+            try {
+                future.get(2, TimeUnit.SECONDS)
+                vaultLockAcquiredDuringNotification.set(true)
+            } finally {
+                executor.shutdown()
+            }
+        }
+
+        vault.setCredentials(
+            hubUrl = "https://hub.example.com:8000",
+            apiKey = "no-deadlock-key",
+        )
+
+        assertTrue(vaultLockAcquiredDuringNotification.get())
+        assertEquals("no-deadlock-key", vault.getApiKey("https://hub.example.com:8000"))
     }
 }

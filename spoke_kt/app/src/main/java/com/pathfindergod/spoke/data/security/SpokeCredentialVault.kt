@@ -133,14 +133,17 @@ class SpokeCredentialVault(
         return payload.apiKey
     }
 
-    @Synchronized
     override fun setApiKey(key: String?) {
-        if (cachedState == VaultState.CORRUPT) {
-            throw VaultCorruptedException("Cannot update corrupted vault. Call clear() to explicitly reset.")
+        val listenerToNotify = synchronized(this) {
+            if (cachedState == VaultState.CORRUPT) {
+                throw VaultCorruptedException("Cannot update corrupted vault. Call clear() to explicitly reset.")
+            }
+            val current = cachedPayload
+            val updated = current.copy(apiKey = key?.trim()?.ifEmpty { null })
+            saveInternal(updated)
+            changeListener
         }
-        val current = cachedPayload
-        val updated = current.copy(apiKey = key?.trim()?.ifEmpty { null })
-        saveInternal(updated)
+        notifyListenerSafely(listenerToNotify)
     }
 
     @Synchronized
@@ -153,43 +156,59 @@ class SpokeCredentialVault(
         return payload.certificatePin
     }
 
-    @Synchronized
     override fun setCertificatePin(pin: String?) {
-        if (cachedState == VaultState.CORRUPT) {
-            throw VaultCorruptedException("Cannot update corrupted vault. Call clear() to explicitly reset.")
+        val listenerToNotify = synchronized(this) {
+            if (cachedState == VaultState.CORRUPT) {
+                throw VaultCorruptedException("Cannot update corrupted vault. Call clear() to explicitly reset.")
+            }
+            val current = cachedPayload
+            val updated = current.copy(certificatePin = pin?.trim()?.ifEmpty { null })
+            saveInternal(updated)
+            changeListener
         }
-        val current = cachedPayload
-        val updated = current.copy(certificatePin = pin?.trim()?.ifEmpty { null })
-        saveInternal(updated)
+        notifyListenerSafely(listenerToNotify)
     }
 
-    @Synchronized
     override fun setCredentials(hubUrl: String, apiKey: String?, pin: String?) {
-        if (cachedState == VaultState.CORRUPT) {
-            throw VaultCorruptedException("Cannot update corrupted vault. Call clear() to explicitly reset.")
+        val listenerToNotify = synchronized(this) {
+            if (cachedState == VaultState.CORRUPT) {
+                throw VaultCorruptedException("Cannot update corrupted vault. Call clear() to explicitly reset.")
+            }
+            val normalizedUrl = HubEndpoint.normalize(hubUrl)
+            val isSameHub = isEndpointMatching(normalizedUrl, cachedPayload.hubUrl)
+            val resolvedPin = pin?.trim()?.ifEmpty { null } ?: if (isSameHub) cachedPayload.certificatePin else null
+            val updated = VaultPayload(
+                hubUrl = normalizedUrl,
+                apiKey = apiKey?.trim()?.ifEmpty { null },
+                certificatePin = resolvedPin,
+            )
+            saveInternal(updated)
+            changeListener
         }
-        val normalizedUrl = HubEndpoint.normalize(hubUrl)
-        val isSameHub = isEndpointMatching(normalizedUrl, cachedPayload.hubUrl)
-        val resolvedPin = pin?.trim()?.ifEmpty { null } ?: if (isSameHub) cachedPayload.certificatePin else null
-        val updated = VaultPayload(
-            hubUrl = normalizedUrl,
-            apiKey = apiKey?.trim()?.ifEmpty { null },
-            certificatePin = resolvedPin,
-        )
-        saveInternal(updated)
+        notifyListenerSafely(listenerToNotify)
     }
 
-    @Synchronized
     override fun clear() {
-        if (backupFile.exists() && !fileDeleter(backupFile)) {
-            throw IOException("Could not delete backup file $backupFile")
+        val listenerToNotify = synchronized(this) {
+            if (backupFile.exists() && !fileDeleter(backupFile)) {
+                throw IOException("Could not delete backup file $backupFile")
+            }
+            if (vaultFile.exists() && !fileDeleter(vaultFile)) {
+                throw IOException("Could not delete vault file $vaultFile")
+            }
+            cachedState = VaultState.EMPTY
+            cachedPayload = VaultPayload()
+            changeListener
         }
-        if (vaultFile.exists() && !fileDeleter(vaultFile)) {
-            throw IOException("Could not delete vault file $vaultFile")
+        notifyListenerSafely(listenerToNotify)
+    }
+
+    private fun notifyListenerSafely(listener: (() -> Unit)?) {
+        if (listener == null) return
+        try {
+            listener.invoke()
+        } catch (_: Exception) {
         }
-        cachedState = VaultState.EMPTY
-        cachedPayload = VaultPayload()
-        changeListener?.invoke()
     }
 
     private fun isEndpointMatching(requested: String, bound: String?): Boolean {
@@ -259,19 +278,21 @@ class SpokeCredentialVault(
         }
 
         if (backupPayload != null) {
-            if (hasVault) {
-                fileDeleter(vaultFile)
-            }
-            if (!vaultFile.exists()) {
-                fileRenamer(backupFile, vaultFile)
-            }
-            cachedPayload = backupPayload
-            cachedState = if (backupPayload.apiKey == null && backupPayload.hubUrl == null && backupPayload.certificatePin == null) {
-                VaultState.EMPTY
+            val primaryDeleted = !hasVault || fileDeleter(vaultFile)
+            val backupRenamed = primaryDeleted && fileRenamer(backupFile, vaultFile)
+            if (backupRenamed) {
+                cachedPayload = backupPayload
+                cachedState = if (backupPayload.apiKey == null && backupPayload.hubUrl == null && backupPayload.certificatePin == null) {
+                    VaultState.EMPTY
+                } else {
+                    VaultState.READY
+                }
+                return
             } else {
-                VaultState.READY
+                cachedState = VaultState.CORRUPT
+                cachedPayload = VaultPayload()
+                return
             }
-            return
         }
 
         cachedState = VaultState.CORRUPT
@@ -320,7 +341,6 @@ class SpokeCredentialVault(
             }
             cachedPayload = payload
             cachedState = VaultState.READY
-            changeListener?.invoke()
         } catch (e: Exception) {
             if (vaultFile.exists()) {
                 fileDeleter(vaultFile)
