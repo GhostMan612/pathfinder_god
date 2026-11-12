@@ -43,6 +43,7 @@ class ApiKeyInterceptorTest {
         override fun setCredentials(hubUrl: String, apiKey: String?, pin: String?) {
             this.apiKey = apiKey
         }
+        override fun setChangeListener(listener: (() -> Unit)?) {}
         override fun clear() { apiKey = null }
     }
 
@@ -111,17 +112,31 @@ class ApiKeyInterceptorTest {
     }
 
     @Test
-    fun doesNotInjectHeaderWhenVaultIsEmptyOrNull() {
-        val vault = MockVault(apiKey = null)
+    fun stripsPreexistingApiKeyWhenTargetOriginIsNotAuthorized() {
+        val vault = MockVault(
+            boundHubUrl = "http://localhost:$serverPort/",
+            apiKey = "spoke-secret-key-42",
+        )
+        val capturedHeaderOnOtherHost = AtomicReference<String?>()
         val client = OkHttpClient.Builder()
             .addInterceptor(ApiKeyInterceptor(vault))
+            .addNetworkInterceptor { chain ->
+                capturedHeaderOnOtherHost.set(chain.request().header(ApiKeyInterceptor.API_KEY_HEADER))
+                chain.proceed(chain.request())
+            }
             .build()
 
-        val request = Request.Builder()
+        val unauthorizedRequest = Request.Builder()
             .url("http://localhost:$serverPort/test")
+            .header(ApiKeyInterceptor.API_KEY_HEADER, "leaked-secret")
             .build()
 
-        client.newCall(request).execute().use { response ->
+        val vaultWithoutMatch = MockVault(boundHubUrl = "http://authorized.hub:8000/", apiKey = "key")
+        val sanitizingClient = OkHttpClient.Builder()
+            .addInterceptor(ApiKeyInterceptor(vaultWithoutMatch))
+            .build()
+
+        sanitizingClient.newCall(unauthorizedRequest).execute().use { response ->
             assertTrue(response.isSuccessful)
         }
 
@@ -129,24 +144,40 @@ class ApiKeyInterceptorTest {
     }
 
     @Test
-    fun doesNotOverwriteExistingHeader() {
+    fun remoteCleartextUrlSuppressesApiKey() {
         val vault = MockVault(
-            boundHubUrl = "http://localhost:$serverPort/",
-            apiKey = "vault-key",
+            boundHubUrl = "http://192.168.1.50:8000/",
+            apiKey = "remote-lan-key",
         )
-        val client = OkHttpClient.Builder()
-            .addInterceptor(ApiKeyInterceptor(vault))
-            .build()
-
+        val interceptor = ApiKeyInterceptor(vault)
         val request = Request.Builder()
-            .url("http://localhost:$serverPort/test")
-            .header(ApiKeyInterceptor.API_KEY_HEADER, "explicit-preexisting-key")
+            .url("http://192.168.1.50:8000/api/characters")
             .build()
 
-        client.newCall(request).execute().use { response ->
-            assertTrue(response.isSuccessful)
+        var forwardedHeader: String? = "uninitialized"
+        val chain = object : okhttp3.Interceptor.Chain {
+            override fun request(): Request = request
+            override fun proceed(req: Request): okhttp3.Response {
+                forwardedHeader = req.header(ApiKeyInterceptor.API_KEY_HEADER)
+                return okhttp3.Response.Builder()
+                    .request(req)
+                    .protocol(okhttp3.Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body(okhttp3.ResponseBody.create(null, ""))
+                    .build()
+            }
+            override fun connection(): okhttp3.Connection? = null
+            override fun call(): okhttp3.Call = throw UnsupportedOperationException()
+            override fun connectTimeoutMillis(): Int = 0
+            override fun withConnectTimeout(timeout: Int, unit: java.util.concurrent.TimeUnit): okhttp3.Interceptor.Chain = this
+            override fun readTimeoutMillis(): Int = 0
+            override fun withReadTimeout(timeout: Int, unit: java.util.concurrent.TimeUnit): okhttp3.Interceptor.Chain = this
+            override fun writeTimeoutMillis(): Int = 0
+            override fun withWriteTimeout(timeout: Int, unit: java.util.concurrent.TimeUnit): okhttp3.Interceptor.Chain = this
         }
 
-        assertEquals("explicit-preexisting-key", capturedApiKey.get())
+        interceptor.intercept(chain)
+        assertNull(forwardedHeader)
     }
 }

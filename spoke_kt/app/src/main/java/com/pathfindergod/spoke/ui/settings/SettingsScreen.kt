@@ -42,6 +42,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pathfindergod.spoke.R
 import com.pathfindergod.spoke.data.local.AppPreferences
+import com.pathfindergod.spoke.data.network.HubApiFactory
 import com.pathfindergod.spoke.data.network.HubEndpoint
 import com.pathfindergod.spoke.data.security.SpokeCredentialVault
 import com.pathfindergod.spoke.data.security.VaultState
@@ -236,7 +237,12 @@ fun SettingsScreen(onOpenCredits: () -> Unit) {
             GodPrimaryButton(
                 text = stringResource(R.string.settings_connect),
                 onClickLabel = stringResource(R.string.a11y_settings_connect),
+                enabled = vaultState != VaultState.CORRUPT,
                 onClick = {
+                    if (vaultState == VaultState.CORRUPT) {
+                        hubUrlError = R.string.settings_vault_corrupt_title
+                        return@GodPrimaryButton
+                    }
                     val endpoint = try {
                         HubEndpoint.normalize(url)
                     } catch (_: IllegalArgumentException) {
@@ -258,13 +264,19 @@ fun SettingsScreen(onOpenCredits: () -> Unit) {
                         hubUrlError = R.string.settings_hub_url_requires_https
                         return@GodPrimaryButton
                     }
+                    try {
+                        if (editingApiKey.isNotBlank()) {
+                            vault.setCredentials(endpoint, editingApiKey.trim())
+                        } else if (currentKey == null) {
+                            vault.setCredentials(endpoint, null)
+                        }
+                    } catch (_: Exception) {
+                        hubUrlError = R.string.settings_vault_storage_error
+                        return@GodPrimaryButton
+                    }
                     audio.buttonPress()
                     prefs.updateBaseUrl(endpoint)
-                    if (editingApiKey.isNotBlank()) {
-                        vault.setCredentials(endpoint, editingApiKey.trim())
-                    } else if (currentKey == null) {
-                        vault.setCredentials(endpoint, null)
-                    }
+                    HubApiFactory.refreshClient()
                     editingApiKey = ""
                     showKeyInput = false
                     vaultVersion++

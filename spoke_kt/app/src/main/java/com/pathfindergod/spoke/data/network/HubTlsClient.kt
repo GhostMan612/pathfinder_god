@@ -99,7 +99,7 @@ object HubTlsClient {
             .writeTimeout(WRITE_SECONDS, TimeUnit.SECONDS)
             .pingInterval(pingIntervalSeconds, TimeUnit.SECONDS)
             .retryOnConnectionFailure(retryOnConnectionFailure)
-            // An HTTPS Hub must not silently downgrade to HTTP via redirect.
+            .followRedirects(false)
             .followSslRedirects(false)
             .connectionPool(
                 ConnectionPool(MAX_IDLE_CONNECTIONS, KEEP_ALIVE_MINUTES, TimeUnit.MINUTES),

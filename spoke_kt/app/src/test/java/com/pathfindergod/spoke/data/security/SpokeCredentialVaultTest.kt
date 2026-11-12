@@ -7,6 +7,7 @@ package com.pathfindergod.spoke.data.security
 
 import java.io.File
 import java.nio.file.Files
+import java.util.concurrent.atomic.AtomicInteger
 import javax.crypto.KeyGenerator
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -83,20 +84,25 @@ class SpokeCredentialVaultTest {
     }
 
     @Test
-    fun switchingHubsRequiresExplicitNewCredentials() {
+    fun switchingHubsRequiresExplicitNewCredentialsAndDoesNotCarryOverPin() {
         vault.setCredentials(
             hubUrl = "https://alpha.hub.local:8000",
             apiKey = "alpha-secret-key",
+            pin = "sha256/AlphaPin=",
         )
         assertEquals("alpha-secret-key", vault.getApiKey("https://alpha.hub.local:8000"))
+        assertEquals("sha256/AlphaPin=", vault.getCertificatePin("https://alpha.hub.local:8000"))
 
         vault.setCredentials(
             hubUrl = "https://beta.hub.local:8000",
             apiKey = null,
+            pin = null,
         )
         assertEquals("https://beta.hub.local:8000/", vault.getHubUrl())
         assertNull(vault.getApiKey("https://beta.hub.local:8000"))
         assertNull(vault.getApiKey("https://alpha.hub.local:8000"))
+        assertNull(vault.getCertificatePin("https://beta.hub.local:8000"))
+        assertNull(vault.getCertificatePin("https://alpha.hub.local:8000"))
     }
 
     @Test
@@ -142,24 +148,38 @@ class SpokeCredentialVaultTest {
     }
 
     @Test
-    fun interruptedWritePreservesExistingVaultFile() {
+    fun atomicBackupFileRecoversStateOnInterruptedWrite() {
         vault.setCredentials(
             hubUrl = "https://hub.example.com:8000",
             apiKey = "original-intact-key",
         )
         assertEquals(VaultState.READY, vault.getState())
 
-        val tempFile = File(tempDir, "${SpokeCredentialVault.VAULT_FILE_NAME}.tmp")
-        tempFile.writeBytes(byteArrayOf(9, 9, 9, 9))
+        val vaultFile = File(tempDir, SpokeCredentialVault.VAULT_FILE_NAME)
+        val backupFile = File(tempDir, "${SpokeCredentialVault.VAULT_FILE_NAME}.bak")
+        vaultFile.copyTo(backupFile, overwrite = true)
+        vaultFile.writeBytes(byteArrayOf(0, 0, 0, 0))
 
         val reloaded = SpokeCredentialVault(tempDir, keyProvider)
         assertEquals(VaultState.READY, reloaded.getState())
         assertEquals("original-intact-key", reloaded.getApiKey("https://hub.example.com:8000"))
+    }
 
-        reloaded.setCredentials(
-            hubUrl = "https://hub.example.com:8000",
-            apiKey = "updated-key",
-        )
-        assertEquals("updated-key", reloaded.getApiKey("https://hub.example.com:8000"))
+    @Test
+    fun changeListenerFiresOnUpdates() {
+        val changeCount = AtomicInteger(0)
+        vault.setChangeListener { changeCount.incrementAndGet() }
+
+        vault.setCredentials("https://hub.example.com:8000", "key1")
+        assertEquals(1, changeCount.get())
+
+        vault.setApiKey("key2")
+        assertEquals(2, changeCount.get())
+
+        vault.setCertificatePin("sha256/NewPin=")
+        assertEquals(3, changeCount.get())
+
+        vault.clear()
+        assertEquals(4, changeCount.get())
     }
 }

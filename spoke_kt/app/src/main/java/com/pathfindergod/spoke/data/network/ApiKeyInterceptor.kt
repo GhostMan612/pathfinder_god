@@ -15,26 +15,23 @@ class ApiKeyInterceptor(
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val original = chain.request()
+        val requestUrl = original.url.toString()
+        val authorizedKey = HubTransportSecurity.getAuthorizedApiKey(requestUrl, vault)
+
+        if (authorizedKey == null) {
+            if (original.header(API_KEY_HEADER) != null) {
+                val sanitized = original.newBuilder().removeHeader(API_KEY_HEADER).build()
+                return chain.proceed(sanitized)
+            }
+            return chain.proceed(original)
+        }
+
         if (original.header(API_KEY_HEADER) != null) {
             return chain.proceed(original)
         }
 
-        val requestUrl = original.url.toString()
-        val apiKey = vault.getApiKey(requestUrl)
-        if (apiKey.isNullOrEmpty()) {
-            return chain.proceed(original)
-        }
-
-        if (!original.isHttps) {
-            val host = original.url.host
-            val isLocal = host == "localhost" || host == "127.0.0.1" || host == "10.0.2.2"
-            if (!isLocal) {
-                return chain.proceed(original)
-            }
-        }
-
         val authenticated = original.newBuilder()
-            .header(API_KEY_HEADER, apiKey)
+            .header(API_KEY_HEADER, authorizedKey)
             .build()
         return chain.proceed(authenticated)
     }

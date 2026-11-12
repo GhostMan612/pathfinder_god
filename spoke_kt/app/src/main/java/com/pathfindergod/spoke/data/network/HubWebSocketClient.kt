@@ -93,8 +93,10 @@ class HubWebSocketClient(
             val okHttp = resolveClient()
             val activeVault = vault ?: SpokeCredentialVault.instanceOrNull()
             val requestBuilder = Request.Builder().url(url)
-            activeVault?.getApiKey(url)?.trim()?.takeIf { it.isNotEmpty() }?.let { key ->
-                requestBuilder.header(ApiKeyInterceptor.API_KEY_HEADER, key)
+            activeVault?.let {
+                HubTransportSecurity.getAuthorizedApiKey(url, it)?.let { key ->
+                    requestBuilder.header(ApiKeyInterceptor.API_KEY_HEADER, key)
+                }
             }
             val request = requestBuilder.build()
             val listener = object : WebSocketListener() {
@@ -156,8 +158,10 @@ class HubWebSocketClient(
         val okHttp = resolveClient()
         val activeVault = vault ?: SpokeCredentialVault.instanceOrNull()
         val requestBuilder = Request.Builder().url(url)
-        activeVault?.getApiKey(url)?.trim()?.takeIf { it.isNotEmpty() }?.let { key ->
-            requestBuilder.header(ApiKeyInterceptor.API_KEY_HEADER, key)
+        activeVault?.let {
+            HubTransportSecurity.getAuthorizedApiKey(url, it)?.let { key ->
+                requestBuilder.header(ApiKeyInterceptor.API_KEY_HEADER, key)
+            }
         }
         val request = requestBuilder.build()
         val listener = object : WebSocketListener() {

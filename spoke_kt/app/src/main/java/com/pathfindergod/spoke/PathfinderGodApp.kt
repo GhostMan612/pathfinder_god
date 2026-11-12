@@ -13,6 +13,7 @@ class PathfinderGodApp : Application() {
     override fun onCreate() {
         super.onCreate()
         val vault = SpokeCredentialVault.get(this)
+        vault.setChangeListener { HubApiFactory.refreshClient() }
         HubApiFactory.init(vault)
     }
 

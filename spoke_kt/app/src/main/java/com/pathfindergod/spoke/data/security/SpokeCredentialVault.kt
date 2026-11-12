@@ -11,9 +11,8 @@ import android.security.keystore.KeyProperties
 import com.pathfindergod.spoke.data.network.HubEndpoint
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.nio.charset.StandardCharsets
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -39,6 +38,7 @@ interface CredentialVault {
     fun getCertificatePin(endpoint: String? = null): String?
     fun setCertificatePin(pin: String?)
     fun setCredentials(hubUrl: String, apiKey: String?, pin: String? = null)
+    fun setChangeListener(listener: (() -> Unit)?)
     fun clear()
 }
 
@@ -93,7 +93,7 @@ class SpokeCredentialVault(
 
     private val json = Json { ignoreUnknownKeys = true }
     private val vaultFile = File(storageDir, VAULT_FILE_NAME)
-    private val tempFile = File(storageDir, "$VAULT_FILE_NAME.tmp")
+    private val backupFile = File(storageDir, "$VAULT_FILE_NAME.bak")
 
     @Volatile
     private var cachedState: VaultState = VaultState.EMPTY
@@ -101,8 +101,15 @@ class SpokeCredentialVault(
     @Volatile
     private var cachedPayload: VaultPayload = VaultPayload()
 
+    @Volatile
+    private var changeListener: (() -> Unit)? = null
+
     init {
         loadInternal()
+    }
+
+    override fun setChangeListener(listener: (() -> Unit)?) {
+        changeListener = listener
     }
 
     @Synchronized
@@ -160,24 +167,27 @@ class SpokeCredentialVault(
             throw VaultCorruptedException("Cannot update corrupted vault. Call clear() to explicitly reset.")
         }
         val normalizedUrl = HubEndpoint.normalize(hubUrl)
+        val isSameHub = isEndpointMatching(normalizedUrl, cachedPayload.hubUrl)
+        val resolvedPin = pin?.trim()?.ifEmpty { null } ?: if (isSameHub) cachedPayload.certificatePin else null
         val updated = VaultPayload(
             hubUrl = normalizedUrl,
             apiKey = apiKey?.trim()?.ifEmpty { null },
-            certificatePin = pin?.trim()?.ifEmpty { null } ?: cachedPayload.certificatePin,
+            certificatePin = resolvedPin,
         )
         saveInternal(updated)
     }
 
     @Synchronized
     override fun clear() {
-        if (tempFile.exists()) {
-            tempFile.delete()
+        if (backupFile.exists()) {
+            backupFile.delete()
         }
         if (vaultFile.exists()) {
             vaultFile.delete()
         }
         cachedState = VaultState.EMPTY
         cachedPayload = VaultPayload()
+        changeListener?.invoke()
     }
 
     private fun isEndpointMatching(requested: String, bound: String?): Boolean {
@@ -201,6 +211,12 @@ class SpokeCredentialVault(
     }
 
     private fun loadInternal() {
+        if (backupFile.exists()) {
+            if (vaultFile.exists()) {
+                vaultFile.delete()
+            }
+            backupFile.renameTo(vaultFile)
+        }
         if (!vaultFile.exists()) {
             cachedState = VaultState.EMPTY
             cachedPayload = VaultPayload()
@@ -254,26 +270,34 @@ class SpokeCredentialVault(
             storageDir.mkdirs()
         }
 
+        if (vaultFile.exists()) {
+            if (!backupFile.exists()) {
+                if (!vaultFile.renameTo(backupFile)) {
+                    throw IOException("Could not rename file $vaultFile to backup $backupFile")
+                }
+            } else {
+                vaultFile.delete()
+            }
+        }
+
         try {
-            FileOutputStream(tempFile).use { fos ->
+            FileOutputStream(vaultFile).use { fos ->
                 fos.write(output)
                 fos.flush()
                 fos.fd.sync()
             }
-            Files.move(
-                tempFile.toPath(),
-                vaultFile.toPath(),
-                StandardCopyOption.ATOMIC_MOVE,
-                StandardCopyOption.REPLACE_EXISTING,
-            )
-            if (!vaultFile.exists() || vaultFile.length() != output.size.toLong()) {
-                throw IllegalStateException("Atomic vault file write verification failed")
+            if (backupFile.exists()) {
+                backupFile.delete()
             }
             cachedPayload = payload
             cachedState = VaultState.READY
+            changeListener?.invoke()
         } catch (e: Exception) {
-            if (tempFile.exists()) {
-                tempFile.delete()
+            if (vaultFile.exists()) {
+                vaultFile.delete()
+            }
+            if (backupFile.exists()) {
+                backupFile.renameTo(vaultFile)
             }
             throw e
         }

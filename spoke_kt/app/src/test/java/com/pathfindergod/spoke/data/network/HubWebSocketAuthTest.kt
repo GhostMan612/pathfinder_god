@@ -42,6 +42,7 @@ class HubWebSocketAuthTest {
         override fun getCertificatePin(endpoint: String?): String? = null
         override fun setCertificatePin(pin: String?) {}
         override fun setCredentials(hubUrl: String, apiKey: String?, pin: String?) {}
+        override fun setChangeListener(listener: (() -> Unit)?) {}
         override fun clear() {}
     }
 
@@ -98,6 +99,28 @@ class HubWebSocketAuthTest {
 
         val scope = CoroutineScope(Dispatchers.IO)
         val job = wsClient.stream("ws://localhost:8000/stream", "test query")
+            .catch { }
+            .launchIn(scope)
+
+        try {
+            assertTrue(latch.await(5, TimeUnit.SECONDS))
+            assertNull(capturedHeader.get())
+        } finally {
+            job.cancel()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun streamOmitsApiKeyHeaderOverRemoteCleartextWebSocket() {
+        val capturedHeader = AtomicReference<String?>()
+        val latch = CountDownLatch(1)
+        val client = createInterceptingClient(capturedHeader, latch)
+        val vault = MockVault(boundHubUrl = "ws://192.168.1.50:8000/", key = "secret-lan-token")
+        val wsClient = HubWebSocketClient(client = client, vault = vault)
+
+        val scope = CoroutineScope(Dispatchers.IO)
+        val job = wsClient.stream("ws://192.168.1.50:8000/stream", "test query")
             .catch { }
             .launchIn(scope)
 

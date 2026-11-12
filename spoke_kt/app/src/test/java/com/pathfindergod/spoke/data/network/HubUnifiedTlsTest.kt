@@ -43,17 +43,31 @@ class HubUnifiedTlsTest {
     private var serverPin: String = ""
 
     private class MockVault(
-        private val boundHubUrl: String,
-        private val pin: String?,
+        private var boundHubUrl: String,
+        private var pin: String?,
     ) : CredentialVault {
+        private var listener: (() -> Unit)? = null
         override fun getState(): VaultState = VaultState.READY
         override fun getHubUrl(): String = boundHubUrl
         override fun getApiKey(endpoint: String?): String? = null
         override fun setApiKey(key: String?) {}
         override fun getCertificatePin(endpoint: String?): String? = pin
-        override fun setCertificatePin(pin: String?) {}
-        override fun setCredentials(hubUrl: String, apiKey: String?, pin: String?) {}
-        override fun clear() {}
+        override fun setCertificatePin(pin: String?) {
+            this.pin = pin
+            listener?.invoke()
+        }
+        override fun setCredentials(hubUrl: String, apiKey: String?, pin: String?) {
+            this.boundHubUrl = hubUrl
+            this.pin = pin
+            listener?.invoke()
+        }
+        override fun setChangeListener(listener: (() -> Unit)?) {
+            this.listener = listener
+        }
+        override fun clear() {
+            this.pin = null
+            listener?.invoke()
+        }
     }
 
     @Before
@@ -147,10 +161,7 @@ class HubUnifiedTlsTest {
         assertTrue(connectedOrRefusedByHttpHandler.await(5, TimeUnit.SECONDS))
         val err = caughtError.get()
         assertNotNull(err)
-        assertTrue(
-            "Must pass TLS handshake and be rejected by non-websocket HTTP handler, not SSLException",
-            err !is SSLException,
-        )
+        assertTrue(err !is SSLException)
         job.cancel()
         scope.cancel()
     }
@@ -183,11 +194,31 @@ class HubUnifiedTlsTest {
         assertTrue(failedLatch.await(5, TimeUnit.SECONDS))
         val err = caughtError.get()
         assertNotNull(err)
-        assertTrue(
-            "Expected TLS failure (SSLException or CertificatePinner violation)",
-            err is SSLException || err?.cause is SSLException,
-        )
+        assertTrue(err is SSLException || err?.cause is SSLException)
         job.cancel()
         scope.cancel()
+    }
+
+    @Test
+    fun clientRefreshRotatesPinAndRebuildsTlsConfiguration() {
+        val vault = MockVault("https://localhost:$httpsPort", serverPin)
+        HubApiFactory.init(vault)
+        vault.setChangeListener { HubApiFactory.refreshClient() }
+
+        val request = Request.Builder().url("https://localhost:$httpsPort/health").build()
+        HubApiFactory.okHttpClient.newCall(request).execute().use { response ->
+            assertTrue(response.isSuccessful)
+        }
+
+        vault.setCertificatePin("sha256/ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ=")
+
+        assertThrows(SSLException::class.java) {
+            HubApiFactory.okHttpClient.newCall(request).execute().use { }
+        }
+
+        vault.setCertificatePin(serverPin)
+        HubApiFactory.okHttpClient.newCall(request).execute().use { response ->
+            assertTrue(response.isSuccessful)
+        }
     }
 }
