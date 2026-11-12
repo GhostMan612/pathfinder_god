@@ -397,23 +397,59 @@ class DiceEngineTest {
     }
 
     @Test
-    fun naturalTwentyIsAlwaysCriticalSuccessInTwoE() {
+    fun naturalTwentyShiftsDegreeUpOneStepInTwoE() {
         val engine = DiceEngine()
-        val record = d20(20).roll("d20")
+        val record = d20(20).roll("d20") // total = 20
+        // DC 35: margin = 20 - 35 = -15 (base: Critical Failure) -> shifts to Failure
+        assertEquals(
+            DegreeOfSuccess.FAILURE,
+            engine.degreeOfSuccess(record, 35),
+        )
+        // DC 30: margin = 20 - 30 = -10 (base: Critical Failure) -> shifts to Failure
+        assertEquals(
+            DegreeOfSuccess.FAILURE,
+            engine.degreeOfSuccess(record, 30),
+        )
+        // DC 25: margin = 20 - 25 = -5 (base: Failure) -> shifts to Success
+        assertEquals(
+            DegreeOfSuccess.SUCCESS,
+            engine.degreeOfSuccess(record, 25),
+        )
+        // DC 20: margin = 20 - 20 = 0 (base: Success) -> shifts to Critical Success
         assertEquals(
             DegreeOfSuccess.CRITICAL_SUCCESS,
-            engine.degreeOfSuccess(record, 30),
+            engine.degreeOfSuccess(record, 20),
+        )
+        // DC 10: margin = 20 - 10 = +10 (base: Critical Success) -> caps at Critical Success
+        assertEquals(
+            DegreeOfSuccess.CRITICAL_SUCCESS,
+            engine.degreeOfSuccess(record, 10),
         )
     }
 
     @Test
-    fun naturalOneIsAlwaysCriticalFailureInTwoE() {
+    fun naturalOneShiftsDegreeDownOneStepInTwoE() {
         val engine = DiceEngine()
-        val record = d20(1).roll("d20+10")
-        assertEquals(11, record.total)
+        val record = d20(1).roll("d20+10") // total = 11
+        // DC 1: margin = 11 - 1 = +10 (base: Critical Success) -> shifts to Success
+        assertEquals(
+            DegreeOfSuccess.SUCCESS,
+            engine.degreeOfSuccess(record, 1),
+        )
+        // DC 5: margin = 11 - 5 = +6 (base: Success) -> shifts to Failure
+        assertEquals(
+            DegreeOfSuccess.FAILURE,
+            engine.degreeOfSuccess(record, 5),
+        )
+        // DC 15: margin = 11 - 15 = -4 (base: Failure) -> shifts to Critical Failure
         assertEquals(
             DegreeOfSuccess.CRITICAL_FAILURE,
-            engine.degreeOfSuccess(record, 5),
+            engine.degreeOfSuccess(record, 15),
+        )
+        // DC 25: margin = 11 - 25 = -14 (base: Critical Failure) -> caps at Critical Failure
+        assertEquals(
+            DegreeOfSuccess.CRITICAL_FAILURE,
+            engine.degreeOfSuccess(record, 25),
         )
     }
 

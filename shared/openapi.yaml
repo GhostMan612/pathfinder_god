@@ -3884,6 +3884,11 @@ components:
           type: integer
           title: Target Temp Hp
           default: 0
+        natural_roll:
+          type: integer
+          title: Natural Roll
+          description: Unmodified d20 roll (1-20) if available for PF2e degree-of-success adjustment
+          nullable: true
       type: object
       required:
       - attack_roll

@@ -21,6 +21,7 @@ class StrikeRequest(BaseModel):
     damage_roll: int
     target_hp: int
     target_temp_hp: int = 0
+    natural_roll: int | None = None
 
 
 class StrikeResponse(BaseModel):
@@ -57,6 +58,7 @@ async def resolve_strike(request: StrikeRequest) -> StrikeResponse:
         damage_roll=request.damage_roll,
         target_hp=request.target_hp,
         target_temp_hp=request.target_temp_hp,
+        natural_roll=request.natural_roll,
     )
     return StrikeResponse(
         outcome=result.outcome,

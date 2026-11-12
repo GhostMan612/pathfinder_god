@@ -99,8 +99,9 @@ class CombatTrackerAgent:
         damage_roll: int,
         target_hp: int,
         target_temp_hp: int = 0,
+        natural_roll: int | None = None,
     ) -> StrikeResult:
-        """Resolve a single strike against a target.
+        """Resolve a single strike against a target per PF2e Remaster rules.
 
         Args:
             attack_roll: The attack roll total (d20 + modifiers).
@@ -108,6 +109,9 @@ class CombatTrackerAgent:
             damage_roll: Total damage rolled (before doubling on crit).
             target_hp: Target's current HP.
             target_temp_hp: Target's current temporary HP.
+            natural_roll: The unmodified face of the d20 roll (1-20), if known.
+                In PF2e, a natural 20 improves the degree of success by one step,
+                and a natural 1 worsens it by one step.
 
         Returns:
             StrikeResult with outcome, damage dealt, new HP values, and notes.
@@ -115,19 +119,41 @@ class CombatTrackerAgent:
         margin = attack_roll - target_ac
 
         if margin >= 10:
-            outcome = "Critical Success"
+            base_outcome = "Critical Success"
+        elif margin >= 0:
+            base_outcome = "Success"
+        elif margin >= -9:
+            base_outcome = "Failure"
+        else:
+            base_outcome = "Critical Failure"
+
+        if natural_roll == 20:
+            outcome = {
+                "Critical Failure": "Failure",
+                "Failure": "Success",
+                "Success": "Critical Success",
+                "Critical Success": "Critical Success",
+            }[base_outcome]
+        elif natural_roll == 1:
+            outcome = {
+                "Critical Success": "Success",
+                "Success": "Failure",
+                "Failure": "Critical Failure",
+                "Critical Failure": "Critical Failure",
+            }[base_outcome]
+        else:
+            outcome = base_outcome
+
+        if outcome == "Critical Success":
             damage = max(1, damage_roll * 2)
             notes = "Critical hit! Damage doubled."
-        elif margin >= 0:
-            outcome = "Success"
+        elif outcome == "Success":
             damage = max(1, damage_roll)
             notes = "Hit."
-        elif margin >= -9:
-            outcome = "Failure"
+        elif outcome == "Failure":
             damage = 0
             notes = "Miss."
         else:
-            outcome = "Critical Failure"
             damage = 0
             notes = "Critical miss."
 
@@ -172,19 +198,32 @@ class CombatTrackerAgent:
             roll = (rng or random).randint(1, 20)
         roll = int(roll)
         margin = roll - dc
+        if margin >= 10:
+            base_outcome = "Critical Success"
+        elif margin >= 0:
+            base_outcome = "Success"
+        elif margin <= -10:
+            base_outcome = "Critical Failure"
+        else:
+            base_outcome = "Failure"
+
         # Natural 20 improves the degree by one step; natural 1 worsens it.
         if roll == 20:
-            outcome = "Critical Success"
+            outcome = {
+                "Critical Failure": "Failure",
+                "Failure": "Success",
+                "Success": "Critical Success",
+                "Critical Success": "Critical Success",
+            }[base_outcome]
         elif roll == 1:
-            outcome = "Critical Failure"
-        elif margin >= 10:
-            outcome = "Critical Success"
-        elif margin >= 0:
-            outcome = "Success"
-        elif margin <= -10:
-            outcome = "Critical Failure"
+            outcome = {
+                "Critical Success": "Success",
+                "Success": "Failure",
+                "Failure": "Critical Failure",
+                "Critical Failure": "Critical Failure",
+            }[base_outcome]
         else:
-            outcome = "Failure"
+            outcome = base_outcome
 
         if outcome == "Critical Success":
             new_dying = max(0, dying - 2)
