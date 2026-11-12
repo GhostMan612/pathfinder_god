@@ -302,8 +302,11 @@ class SemanticStore:
             raise SemanticSpineError("Embedding shorter than configured dimensions")
         needle = normalize_vector(vector, dimensions)
         edition = (edition or "both").lower().strip()
-        preferred = ["1E", "2E"] if edition in ("1e", "1", "pf1") else ["2E", "1E"]
-        if edition in ("both", "all", "any"):
+        if edition in ("1e", "1", "pf1", "pf1e", "pathfinder1", "first"):
+            preferred = ["1E"]
+        elif edition in ("2e", "2", "pf2", "pf2e", "remaster", "second"):
+            preferred = ["2E"]
+        else:
             preferred = ["2E", "1E"]
 
         results: list[RankedRule] = []

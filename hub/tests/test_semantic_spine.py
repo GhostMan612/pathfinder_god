@@ -88,12 +88,18 @@ def test_search_preserves_edition_and_source(standalone_store):
     assert all(len(hit.record.public_hit()) == 5 for hit in hits)
 
 
-def test_other_edition_only_fills_remaining_slots(standalone_store):
+def test_strict_edition_search_does_not_fill_from_other_edition(standalone_store):
     embedder = FakeEmbedder()
     standalone_store.build(embedder)
-    hits = standalone_store.search("attack", "1e", embedder, limit=3)
-    assert hits[0].record.system == "1E"
-    assert len(hits) == 3
+    # Strict 1e search: only the 1 1E record is returned, never leaking 2E records
+    hits_1e = standalone_store.search("attack", "1e", embedder, limit=3)
+    assert len(hits_1e) == 1
+    assert hits_1e[0].record.system == "1E"
+
+    # Explicit "both" search: fills remaining slots across editions
+    hits_both = standalone_store.search("attack", "both", embedder, limit=3)
+    assert len(hits_both) == 3
+    assert hits_both[0].record.system == "2E"
 
 
 def test_source_change_invalidates_index(standalone_store):

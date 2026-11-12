@@ -94,17 +94,17 @@ class Retriever:
     def search(self, query: str, edition: str = "both", limit: int | None = None) -> list[RuleHit]:
         """Retrieve rule snippets for ``query``.
 
-        For an edition-specific request we try that edition first and, if it
-        yields nothing, fall back to the other edition — 2e-first when the
-        caller asks for "both", matching the original scripts' behaviour.
+        For an edition-specific request ("1e" or "2e"), search strictly that
+        edition without cross-edition fallback. For "both", search 2e first,
+        then 1e.
         """
         limit = limit or self._rag_limit
         edition = normalize_edition(edition)
 
         if edition == "2e":
-            return self._search_editions(query, ["2e", "1e"], limit)
+            return self._search_editions(query, ["2e"], limit)
         if edition == "1e":
-            return self._search_editions(query, ["1e", "2e"], limit)
+            return self._search_editions(query, ["1e"], limit)
         # "both": prefer 2e, then 1e, then anything.
         return self._search_editions(query, ["2e", "1e", "both"], limit)
 
@@ -113,8 +113,16 @@ class Retriever:
         hits = self.search(query, edition=edition, limit=limit)
         if hits:
             return "\n\n".join(h.as_context_block() for h in hits)
+        edition_norm = normalize_edition(edition)
+        edition_label = (
+            "Pathfinder 2e"
+            if edition_norm == "2e"
+            else "Pathfinder 1e"
+            if edition_norm == "1e"
+            else "Pathfinder"
+        )
         return (
-            "No local Pathfinder rule hit was found in the databases. Answer as a "
+            f"No local {edition_label} rule hit was found in the databases. Answer as a "
             "knowledgeable GM using broad Pathfinder principles and clearly state any "
             "assumptions."
         )

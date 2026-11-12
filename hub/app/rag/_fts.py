@@ -105,13 +105,14 @@ def normalize_edition(edition: str | None) -> str:
 def editions_for(edition: str | None) -> list[str]:
     """Ordered list of uppercase DB system codes to search.
 
+    Strict-by-default: '1e' searches only 1E; '2e' searches only 2E.
     'both' searches 2E then 1E so second-edition rules win ties.
     """
     norm = normalize_edition(edition)
-    if norm == "both":
-        return ["2E", "1E"]
     if norm == "1e":
-        return ["1E", "2E"]
+        return ["1E"]
+    if norm == "2e":
+        return ["2E"]
     return ["2E", "1E"]
 
 
