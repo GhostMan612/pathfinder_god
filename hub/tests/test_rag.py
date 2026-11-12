@@ -34,11 +34,30 @@ def test_edition_filter_isolates_2e(rules_db_dir: Path):
     assert all(h.system == "2E" for h in hits)
 
 
-def test_edition_fallback_2e_to_1e(rules_db_dir: Path):
-    # Fireball only exists as a 1e row here; asking 2e-first must fall back to 1e.
-    hits = _retriever(rules_db_dir).search("fireball", edition="2e")
-    assert hits
-    assert hits[0].system == "1E"
+def test_strict_edition_isolation_never_falls_back_to_other_edition(rules_db_dir: Path):
+    # Fireball only exists as a 1E row in the test DB.
+    # Under strict edition isolation, searching with edition="2e" must return no hits (no silent 1E fallback).
+    hits_2e = _retriever(rules_db_dir).search("fireball", edition="2e")
+    assert hits_2e == []
+
+    # Searching with explicit "1e" returns the 1E hit.
+    hits_1e = _retriever(rules_db_dir).search("fireball", edition="1e")
+    assert hits_1e
+    assert hits_1e[0].system == "1E"
+
+    # Goblin warrior only exists as 2E in the test DB; searching with edition="1e" returns no hits.
+    hits_goblin_1e = _retriever(rules_db_dir).search("goblin warrior", edition="1e")
+    assert hits_goblin_1e == []
+
+    # Searching with explicit "2e" returns the 2E hit.
+    hits_goblin_2e = _retriever(rules_db_dir).search("goblin warrior", edition="2e")
+    assert hits_goblin_2e
+    assert hits_goblin_2e[0].system == "2E"
+
+    # Cross-edition search ("both") returns the 1E Fireball hit.
+    hits_both = _retriever(rules_db_dir).search("fireball", edition="both")
+    assert hits_both
+    assert hits_both[0].system == "1E"
 
 
 def test_both_prefers_2e_when_present(rules_db_dir: Path):
@@ -50,7 +69,7 @@ def test_both_prefers_2e_when_present(rules_db_dir: Path):
 
 def test_build_context_has_no_hit_message(rules_db_dir: Path):
     ctx = _retriever(rules_db_dir).build_context("xyzzy nonexistent thing", edition="2e")
-    assert "No local Pathfinder rule hit" in ctx
+    assert "No local Pathfinder 2e rule hit" in ctx
 
 
 def test_missing_db_degrades_gracefully(tmp_path: Path):
