@@ -89,6 +89,8 @@ internal data class VaultPayload(
 class SpokeCredentialVault(
     private val storageDir: File,
     private val keyProvider: KeyProvider,
+    internal var fileDeleter: (File) -> Boolean = { it.delete() },
+    internal var fileRenamer: (File, File) -> Boolean = { src, dst -> src.renameTo(dst) },
 ) : CredentialVault {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -179,10 +181,10 @@ class SpokeCredentialVault(
 
     @Synchronized
     override fun clear() {
-        if (backupFile.exists() && !backupFile.delete()) {
+        if (backupFile.exists() && !fileDeleter(backupFile)) {
             throw IOException("Could not delete backup file $backupFile")
         }
-        if (vaultFile.exists() && !vaultFile.delete()) {
+        if (vaultFile.exists() && !fileDeleter(vaultFile)) {
             throw IOException("Could not delete vault file $vaultFile")
         }
         cachedState = VaultState.EMPTY
@@ -245,7 +247,7 @@ class SpokeCredentialVault(
 
         if (primaryPayload != null) {
             if (hasBackup) {
-                backupFile.delete()
+                fileDeleter(backupFile)
             }
             cachedPayload = primaryPayload
             cachedState = if (primaryPayload.apiKey == null && primaryPayload.hubUrl == null && primaryPayload.certificatePin == null) {
@@ -258,10 +260,10 @@ class SpokeCredentialVault(
 
         if (backupPayload != null) {
             if (hasVault) {
-                vaultFile.delete()
+                fileDeleter(vaultFile)
             }
             if (!vaultFile.exists()) {
-                backupFile.renameTo(vaultFile)
+                fileRenamer(backupFile, vaultFile)
             }
             cachedPayload = backupPayload
             cachedState = if (backupPayload.apiKey == null && backupPayload.hubUrl == null && backupPayload.certificatePin == null) {
@@ -297,12 +299,12 @@ class SpokeCredentialVault(
             throw IOException("Could not create storage directory: $storageDir")
         }
 
-        if (backupFile.exists() && !backupFile.delete()) {
+        if (backupFile.exists() && !fileDeleter(backupFile)) {
             throw IOException("Could not remove stale backup file $backupFile before saving")
         }
 
         if (vaultFile.exists()) {
-            if (!vaultFile.renameTo(backupFile)) {
+            if (!fileRenamer(vaultFile, backupFile)) {
                 throw IOException("Could not rename file $vaultFile to backup $backupFile")
             }
         }
@@ -313,7 +315,7 @@ class SpokeCredentialVault(
                 fos.flush()
                 fos.fd.sync()
             }
-            if (backupFile.exists() && !backupFile.delete()) {
+            if (backupFile.exists() && !fileDeleter(backupFile)) {
                 throw IOException("Could not delete backup file $backupFile after successful write")
             }
             cachedPayload = payload
@@ -321,10 +323,10 @@ class SpokeCredentialVault(
             changeListener?.invoke()
         } catch (e: Exception) {
             if (vaultFile.exists()) {
-                vaultFile.delete()
+                fileDeleter(vaultFile)
             }
             if (backupFile.exists() && !vaultFile.exists()) {
-                backupFile.renameTo(vaultFile)
+                fileRenamer(backupFile, vaultFile)
             }
             throw e
         }
