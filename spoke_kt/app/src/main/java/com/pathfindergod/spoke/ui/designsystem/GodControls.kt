@@ -27,6 +27,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
 import com.pathfindergod.spoke.ui.theme.CrimsonPrimary
 import com.pathfindergod.spoke.ui.theme.GoldAccent
@@ -99,6 +101,7 @@ fun GodTextField(
     placeholder: String? = null,
     singleLine: Boolean = true,
     numeric: Boolean = false,
+    password: Boolean = false,
     imeAction: ImeAction? = null,
     keyboardActions: KeyboardActions = KeyboardActions.Default,
     trailingIcon: (@Composable () -> Unit)? = null,
@@ -110,8 +113,13 @@ fun GodTextField(
         placeholder = placeholder?.let { { Text(text = it) } },
         trailingIcon = trailingIcon,
         singleLine = singleLine,
+        visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
         keyboardOptions = KeyboardOptions(
-            keyboardType = if (numeric) KeyboardType.Number else KeyboardType.Text,
+            keyboardType = when {
+                password -> KeyboardType.Password
+                numeric -> KeyboardType.Number
+                else -> KeyboardType.Text
+            },
             imeAction = imeAction ?: ImeAction.Default,
         ),
         keyboardActions = keyboardActions,

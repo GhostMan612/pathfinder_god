@@ -19,6 +19,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.pathfindergod.spoke.R
 import com.pathfindergod.spoke.data.local.AppPreferences
+import com.pathfindergod.spoke.data.network.HubAuthenticationException
 import com.pathfindergod.spoke.data.network.HubEndpoint
 import com.pathfindergod.spoke.data.network.HubWebSocketClient
 import com.pathfindergod.spoke.data.network.StreamEvent
@@ -43,6 +44,7 @@ enum class HubConnectionStatus {
     CONNECTING,
     CONNECTED,
     RETRYING,
+    AUTH_FAILED,
 }
 
 class HubForegroundService : Service() {
@@ -154,20 +156,20 @@ class HubForegroundService : Service() {
                         _events.emit(event)
                     }
                 } catch (e: CancellationException) {
-                    // CancellationException is an Exception. Swallowing it here
-                    // published RETRYING over the DISCONNECTED that dropLink()
-                    // had just set, so a deliberate disconnect was shown as a
-                    // retrying link forever.
                     throw e
+                } catch (e: HubAuthenticationException) {
+                    _status.value = HubConnectionStatus.AUTH_FAILED
+                    break
                 } catch (_: Exception) {
-                    // genuine transport failure -> back off below
                 }
                 if (!isActive) break
                 _status.value = HubConnectionStatus.RETRYING
                 delay(backoff)
                 backoff = (backoff * 2).coerceAtMost(MAX_BACKOFF_MS)
             }
-            _status.value = HubConnectionStatus.DISCONNECTED
+            if (_status.value != HubConnectionStatus.AUTH_FAILED) {
+                _status.value = HubConnectionStatus.DISCONNECTED
+            }
         }
     }
 

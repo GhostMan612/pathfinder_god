@@ -7,7 +7,6 @@ package com.pathfindergod.spoke.data.network
 
 import com.pathfindergod.spoke.data.security.CredentialVault
 import com.pathfindergod.spoke.data.security.SpokeCredentialVault
-import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -24,7 +23,11 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 
-/** Body the Hub's /stream handler blocks on before it emits anything. */
+class HubAuthenticationException(
+    val code: Int,
+    message: String,
+) : Exception(message)
+
 @Serializable
 data class StreamAskRequest(
     val query: String,
@@ -42,7 +45,6 @@ data class StreamTurnRequest(
     val seed: Int? = null,
 )
 
-/** One frame from the Hub: start | chunk | end | error. */
 @Serializable
 data class StreamEvent(
     val type: String,
@@ -73,39 +75,30 @@ fun interface GmStreamSource {
 }
 
 class HubWebSocketClient(
-    private val client: OkHttpClient = HubTlsClient.sharedClient,
+    private val client: OkHttpClient? = null,
     private val vault: CredentialVault? = null,
 ) : GmStreamSource {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
-    // Written by the callbackFlow producer and read from other threads.
     @Volatile
     private var socket: WebSocket? = null
 
     private val _events = MutableSharedFlow<StreamEvent>(extraBufferCapacity = 64)
     val events: SharedFlow<StreamEvent> = _events.asSharedFlow()
 
-    /**
-     * Connect and emit the parsed [StreamEvent] frames the Hub sends for [query].
-     *
-     * This previously opened a socket and said nothing. The Hub's handler
-     * `await`s `receive_json()` before it sends anything, so not one frame was
-     * ever received, the status stayed CONNECTING forever, and the reconnect
-     * loop described in AGENTS.md could not work. It also forwarded raw
-     * strings that nothing ever deserialized, so the StreamEvent envelope was
-     * never read.
-     */
+    private fun resolveClient(): OkHttpClient = client ?: HubApiFactory.okHttpClient
+
     fun stream(url: String, query: String, edition: String = "both"): Flow<StreamEvent> =
         callbackFlow {
+            val okHttp = resolveClient()
             val activeVault = vault ?: SpokeCredentialVault.instanceOrNull()
             val requestBuilder = Request.Builder().url(url)
-            activeVault?.getApiKey()?.trim()?.takeIf { it.isNotEmpty() }?.let { key ->
+            activeVault?.getApiKey(url)?.trim()?.takeIf { it.isNotEmpty() }?.let { key ->
                 requestBuilder.header(ApiKeyInterceptor.API_KEY_HEADER, key)
             }
             val request = requestBuilder.build()
             val listener = object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
-                    // The Hub blocks on receive_json(); we must speak first.
                     val hello = json.encodeToString(
                         StreamAskRequest.serializer(),
                         StreamAskRequest(query = query, edition = edition),
@@ -124,24 +117,27 @@ class HubWebSocketClient(
                 }
 
                 override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                    // Complete the close handshake, otherwise the Hub logs an
-                    // abnormal closure on every disconnect.
                     webSocket.close(1000, null)
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    close(t)
+                    val code = response?.code
+                    val isAuth = code in listOf(401, 403) ||
+                        t.message?.contains("401") == true ||
+                        t.message?.contains("403") == true
+                    if (isAuth) {
+                        close(HubAuthenticationException(code ?: 401, "Authentication failed: HTTP ${code ?: 401}"))
+                    } else {
+                        close(t)
+                    }
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                     close()
                 }
             }
-            val ws = client.newWebSocket(request, listener)
+            val ws = okHttp.newWebSocket(request, listener)
             socket = ws
-            // Only tear down OUR socket. Cancelling a collector is asynchronous,
-            // so a stale awaitClose used to fire after a reconnect had already
-            // opened a new socket and close() it.
             awaitClose {
                 if (socket === ws) {
                     ws.close(1000, "collector gone")
@@ -157,9 +153,10 @@ class HubWebSocketClient(
         actor: String,
         seed: Int?,
     ): Flow<StreamEvent> = callbackFlow {
+        val okHttp = resolveClient()
         val activeVault = vault ?: SpokeCredentialVault.instanceOrNull()
         val requestBuilder = Request.Builder().url(url)
-        activeVault?.getApiKey()?.trim()?.takeIf { it.isNotEmpty() }?.let { key ->
+        activeVault?.getApiKey(url)?.trim()?.takeIf { it.isNotEmpty() }?.let { key ->
             requestBuilder.header(ApiKeyInterceptor.API_KEY_HEADER, key)
         }
         val request = requestBuilder.build()
@@ -192,14 +189,22 @@ class HubWebSocketClient(
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                close(t)
+                val code = response?.code
+                val isAuth = code in listOf(401, 403) ||
+                    t.message?.contains("401") == true ||
+                    t.message?.contains("403") == true
+                if (isAuth) {
+                    close(HubAuthenticationException(code ?: 401, "Authentication failed: HTTP ${code ?: 401}"))
+                } else {
+                    close(t)
+                }
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 close()
             }
         }
-        val ws = client.newWebSocket(request, listener)
+        val ws = okHttp.newWebSocket(request, listener)
         socket = ws
         awaitClose {
             if (socket === ws) {
@@ -219,15 +224,12 @@ class HubWebSocketClient(
         socket = null
     }
 
-    /** Releases the dispatcher threads and the connection pool.
-
-     * START_STICKY guarantees the owning service is recreated, so without this
-     * each recreation leaked two dispatcher threads plus a keep-alive thread.
-     */
     fun shutdown() {
         close()
-        client.dispatcher.cancelAll()
-        client.dispatcher.executorService.shutdown()
-        client.connectionPool.evictAll()
+        client?.let {
+            it.dispatcher.cancelAll()
+            it.dispatcher.executorService.shutdown()
+            it.connectionPool.evictAll()
+        }
     }
 }

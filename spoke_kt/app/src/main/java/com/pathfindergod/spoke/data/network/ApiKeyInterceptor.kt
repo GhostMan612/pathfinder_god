@@ -9,30 +9,37 @@ import com.pathfindergod.spoke.data.security.CredentialVault
 import okhttp3.Interceptor
 import okhttp3.Response
 
-/**
- * Injects the X-API-Key header into outgoing requests when an API key is configured
- * in the credential vault. Does not log or expose the key value.
- */
 class ApiKeyInterceptor(
     private val vault: CredentialVault,
 ) : Interceptor {
 
-    companion object {
-        const val API_KEY_HEADER = "X-API-Key"
-    }
-
     override fun intercept(chain: Interceptor.Chain): Response {
-        val request = chain.request()
-        val apiKey = vault.getApiKey()?.trim()
-
-        val finalRequest = if (!apiKey.isNullOrEmpty() && request.header(API_KEY_HEADER) == null) {
-            request.newBuilder()
-                .header(API_KEY_HEADER, apiKey)
-                .build()
-        } else {
-            request
+        val original = chain.request()
+        if (original.header(API_KEY_HEADER) != null) {
+            return chain.proceed(original)
         }
 
-        return chain.proceed(finalRequest)
+        val requestUrl = original.url.toString()
+        val apiKey = vault.getApiKey(requestUrl)
+        if (apiKey.isNullOrEmpty()) {
+            return chain.proceed(original)
+        }
+
+        if (!original.isHttps) {
+            val host = original.url.host
+            val isLocal = host == "localhost" || host == "127.0.0.1" || host == "10.0.2.2"
+            if (!isLocal) {
+                return chain.proceed(original)
+            }
+        }
+
+        val authenticated = original.newBuilder()
+            .header(API_KEY_HEADER, apiKey)
+            .build()
+        return chain.proceed(authenticated)
+    }
+
+    companion object {
+        const val API_KEY_HEADER = "X-API-Key"
     }
 }

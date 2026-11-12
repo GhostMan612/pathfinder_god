@@ -6,6 +6,7 @@
 package com.pathfindergod.spoke.data.network
 
 import com.pathfindergod.spoke.data.security.CredentialVault
+import com.pathfindergod.spoke.data.security.VaultState
 import com.sun.net.httpserver.HttpServer
 import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicReference
@@ -24,13 +25,24 @@ class ApiKeyInterceptorTest {
     private var serverPort: Int = 0
     private val capturedApiKey = AtomicReference<String?>()
 
-    private class MockVault(private var apiKey: String? = null) : CredentialVault {
-        override fun getApiKey(): String? = apiKey
+    private class MockVault(
+        private val boundHubUrl: String? = null,
+        private var apiKey: String? = null,
+    ) : CredentialVault {
+        override fun getState(): VaultState = if (apiKey != null || boundHubUrl != null) VaultState.READY else VaultState.EMPTY
+        override fun getHubUrl(): String? = boundHubUrl
+        override fun getApiKey(endpoint: String?): String? {
+            if (endpoint != null && boundHubUrl != null && !endpoint.startsWith(boundHubUrl.trimEnd('/'))) {
+                return null
+            }
+            return apiKey
+        }
         override fun setApiKey(key: String?) { apiKey = key }
-        override fun getCertificatePin(): String? = null
+        override fun getCertificatePin(endpoint: String?): String? = null
         override fun setCertificatePin(pin: String?) {}
-        override fun getHubUrl(): String? = null
-        override fun setHubUrl(url: String?) {}
+        override fun setCredentials(hubUrl: String, apiKey: String?, pin: String?) {
+            this.apiKey = apiKey
+        }
         override fun clear() { apiKey = null }
     }
 
@@ -57,8 +69,11 @@ class ApiKeyInterceptorTest {
     }
 
     @Test
-    fun injectsApiKeyHeaderWhenVaultHasKey() {
-        val vault = MockVault(apiKey = "spoke-secret-key-42")
+    fun injectsApiKeyHeaderWhenVaultMatchesRequestUrl() {
+        val vault = MockVault(
+            boundHubUrl = "http://localhost:$serverPort/",
+            apiKey = "spoke-secret-key-42",
+        )
         val client = OkHttpClient.Builder()
             .addInterceptor(ApiKeyInterceptor(vault))
             .build()
@@ -72,6 +87,27 @@ class ApiKeyInterceptorTest {
         }
 
         assertEquals("spoke-secret-key-42", capturedApiKey.get())
+    }
+
+    @Test
+    fun omitsHeaderWhenRequestUrlDoesNotMatchBoundHubUrl() {
+        val vault = MockVault(
+            boundHubUrl = "http://otherhost:8000/",
+            apiKey = "spoke-secret-key-42",
+        )
+        val client = OkHttpClient.Builder()
+            .addInterceptor(ApiKeyInterceptor(vault))
+            .build()
+
+        val request = Request.Builder()
+            .url("http://localhost:$serverPort/test")
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            assertTrue(response.isSuccessful)
+        }
+
+        assertNull(capturedApiKey.get())
     }
 
     @Test
@@ -94,7 +130,10 @@ class ApiKeyInterceptorTest {
 
     @Test
     fun doesNotOverwriteExistingHeader() {
-        val vault = MockVault(apiKey = "vault-key")
+        val vault = MockVault(
+            boundHubUrl = "http://localhost:$serverPort/",
+            apiKey = "vault-key",
+        )
         val client = OkHttpClient.Builder()
             .addInterceptor(ApiKeyInterceptor(vault))
             .build()

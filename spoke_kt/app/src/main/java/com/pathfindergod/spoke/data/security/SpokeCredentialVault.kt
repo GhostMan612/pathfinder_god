@@ -8,9 +8,12 @@ package com.pathfindergod.spoke.data.security
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import com.pathfindergod.spoke.data.network.HubEndpoint
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -20,13 +23,22 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
+enum class VaultState {
+    EMPTY,
+    READY,
+    CORRUPT,
+}
+
+class VaultCorruptedException(message: String) : IllegalStateException(message)
+
 interface CredentialVault {
-    fun getApiKey(): String?
-    fun setApiKey(key: String?)
-    fun getCertificatePin(): String?
-    fun setCertificatePin(pin: String?)
+    fun getState(): VaultState
     fun getHubUrl(): String?
-    fun setHubUrl(url: String?)
+    fun getApiKey(endpoint: String? = null): String?
+    fun setApiKey(key: String?)
+    fun getCertificatePin(endpoint: String? = null): String?
+    fun setCertificatePin(pin: String?)
+    fun setCredentials(hubUrl: String, apiKey: String?, pin: String? = null)
     fun clear()
 }
 
@@ -69,9 +81,9 @@ class JvmSecretKeyProvider(
 
 @Serializable
 internal data class VaultPayload(
+    val hubUrl: String? = null,
     val apiKey: String? = null,
     val certificatePin: String? = null,
-    val hubUrl: String? = null,
 )
 
 class SpokeCredentialVault(
@@ -81,47 +93,125 @@ class SpokeCredentialVault(
 
     private val json = Json { ignoreUnknownKeys = true }
     private val vaultFile = File(storageDir, VAULT_FILE_NAME)
+    private val tempFile = File(storageDir, "$VAULT_FILE_NAME.tmp")
+
+    @Volatile
+    private var cachedState: VaultState = VaultState.EMPTY
+
+    @Volatile
+    private var cachedPayload: VaultPayload = VaultPayload()
+
+    init {
+        loadInternal()
+    }
 
     @Synchronized
-    override fun getApiKey(): String? = loadPayload().apiKey
+    override fun getState(): VaultState = cachedState
+
+    @Synchronized
+    override fun getHubUrl(): String? {
+        if (cachedState != VaultState.READY) return null
+        return cachedPayload.hubUrl
+    }
+
+    @Synchronized
+    override fun getApiKey(endpoint: String?): String? {
+        if (cachedState != VaultState.READY) return null
+        val payload = cachedPayload
+        if (endpoint != null && !isEndpointMatching(endpoint, payload.hubUrl)) {
+            return null
+        }
+        return payload.apiKey
+    }
 
     @Synchronized
     override fun setApiKey(key: String?) {
-        val current = loadPayload()
-        savePayload(current.copy(apiKey = key?.trim()?.ifEmpty { null }))
+        if (cachedState == VaultState.CORRUPT) {
+            throw VaultCorruptedException("Cannot update corrupted vault. Call clear() to explicitly reset.")
+        }
+        val current = cachedPayload
+        val updated = current.copy(apiKey = key?.trim()?.ifEmpty { null })
+        saveInternal(updated)
     }
 
     @Synchronized
-    override fun getCertificatePin(): String? = loadPayload().certificatePin
+    override fun getCertificatePin(endpoint: String?): String? {
+        if (cachedState != VaultState.READY) return null
+        val payload = cachedPayload
+        if (endpoint != null && !isEndpointMatching(endpoint, payload.hubUrl)) {
+            return null
+        }
+        return payload.certificatePin
+    }
 
     @Synchronized
     override fun setCertificatePin(pin: String?) {
-        val current = loadPayload()
-        savePayload(current.copy(certificatePin = pin?.trim()?.ifEmpty { null }))
+        if (cachedState == VaultState.CORRUPT) {
+            throw VaultCorruptedException("Cannot update corrupted vault. Call clear() to explicitly reset.")
+        }
+        val current = cachedPayload
+        val updated = current.copy(certificatePin = pin?.trim()?.ifEmpty { null })
+        saveInternal(updated)
     }
 
     @Synchronized
-    override fun getHubUrl(): String? = loadPayload().hubUrl
-
-    @Synchronized
-    override fun setHubUrl(url: String?) {
-        val current = loadPayload()
-        savePayload(current.copy(hubUrl = url?.trim()?.ifEmpty { null }))
+    override fun setCredentials(hubUrl: String, apiKey: String?, pin: String?) {
+        if (cachedState == VaultState.CORRUPT) {
+            throw VaultCorruptedException("Cannot update corrupted vault. Call clear() to explicitly reset.")
+        }
+        val normalizedUrl = HubEndpoint.normalize(hubUrl)
+        val updated = VaultPayload(
+            hubUrl = normalizedUrl,
+            apiKey = apiKey?.trim()?.ifEmpty { null },
+            certificatePin = pin?.trim()?.ifEmpty { null } ?: cachedPayload.certificatePin,
+        )
+        saveInternal(updated)
     }
 
     @Synchronized
     override fun clear() {
+        if (tempFile.exists()) {
+            tempFile.delete()
+        }
         if (vaultFile.exists()) {
             vaultFile.delete()
         }
+        cachedState = VaultState.EMPTY
+        cachedPayload = VaultPayload()
     }
 
-    private fun loadPayload(): VaultPayload {
-        if (!vaultFile.exists()) return VaultPayload()
-        return try {
+    private fun isEndpointMatching(requested: String, bound: String?): Boolean {
+        if (bound.isNullOrBlank()) return false
+        val reqUri = try { java.net.URI(requested) } catch (_: Exception) { return false }
+        val bndUri = try { java.net.URI(bound) } catch (_: Exception) { return false }
+        val reqScheme = reqUri.scheme?.lowercase() ?: return false
+        val bndScheme = bndUri.scheme?.lowercase() ?: return false
+        val schemesMatch = reqScheme == bndScheme ||
+            (reqScheme == "ws" && bndScheme == "http") ||
+            (reqScheme == "http" && bndScheme == "ws") ||
+            (reqScheme == "wss" && bndScheme == "https") ||
+            (reqScheme == "https" && bndScheme == "wss")
+        if (!schemesMatch) return false
+        val reqHost = reqUri.host ?: return false
+        val bndHost = bndUri.host ?: return false
+        if (!reqHost.equals(bndHost, ignoreCase = true)) return false
+        val reqPort = if (reqUri.port != -1) reqUri.port else (if (reqScheme == "https" || reqScheme == "wss") 443 else 80)
+        val bndPort = if (bndUri.port != -1) bndUri.port else (if (bndScheme == "https" || bndScheme == "wss") 443 else 80)
+        return reqPort == bndPort
+    }
+
+    private fun loadInternal() {
+        if (!vaultFile.exists()) {
+            cachedState = VaultState.EMPTY
+            cachedPayload = VaultPayload()
+            return
+        }
+        try {
             val bytes = vaultFile.readBytes()
             if (bytes.size < IV_SIZE_BYTES + TAG_SIZE_BYTES) {
-                return VaultPayload()
+                cachedState = VaultState.CORRUPT
+                cachedPayload = VaultPayload()
+                return
             }
             val iv = bytes.copyOfRange(0, IV_SIZE_BYTES)
             val ciphertext = bytes.copyOfRange(IV_SIZE_BYTES, bytes.size)
@@ -130,13 +220,20 @@ class SpokeCredentialVault(
             cipher.init(Cipher.DECRYPT_MODE, keyProvider.getSecretKey(), spec)
             val plaintextBytes = cipher.doFinal(ciphertext)
             val plaintext = String(plaintextBytes, StandardCharsets.UTF_8)
-            json.decodeFromString<VaultPayload>(plaintext)
+            val payload = json.decodeFromString<VaultPayload>(plaintext)
+            cachedPayload = payload
+            cachedState = if (payload.apiKey == null && payload.hubUrl == null && payload.certificatePin == null) {
+                VaultState.EMPTY
+            } else {
+                VaultState.READY
+            }
         } catch (_: Exception) {
-            VaultPayload()
+            cachedState = VaultState.CORRUPT
+            cachedPayload = VaultPayload()
         }
     }
 
-    private fun savePayload(payload: VaultPayload) {
+    private fun saveInternal(payload: VaultPayload) {
         if (payload.apiKey == null && payload.certificatePin == null && payload.hubUrl == null) {
             clear()
             return
@@ -156,15 +253,30 @@ class SpokeCredentialVault(
         if (!storageDir.exists()) {
             storageDir.mkdirs()
         }
-        val tempFile = File(storageDir, "$VAULT_FILE_NAME.tmp")
-        FileOutputStream(tempFile).use { fos ->
-            fos.write(output)
-            fos.flush()
+
+        try {
+            FileOutputStream(tempFile).use { fos ->
+                fos.write(output)
+                fos.flush()
+                fos.fd.sync()
+            }
+            Files.move(
+                tempFile.toPath(),
+                vaultFile.toPath(),
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+            if (!vaultFile.exists() || vaultFile.length() != output.size.toLong()) {
+                throw IllegalStateException("Atomic vault file write verification failed")
+            }
+            cachedPayload = payload
+            cachedState = VaultState.READY
+        } catch (e: Exception) {
+            if (tempFile.exists()) {
+                tempFile.delete()
+            }
+            throw e
         }
-        if (vaultFile.exists()) {
-            vaultFile.delete()
-        }
-        tempFile.renameTo(vaultFile)
     }
 
     companion object {

@@ -11,7 +11,9 @@ import javax.crypto.KeyGenerator
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -35,92 +37,129 @@ class SpokeCredentialVaultTest {
     @After
     fun tearDown() {
         tempDir.deleteRecursively()
-        SpokeCredentialVault.init(
-            SpokeCredentialVault(tempDir, keyProvider)
-        )
     }
 
     @Test
     fun roundTripStoresAndRetrievesEncryptedCredentials() {
+        assertEquals(VaultState.EMPTY, vault.getState())
         assertNull(vault.getApiKey())
         assertNull(vault.getCertificatePin())
         assertNull(vault.getHubUrl())
 
-        vault.setApiKey("test-api-key-12345")
-        vault.setCertificatePin("sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-        vault.setHubUrl("https://hub.example.com:8000")
+        vault.setCredentials(
+            hubUrl = "https://hub.example.com:8000",
+            apiKey = "test-api-key-12345",
+            pin = "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        )
 
-        assertEquals("test-api-key-12345", vault.getApiKey())
-        assertEquals("sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", vault.getCertificatePin())
-        assertEquals("https://hub.example.com:8000", vault.getHubUrl())
+        assertEquals(VaultState.READY, vault.getState())
+        assertEquals("test-api-key-12345", vault.getApiKey("https://hub.example.com:8000"))
+        assertEquals("sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", vault.getCertificatePin("https://hub.example.com:8000"))
+        assertEquals("https://hub.example.com:8000/", vault.getHubUrl())
 
-        // Ensure file exists and does NOT contain raw plaintext secrets
         val vaultFile = File(tempDir, SpokeCredentialVault.VAULT_FILE_NAME)
         assertTrue(vaultFile.exists())
         val rawBytes = vaultFile.readBytes()
         val rawString = String(rawBytes)
-        assertFalse("Ciphertext must not expose API key in plaintext", rawString.contains("test-api-key-12345"))
-        assertFalse("Ciphertext must not expose Hub URL in plaintext", rawString.contains("hub.example.com"))
+        assertFalse(rawString.contains("test-api-key-12345"))
+        assertFalse(rawString.contains("hub.example.com"))
     }
 
     @Test
-    fun whitespaceIsTrimmedAndBlanksTreatedAsNull() {
-        vault.setApiKey("   ")
-        assertNull(vault.getApiKey())
+    fun credentialsAreBoundToApprovedEndpoint() {
+        vault.setCredentials(
+            hubUrl = "https://alpha.hub.local:8000",
+            apiKey = "alpha-secret-key",
+            pin = "sha256/AlphaPin=",
+        )
 
-        vault.setApiKey("  secret-key  ")
-        assertEquals("secret-key", vault.getApiKey())
+        assertEquals("alpha-secret-key", vault.getApiKey("https://alpha.hub.local:8000"))
+        assertEquals("alpha-secret-key", vault.getApiKey("https://alpha.hub.local:8000/"))
+        assertEquals("sha256/AlphaPin=", vault.getCertificatePin("https://alpha.hub.local:8000"))
 
-        vault.setApiKey(null)
-        assertNull(vault.getApiKey())
+        assertNull(vault.getApiKey("https://beta.hub.local:8000"))
+        assertNull(vault.getApiKey("http://alpha.hub.local:8000"))
+        assertNull(vault.getCertificatePin("https://beta.hub.local:8000"))
     }
 
     @Test
-    fun clearWipesEncryptedStorageFile() {
-        vault.setApiKey("my-secret-key")
+    fun switchingHubsRequiresExplicitNewCredentials() {
+        vault.setCredentials(
+            hubUrl = "https://alpha.hub.local:8000",
+            apiKey = "alpha-secret-key",
+        )
+        assertEquals("alpha-secret-key", vault.getApiKey("https://alpha.hub.local:8000"))
+
+        vault.setCredentials(
+            hubUrl = "https://beta.hub.local:8000",
+            apiKey = null,
+        )
+        assertEquals("https://beta.hub.local:8000/", vault.getHubUrl())
+        assertNull(vault.getApiKey("https://beta.hub.local:8000"))
+        assertNull(vault.getApiKey("https://alpha.hub.local:8000"))
+    }
+
+    @Test
+    fun corruptedCiphertextSetsCorruptStateAndRefusesOverwrites() {
+        vault.setCredentials(
+            hubUrl = "https://hub.example.com:8000",
+            apiKey = "valuable-key",
+        )
+        assertEquals(VaultState.READY, vault.getState())
+
         val vaultFile = File(tempDir, SpokeCredentialVault.VAULT_FILE_NAME)
         assertTrue(vaultFile.exists())
-
-        vault.clear()
-        assertFalse(vaultFile.exists())
-        assertNull(vault.getApiKey())
-    }
-
-    @Test
-    fun corruptedCiphertextFailsClosedWithoutCrashing() {
-        vault.setApiKey("super-secret-key")
-        val vaultFile = File(tempDir, SpokeCredentialVault.VAULT_FILE_NAME)
-        assertTrue(vaultFile.exists())
-
         val bytes = vaultFile.readBytes()
-        // Corrupt a byte in the encrypted ciphertext / tag
         bytes[bytes.size - 1] = (bytes[bytes.size - 1].toInt() xor 0xFF).toByte()
         vaultFile.writeBytes(bytes)
 
-        // Must fail closed: return null instead of throwing an unhandled exception
-        assertNull(vault.getApiKey())
+        val reloadedVault = SpokeCredentialVault(tempDir, keyProvider)
+        assertEquals(VaultState.CORRUPT, reloadedVault.getState())
+        assertNull(reloadedVault.getApiKey("https://hub.example.com:8000"))
+
+        assertThrows(VaultCorruptedException::class.java) {
+            reloadedVault.setApiKey("replacement-attempt")
+        }
+        assertThrows(VaultCorruptedException::class.java) {
+            reloadedVault.setCredentials("https://hub.example.com:8000", "new-key")
+        }
+
+        reloadedVault.clear()
+        assertEquals(VaultState.EMPTY, reloadedVault.getState())
+        reloadedVault.setCredentials("https://hub.example.com:8000", "recovered-key")
+        assertEquals(VaultState.READY, reloadedVault.getState())
+        assertEquals("recovered-key", reloadedVault.getApiKey("https://hub.example.com:8000"))
     }
 
     @Test
-    fun truncatedFileFailsClosed() {
+    fun truncatedFileSetsCorruptState() {
         val vaultFile = File(tempDir, SpokeCredentialVault.VAULT_FILE_NAME)
-        vaultFile.writeBytes(byteArrayOf(1, 2, 3, 4)) // Truncated (< IV + TAG size)
+        vaultFile.writeBytes(byteArrayOf(1, 2, 3, 4))
 
-        assertNull(vault.getApiKey())
-        assertNull(vault.getCertificatePin())
+        val corruptVault = SpokeCredentialVault(tempDir, keyProvider)
+        assertEquals(VaultState.CORRUPT, corruptVault.getState())
+        assertNull(corruptVault.getApiKey())
     }
 
     @Test
-    fun differentKeyFailsClosedWithoutPlaintextExposure() {
-        vault.setApiKey("vault-secret-value")
+    fun interruptedWritePreservesExistingVaultFile() {
+        vault.setCredentials(
+            hubUrl = "https://hub.example.com:8000",
+            apiKey = "original-intact-key",
+        )
+        assertEquals(VaultState.READY, vault.getState())
 
-        // Create a second vault using a different AES-256 key over the same storage file
-        val keyGen2 = KeyGenerator.getInstance("AES")
-        keyGen2.init(256)
-        val otherKeyProvider = JvmSecretKeyProvider(keyGen2.generateKey())
-        val otherVault = SpokeCredentialVault(tempDir, otherKeyProvider)
+        val tempFile = File(tempDir, "${SpokeCredentialVault.VAULT_FILE_NAME}.tmp")
+        tempFile.writeBytes(byteArrayOf(9, 9, 9, 9))
 
-        // Decryption must fail closed
-        assertNull(otherVault.getApiKey())
+        val reloaded = SpokeCredentialVault(tempDir, keyProvider)
+        assertEquals(VaultState.READY, reloaded.getState())
+        assertEquals("original-intact-key", reloaded.getApiKey("https://hub.example.com:8000"))
+
+        reloaded.setCredentials(
+            hubUrl = "https://hub.example.com:8000",
+            apiKey = "updated-key",
+        )
+        assertEquals("updated-key", reloaded.getApiKey("https://hub.example.com:8000"))
     }
 }

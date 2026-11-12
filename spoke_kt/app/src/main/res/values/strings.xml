@@ -313,6 +313,13 @@
     <string name="settings_hub_api_key">Hub API Key (optional)</string>
     <string name="settings_hub_api_key_placeholder">Paste X-API-Key</string>
     <string name="settings_hub_api_key_hint">Stored securely in Android Keystore. Excluded from backups.</string>
+    <string name="settings_hub_key_active">API Key Active</string>
+    <string name="settings_hub_replace_key">Replace Key</string>
+    <string name="settings_hub_clear_key">Clear Key</string>
+    <string name="settings_hub_auth_failed">Authentication Failed: The Hub rejected your credentials (401/403).</string>
+    <string name="settings_vault_corrupt_title">Vault Corrupt or Locked</string>
+    <string name="settings_vault_corrupt_message">Stored credentials cannot be decrypted with the active key. Reset vault to reconfigure.</string>
+    <string name="settings_vault_reset">RESET VAULT</string>
     <string name="settings_hub_url_invalid">Enter a valid Hub address (http:// or https://, host and optional port).</string>
     <string name="settings_hub_url_emulator_only">10.0.2.2 only works on Android emulators. On your phone, enter your laptop\'s LAN address or an HTTPS Hub URL.</string>
     <string name="settings_hub_url_requires_https">This build requires HTTPS for remote Hub connections. Use a trusted TLS endpoint.</string>

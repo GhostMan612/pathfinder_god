@@ -27,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -43,6 +44,7 @@ import com.pathfindergod.spoke.R
 import com.pathfindergod.spoke.data.local.AppPreferences
 import com.pathfindergod.spoke.data.network.HubEndpoint
 import com.pathfindergod.spoke.data.security.SpokeCredentialVault
+import com.pathfindergod.spoke.data.security.VaultState
 import com.pathfindergod.spoke.service.AudioService
 import com.pathfindergod.spoke.service.HubConnectionStatus
 import com.pathfindergod.spoke.service.HubForegroundService
@@ -54,7 +56,6 @@ import com.pathfindergod.spoke.ui.designsystem.GodPrimaryButton
 import com.pathfindergod.spoke.ui.designsystem.GodSectionHeader
 import com.pathfindergod.spoke.ui.designsystem.GodTags
 import com.pathfindergod.spoke.ui.designsystem.GodTextField
-import com.pathfindergod.spoke.ui.designsystem.GodTone
 import com.pathfindergod.spoke.ui.designsystem.Spacing
 import com.pathfindergod.spoke.ui.theme.CritRed
 import com.pathfindergod.spoke.ui.theme.GoldAccent
@@ -69,7 +70,9 @@ fun SettingsScreen(onOpenCredits: () -> Unit) {
     val audio = remember { AudioService.get(context) }
     val vault = remember { SpokeCredentialVault.get(context) }
     var url by rememberSaveable { mutableStateOf(prefs.baseUrl()) }
-    var apiKey by rememberSaveable { mutableStateOf(vault.getApiKey().orEmpty()) }
+    var editingApiKey by remember { mutableStateOf("") }
+    var showKeyInput by remember { mutableStateOf(false) }
+    var vaultVersion by remember { mutableIntStateOf(0) }
     var hubUrlError by rememberSaveable { mutableStateOf<Int?>(null) }
     var music by rememberSaveable { mutableStateOf(prefs.musicEnabled()) }
     var sfx by rememberSaveable { mutableStateOf(prefs.sfxEnabled()) }
@@ -77,6 +80,9 @@ fun SettingsScreen(onOpenCredits: () -> Unit) {
     var track by rememberSaveable { mutableStateOf(prefs.bgmTrack()) }
     var pit by rememberSaveable { mutableStateOf(prefs.pitEnabled()) }
     val status by HubForegroundService.status.collectAsStateWithLifecycle()
+
+    val vaultState = remember(vaultVersion) { vault.getState() }
+    val currentKey = remember(vaultVersion, url) { vault.getApiKey(url) }
 
     Column(
         modifier = Modifier
@@ -90,6 +96,38 @@ fun SettingsScreen(onOpenCredits: () -> Unit) {
             prominent = true,
         )
         GodSectionHeader(text = stringResource(R.string.settings_section_tether))
+
+        if (vaultState == VaultState.CORRUPT) {
+            GodCard(
+                title = {
+                    Text(
+                        text = stringResource(R.string.settings_vault_corrupt_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = CritRed,
+                    )
+                },
+                borderColor = CritRed,
+            ) {
+                Text(
+                    text = stringResource(R.string.settings_vault_corrupt_message),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
+                    modifier = Modifier.padding(top = Spacing.xs),
+                )
+                GodPrimaryButton(
+                    text = stringResource(R.string.settings_vault_reset),
+                    onClick = {
+                        vault.clear()
+                        editingApiKey = ""
+                        showKeyInput = false
+                        vaultVersion++
+                    },
+                    testTag = GodTags.SETTINGS_VAULT_RESET,
+                    modifier = Modifier.padding(top = Spacing.sm),
+                )
+            }
+        }
+
         GodCard(
             title = {
                 Text(
@@ -120,21 +158,73 @@ fun SettingsScreen(onOpenCredits: () -> Unit) {
                 color = GoldAccent,
                 modifier = Modifier.padding(top = Spacing.md),
             )
-            GodTextField(
-                value = apiKey,
-                onValueChange = { apiKey = it },
-                placeholder = stringResource(R.string.settings_hub_api_key_placeholder),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = Spacing.xs)
-                    .testTag(GodTags.SETTINGS_API_KEY),
-            )
-            Text(
-                text = stringResource(R.string.settings_hub_api_key_hint),
-                style = MaterialTheme.typography.bodySmall,
-                color = TextSecondary,
-                modifier = Modifier.padding(top = Spacing.xs),
-            )
+
+            if (currentKey != null && !showKeyInput) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = Spacing.xs),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    GodChip(
+                        label = stringResource(R.string.settings_hub_key_active),
+                        onClick = {},
+                        selected = true,
+                        borderColor = StatusGreen,
+                    )
+                    Text(
+                        text = "••••••••••••",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary,
+                    )
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = Spacing.sm),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                ) {
+                    GodPrimaryButton(
+                        text = stringResource(R.string.settings_hub_replace_key),
+                        onClick = {
+                            showKeyInput = true
+                            editingApiKey = ""
+                        },
+                        testTag = GodTags.SETTINGS_REPLACE_KEY,
+                        modifier = Modifier.weight(1f),
+                    )
+                    GodPrimaryButton(
+                        text = stringResource(R.string.settings_hub_clear_key),
+                        onClick = {
+                            vault.setApiKey(null)
+                            showKeyInput = false
+                            editingApiKey = ""
+                            vaultVersion++
+                        },
+                        testTag = GodTags.SETTINGS_CLEAR_KEY,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            } else {
+                GodTextField(
+                    value = editingApiKey,
+                    onValueChange = { editingApiKey = it },
+                    placeholder = stringResource(R.string.settings_hub_api_key_placeholder),
+                    password = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = Spacing.xs)
+                        .testTag(GodTags.SETTINGS_API_KEY),
+                )
+                Text(
+                    text = stringResource(R.string.settings_hub_api_key_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
+                    modifier = Modifier.padding(top = Spacing.xs),
+                )
+            }
+
             hubUrlError?.let { res ->
                 Text(
                     text = stringResource(res),
@@ -153,8 +243,6 @@ fun SettingsScreen(onOpenCredits: () -> Unit) {
                         hubUrlError = R.string.settings_hub_url_invalid
                         return@GodPrimaryButton
                     }
-                    // 10.0.2.2 is the Android-emulator host bridge, not a
-                    // routable laptop address from a physical phone.
                     val hardware = Build.HARDWARE.lowercase()
                     val model = Build.MODEL.lowercase()
                     val emulator = hardware.contains("ranchu") ||
@@ -172,7 +260,14 @@ fun SettingsScreen(onOpenCredits: () -> Unit) {
                     }
                     audio.buttonPress()
                     prefs.updateBaseUrl(endpoint)
-                    vault.setApiKey(apiKey.trim().ifEmpty { null })
+                    if (editingApiKey.isNotBlank()) {
+                        vault.setCredentials(endpoint, editingApiKey.trim())
+                    } else if (currentKey == null) {
+                        vault.setCredentials(endpoint, null)
+                    }
+                    editingApiKey = ""
+                    showKeyInput = false
+                    vaultVersion++
                     url = prefs.baseUrl()
                     hubUrlError = null
                     restartLink(context, prefs.streamUrl())
@@ -184,22 +279,32 @@ fun SettingsScreen(onOpenCredits: () -> Unit) {
         GodCard(
             testTag = GodTags.SETTINGS_HUB_STATUS,
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(Dimens.statusDot)
-                        .background(statusColor(status), CircleShape),
-                )
-                Column(modifier = Modifier.padding(start = Spacing.md)) {
-                    Text(
-                        text = status.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = TextPrimary,
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(Dimens.statusDot)
+                            .background(statusColor(status), CircleShape),
                     )
+                    Column(modifier = Modifier.padding(start = Spacing.md)) {
+                        Text(
+                            text = status.name,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextPrimary,
+                        )
+                        Text(
+                            text = prefs.baseUrl(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextSecondary,
+                        )
+                    }
+                }
+                if (status == HubConnectionStatus.AUTH_FAILED) {
                     Text(
-                        text = prefs.baseUrl(),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextSecondary,
+                        text = stringResource(R.string.settings_hub_auth_failed),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = CritRed,
+                        modifier = Modifier.padding(top = Spacing.sm),
                     )
                 }
             }
@@ -248,21 +353,30 @@ fun SettingsScreen(onOpenCredits: () -> Unit) {
                 )
             },
         ) {
-            AudioService.BGM_TRACKS.forEach { option ->
-                GodChip(
-                    label = trackLabel(option),
-                    selected = option == track,
-                    onClick = {
-                        track = option
-                        prefs.setBgmTrack(option)
-                        audio.playBgm(option)
-                    },
-                    onClickLabel = stringResource(R.string.a11y_settings_track, trackLabel(option)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = Spacing.md),
-                    testTag = GodTags.settingsTrack(option),
-                )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = Spacing.sm),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+            ) {
+                listOf(AudioService.BGM_INN, AudioService.BGM_TAVERN).forEach { item ->
+                    GodChip(
+                        label = trackLabel(item),
+                        selected = track == item,
+                        onClick = {
+                            track = item
+                            prefs.setBgmTrack(item)
+                            audio.syncMusic()
+                            audio.buttonPress()
+                        },
+                        onClickLabel = stringResource(
+                            R.string.a11y_settings_track,
+                            trackLabel(item),
+                        ),
+                        testTag = GodTags.settingsTrack(item),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
         }
 
@@ -336,7 +450,9 @@ private fun statusColor(status: HubConnectionStatus) = when (status) {
     HubConnectionStatus.CONNECTING,
     HubConnectionStatus.RETRYING,
     -> GoldAccent
-    HubConnectionStatus.DISCONNECTED -> CritRed
+    HubConnectionStatus.DISCONNECTED,
+    HubConnectionStatus.AUTH_FAILED,
+    -> CritRed
 }
 
 private fun restartLink(context: Context, streamUrl: String) {
