@@ -6,6 +6,8 @@
 package com.pathfindergod.spoke.data.security
 
 import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
 import java.nio.file.Files
 import java.util.concurrent.atomic.AtomicInteger
 import javax.crypto.KeyGenerator
@@ -181,5 +183,111 @@ class SpokeCredentialVaultTest {
 
         vault.clear()
         assertEquals(4, changeCount.get())
+    }
+
+    @Test
+    fun validPrimaryWithStaleBackupRetainsPrimaryWhenRestorationFails() {
+        vault.setCredentials(
+            hubUrl = "https://hub.example.com:8000",
+            apiKey = "valid-primary-key",
+        )
+        assertEquals(VaultState.READY, vault.getState())
+
+        val backupFile = File(tempDir, "${SpokeCredentialVault.VAULT_FILE_NAME}.bak")
+        backupFile.writeBytes(byteArrayOf(1, 2, 3, 4, 5))
+
+        val vaultFile = File(tempDir, SpokeCredentialVault.VAULT_FILE_NAME)
+        FileOutputStream(vaultFile, true).use { _ ->
+            val reloaded = SpokeCredentialVault(tempDir, keyProvider)
+            assertEquals(VaultState.READY, reloaded.getState())
+            assertEquals("valid-primary-key", reloaded.getApiKey("https://hub.example.com:8000"))
+        }
+    }
+
+    @Test
+    fun failedBackupRestorationDistinguishesCorruptFromEmpty() {
+        val backupFile = File(tempDir, "${SpokeCredentialVault.VAULT_FILE_NAME}.bak")
+        backupFile.writeBytes(byteArrayOf(1, 2, 3, 4))
+
+        val vaultFile = File(tempDir, SpokeCredentialVault.VAULT_FILE_NAME)
+        assertFalse(vaultFile.exists())
+
+        FileOutputStream(backupFile, true).use { _ ->
+            val reloaded = SpokeCredentialVault(tempDir, keyProvider)
+            assertEquals(VaultState.CORRUPT, reloaded.getState())
+            assertNull(reloaded.getApiKey())
+        }
+    }
+
+    @Test
+    fun failedDeletionOnClearThrowsIOExceptionAndPreservesState() {
+        vault.setCredentials(
+            hubUrl = "https://hub.example.com:8000",
+            apiKey = "indestructible-key",
+        )
+        assertEquals(VaultState.READY, vault.getState())
+
+        val vaultFile = File(tempDir, SpokeCredentialVault.VAULT_FILE_NAME)
+        FileOutputStream(vaultFile, true).use { _ ->
+            assertThrows(IOException::class.java) {
+                vault.clear()
+            }
+            assertEquals(VaultState.READY, vault.getState())
+            assertEquals("indestructible-key", vault.getApiKey("https://hub.example.com:8000"))
+        }
+
+        val reloaded = SpokeCredentialVault(tempDir, keyProvider)
+        assertEquals(VaultState.READY, reloaded.getState())
+        assertEquals("indestructible-key", reloaded.getApiKey("https://hub.example.com:8000"))
+    }
+
+    @Test
+    fun staleBackupIsCleanedUpOnSuccessfulSave() {
+        vault.setCredentials(
+            hubUrl = "https://hub.example.com:8000",
+            apiKey = "key-v1",
+        )
+        assertEquals(VaultState.READY, vault.getState())
+
+        val backupFile = File(tempDir, "${SpokeCredentialVault.VAULT_FILE_NAME}.bak")
+        backupFile.writeBytes(byteArrayOf(9, 9, 9, 9))
+        assertTrue(backupFile.exists())
+
+        vault.setCredentials(
+            hubUrl = "https://hub.example.com:8000",
+            apiKey = "key-v2",
+        )
+        assertEquals(VaultState.READY, vault.getState())
+        assertEquals("key-v2", vault.getApiKey("https://hub.example.com:8000"))
+        assertFalse(backupFile.exists())
+
+        val reloaded = SpokeCredentialVault(tempDir, keyProvider)
+        assertEquals(VaultState.READY, reloaded.getState())
+        assertEquals("key-v2", reloaded.getApiKey("https://hub.example.com:8000"))
+    }
+
+    @Test
+    fun saveFailsIfStaleBackupCannotBeRemoved() {
+        vault.setCredentials(
+            hubUrl = "https://hub.example.com:8000",
+            apiKey = "original-key",
+        )
+        val backupFile = File(tempDir, "${SpokeCredentialVault.VAULT_FILE_NAME}.bak")
+        backupFile.writeBytes(byteArrayOf(1, 2, 3))
+
+        FileOutputStream(backupFile, true).use { _ ->
+            assertThrows(IOException::class.java) {
+                vault.setCredentials(
+                    hubUrl = "https://hub.example.com:8000",
+                    apiKey = "new-key",
+                )
+            }
+            assertEquals(VaultState.READY, vault.getState())
+            assertEquals("original-key", vault.getApiKey("https://hub.example.com:8000"))
+        }
+
+        val reloaded = SpokeCredentialVault(tempDir, keyProvider)
+        assertEquals(VaultState.READY, reloaded.getState())
+        assertEquals("original-key", reloaded.getApiKey("https://hub.example.com:8000"))
     }
 }

@@ -118,10 +118,14 @@ fun SettingsScreen(onOpenCredits: () -> Unit) {
                 GodPrimaryButton(
                     text = stringResource(R.string.settings_vault_reset),
                     onClick = {
-                        vault.clear()
-                        editingApiKey = ""
-                        showKeyInput = false
-                        vaultVersion++
+                        try {
+                            vault.clear()
+                            editingApiKey = ""
+                            showKeyInput = false
+                            vaultVersion++
+                        } catch (_: Exception) {
+                            hubUrlError = R.string.settings_vault_storage_error
+                        }
                     },
                     testTag = GodTags.SETTINGS_VAULT_RESET,
                     modifier = Modifier.padding(top = Spacing.sm),
@@ -198,10 +202,14 @@ fun SettingsScreen(onOpenCredits: () -> Unit) {
                     GodPrimaryButton(
                         text = stringResource(R.string.settings_hub_clear_key),
                         onClick = {
-                            vault.setApiKey(null)
-                            showKeyInput = false
-                            editingApiKey = ""
-                            vaultVersion++
+                            try {
+                                vault.setApiKey(null)
+                                showKeyInput = false
+                                editingApiKey = ""
+                                vaultVersion++
+                            } catch (_: Exception) {
+                                hubUrlError = R.string.settings_vault_storage_error
+                            }
                         },
                         testTag = GodTags.SETTINGS_CLEAR_KEY,
                         modifier = Modifier.weight(1f),

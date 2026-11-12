@@ -179,11 +179,11 @@ class SpokeCredentialVault(
 
     @Synchronized
     override fun clear() {
-        if (backupFile.exists()) {
-            backupFile.delete()
+        if (backupFile.exists() && !backupFile.delete()) {
+            throw IOException("Could not delete backup file $backupFile")
         }
-        if (vaultFile.exists()) {
-            vaultFile.delete()
+        if (vaultFile.exists() && !vaultFile.delete()) {
+            throw IOException("Could not delete vault file $vaultFile")
         }
         cachedState = VaultState.EMPTY
         cachedPayload = VaultPayload()
@@ -210,24 +210,12 @@ class SpokeCredentialVault(
         return reqPort == bndPort
     }
 
-    private fun loadInternal() {
-        if (backupFile.exists()) {
-            if (vaultFile.exists()) {
-                vaultFile.delete()
-            }
-            backupFile.renameTo(vaultFile)
-        }
-        if (!vaultFile.exists()) {
-            cachedState = VaultState.EMPTY
-            cachedPayload = VaultPayload()
-            return
-        }
-        try {
-            val bytes = vaultFile.readBytes()
+    private fun decryptFile(file: File): VaultPayload? {
+        return try {
+            if (!file.exists()) return null
+            val bytes = file.readBytes()
             if (bytes.size < IV_SIZE_BYTES + TAG_SIZE_BYTES) {
-                cachedState = VaultState.CORRUPT
-                cachedPayload = VaultPayload()
-                return
+                return null
             }
             val iv = bytes.copyOfRange(0, IV_SIZE_BYTES)
             val ciphertext = bytes.copyOfRange(IV_SIZE_BYTES, bytes.size)
@@ -236,17 +224,56 @@ class SpokeCredentialVault(
             cipher.init(Cipher.DECRYPT_MODE, keyProvider.getSecretKey(), spec)
             val plaintextBytes = cipher.doFinal(ciphertext)
             val plaintext = String(plaintextBytes, StandardCharsets.UTF_8)
-            val payload = json.decodeFromString<VaultPayload>(plaintext)
-            cachedPayload = payload
-            cachedState = if (payload.apiKey == null && payload.hubUrl == null && payload.certificatePin == null) {
+            json.decodeFromString<VaultPayload>(plaintext)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun loadInternal() {
+        val hasVault = vaultFile.exists()
+        val hasBackup = backupFile.exists()
+
+        if (!hasVault && !hasBackup) {
+            cachedState = VaultState.EMPTY
+            cachedPayload = VaultPayload()
+            return
+        }
+
+        val primaryPayload = if (hasVault) decryptFile(vaultFile) else null
+        val backupPayload = if (hasBackup) decryptFile(backupFile) else null
+
+        if (primaryPayload != null) {
+            if (hasBackup) {
+                backupFile.delete()
+            }
+            cachedPayload = primaryPayload
+            cachedState = if (primaryPayload.apiKey == null && primaryPayload.hubUrl == null && primaryPayload.certificatePin == null) {
                 VaultState.EMPTY
             } else {
                 VaultState.READY
             }
-        } catch (_: Exception) {
-            cachedState = VaultState.CORRUPT
-            cachedPayload = VaultPayload()
+            return
         }
+
+        if (backupPayload != null) {
+            if (hasVault) {
+                vaultFile.delete()
+            }
+            if (!vaultFile.exists()) {
+                backupFile.renameTo(vaultFile)
+            }
+            cachedPayload = backupPayload
+            cachedState = if (backupPayload.apiKey == null && backupPayload.hubUrl == null && backupPayload.certificatePin == null) {
+                VaultState.EMPTY
+            } else {
+                VaultState.READY
+            }
+            return
+        }
+
+        cachedState = VaultState.CORRUPT
+        cachedPayload = VaultPayload()
     }
 
     private fun saveInternal(payload: VaultPayload) {
@@ -266,17 +293,17 @@ class SpokeCredentialVault(
         System.arraycopy(iv, 0, output, 0, iv.size)
         System.arraycopy(ciphertext, 0, output, iv.size, ciphertext.size)
 
-        if (!storageDir.exists()) {
-            storageDir.mkdirs()
+        if (!storageDir.exists() && !storageDir.mkdirs()) {
+            throw IOException("Could not create storage directory: $storageDir")
+        }
+
+        if (backupFile.exists() && !backupFile.delete()) {
+            throw IOException("Could not remove stale backup file $backupFile before saving")
         }
 
         if (vaultFile.exists()) {
-            if (!backupFile.exists()) {
-                if (!vaultFile.renameTo(backupFile)) {
-                    throw IOException("Could not rename file $vaultFile to backup $backupFile")
-                }
-            } else {
-                vaultFile.delete()
+            if (!vaultFile.renameTo(backupFile)) {
+                throw IOException("Could not rename file $vaultFile to backup $backupFile")
             }
         }
 
@@ -286,8 +313,8 @@ class SpokeCredentialVault(
                 fos.flush()
                 fos.fd.sync()
             }
-            if (backupFile.exists()) {
-                backupFile.delete()
+            if (backupFile.exists() && !backupFile.delete()) {
+                throw IOException("Could not delete backup file $backupFile after successful write")
             }
             cachedPayload = payload
             cachedState = VaultState.READY
@@ -296,7 +323,7 @@ class SpokeCredentialVault(
             if (vaultFile.exists()) {
                 vaultFile.delete()
             }
-            if (backupFile.exists()) {
+            if (backupFile.exists() && !vaultFile.exists()) {
                 backupFile.renameTo(vaultFile)
             }
             throw e
