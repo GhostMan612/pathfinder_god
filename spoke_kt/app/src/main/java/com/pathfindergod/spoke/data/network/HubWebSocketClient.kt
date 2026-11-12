@@ -5,6 +5,8 @@
 
 package com.pathfindergod.spoke.data.network
 
+import com.pathfindergod.spoke.data.security.CredentialVault
+import com.pathfindergod.spoke.data.security.SpokeCredentialVault
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -72,6 +74,7 @@ fun interface GmStreamSource {
 
 class HubWebSocketClient(
     private val client: OkHttpClient = HubTlsClient.sharedClient,
+    private val vault: CredentialVault? = null,
 ) : GmStreamSource {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
@@ -94,7 +97,12 @@ class HubWebSocketClient(
      */
     fun stream(url: String, query: String, edition: String = "both"): Flow<StreamEvent> =
         callbackFlow {
-            val request = Request.Builder().url(url).build()
+            val activeVault = vault ?: SpokeCredentialVault.instanceOrNull()
+            val requestBuilder = Request.Builder().url(url)
+            activeVault?.getApiKey()?.trim()?.takeIf { it.isNotEmpty() }?.let { key ->
+                requestBuilder.header(ApiKeyInterceptor.API_KEY_HEADER, key)
+            }
+            val request = requestBuilder.build()
             val listener = object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     // The Hub blocks on receive_json(); we must speak first.
@@ -149,7 +157,12 @@ class HubWebSocketClient(
         actor: String,
         seed: Int?,
     ): Flow<StreamEvent> = callbackFlow {
-        val request = Request.Builder().url(url).build()
+        val activeVault = vault ?: SpokeCredentialVault.instanceOrNull()
+        val requestBuilder = Request.Builder().url(url)
+        activeVault?.getApiKey()?.trim()?.takeIf { it.isNotEmpty() }?.let { key ->
+            requestBuilder.header(ApiKeyInterceptor.API_KEY_HEADER, key)
+        }
+        val request = requestBuilder.build()
         val listener = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 val payload = json.encodeToString(

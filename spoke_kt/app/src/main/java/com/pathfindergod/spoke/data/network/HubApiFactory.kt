@@ -5,6 +5,8 @@
 
 package com.pathfindergod.spoke.data.network
 
+import com.pathfindergod.spoke.data.security.CredentialVault
+import com.pathfindergod.spoke.data.security.SpokeCredentialVault
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.Json
 import okhttp3.ConnectionPool
@@ -26,7 +28,18 @@ object HubApiFactory {
     private var client: OkHttpClient? = null
 
     @Volatile
+    private var vault: CredentialVault? = null
+
+    @Volatile
     private var cached: Pair<String, HubApi>? = null
+
+    fun init(credentialVault: CredentialVault) {
+        synchronized(this) {
+            vault = credentialVault
+            client = null
+            cached = null
+        }
+    }
 
     fun get(baseUrl: String): HubApi {
         val url = normalize(baseUrl)
@@ -61,7 +74,21 @@ object HubApiFactory {
     val okHttpClient: OkHttpClient
         get() = client()
 
-    private fun client(): OkHttpClient = client ?: HubTlsClient.createOkHttpClient().also { client = it }
+    private fun client(): OkHttpClient = client ?: synchronized(this) {
+        client ?: run {
+            val activeVault = vault ?: SpokeCredentialVault.instanceOrNull()
+            val interceptors = mutableListOf<okhttp3.Interceptor>()
+            if (activeVault != null) {
+                interceptors.add(ApiKeyInterceptor(activeVault))
+            }
+            val pin = activeVault?.getCertificatePin()?.trim()?.takeIf { it.isNotEmpty() }
+                ?: HubTlsClient.HUB_CERT_PIN
+            HubTlsClient.createOkHttpClient(
+                pin = pin,
+                interceptors = interceptors,
+            ).also { client = it }
+        }
+    }
 
     private fun normalize(baseUrl: String): String = HubEndpoint.normalize(baseUrl)
 }

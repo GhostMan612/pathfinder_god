@@ -34,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.core.content.ContextCompat
@@ -41,6 +42,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pathfindergod.spoke.R
 import com.pathfindergod.spoke.data.local.AppPreferences
 import com.pathfindergod.spoke.data.network.HubEndpoint
+import com.pathfindergod.spoke.data.security.SpokeCredentialVault
 import com.pathfindergod.spoke.service.AudioService
 import com.pathfindergod.spoke.service.HubConnectionStatus
 import com.pathfindergod.spoke.service.HubForegroundService
@@ -65,7 +67,9 @@ fun SettingsScreen(onOpenCredits: () -> Unit) {
     val context = LocalContext.current
     val prefs = remember { AppPreferences(context) }
     val audio = remember { AudioService.get(context) }
+    val vault = remember { SpokeCredentialVault.get(context) }
     var url by rememberSaveable { mutableStateOf(prefs.baseUrl()) }
+    var apiKey by rememberSaveable { mutableStateOf(vault.getApiKey().orEmpty()) }
     var hubUrlError by rememberSaveable { mutableStateOf<Int?>(null) }
     var music by rememberSaveable { mutableStateOf(prefs.musicEnabled()) }
     var sfx by rememberSaveable { mutableStateOf(prefs.sfxEnabled()) }
@@ -110,6 +114,27 @@ fun SettingsScreen(onOpenCredits: () -> Unit) {
                 color = TextSecondary,
                 modifier = Modifier.padding(top = Spacing.xs),
             )
+            Text(
+                text = stringResource(R.string.settings_hub_api_key),
+                style = MaterialTheme.typography.titleMedium,
+                color = GoldAccent,
+                modifier = Modifier.padding(top = Spacing.md),
+            )
+            GodTextField(
+                value = apiKey,
+                onValueChange = { apiKey = it },
+                placeholder = stringResource(R.string.settings_hub_api_key_placeholder),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = Spacing.xs)
+                    .testTag(GodTags.SETTINGS_API_KEY),
+            )
+            Text(
+                text = stringResource(R.string.settings_hub_api_key_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary,
+                modifier = Modifier.padding(top = Spacing.xs),
+            )
             hubUrlError?.let { res ->
                 Text(
                     text = stringResource(res),
@@ -147,6 +172,7 @@ fun SettingsScreen(onOpenCredits: () -> Unit) {
                     }
                     audio.buttonPress()
                     prefs.updateBaseUrl(endpoint)
+                    vault.setApiKey(apiKey.trim().ifEmpty { null })
                     url = prefs.baseUrl()
                     hubUrlError = null
                     restartLink(context, prefs.streamUrl())

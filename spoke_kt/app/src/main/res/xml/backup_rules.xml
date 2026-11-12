@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <exclude domain="file" path="security" />
+    <exclude domain="file" path="spoke_vault.enc" />
+    <exclude domain="sharedpref" path="spoke_vault_prefs" />
+</full-backup-content>

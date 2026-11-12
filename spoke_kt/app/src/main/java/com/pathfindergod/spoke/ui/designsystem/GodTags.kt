@@ -112,6 +112,7 @@ object GodTags {
     fun settingsToggle(key: String): String = "pg:settings:toggle:$key"
     fun settingsTrack(key: String): String = "pg:settings:track:$key"
     const val SETTINGS_CONNECT = "pg:settings:connect"
+    const val SETTINGS_API_KEY = "pg:settings:api_key"
     const val SETTINGS_HUB_STATUS = "pg:settings:hub:status"
     const val SETTINGS_CREDITS = "pg:settings:credits"
     const val CREDITS_BACK = "pg:credits:back"
