@@ -95,6 +95,20 @@ def _hermetic_settings(rules_db_dir: Path, monkeypatch):
         if isinstance(bound_settings, Settings):
             monkeypatch.setattr(module, "settings", test_settings)
 
+    from app.api.security import (
+        RateLimitMiddleware,
+        _api_rate_limiter,
+        _auth_rate_limiter,
+    )
+
+    _api_rate_limiter._requests.clear()
+    _auth_rate_limiter._requests.clear()
+    node = getattr(main.app, "middleware_stack", None)
+    while node is not None:
+        if isinstance(node, RateLimitMiddleware):
+            node.limiter._requests.clear()
+        node = getattr(node, "app", None)
+
 
 def _create_test_client(rules_db_dir: Path) -> TestClient:
     """Create a test client with a fake LLM that bypasses auth.
