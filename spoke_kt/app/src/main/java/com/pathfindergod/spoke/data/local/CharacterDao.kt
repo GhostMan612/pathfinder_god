@@ -35,10 +35,11 @@ interface CharacterDao {
     @Query("UPDATE characters SET uuid = :uuid WHERE id = :id AND trim(uuid) = ''")
     suspend fun backfillUuidIfBlank(id: Long, uuid: String): Int
 
-    @Query("UPDATE characters SET uuid = :uuid, campaign_id = :campaignId, server_revision = :serverRevision, sync_status = :syncStatus, last_synced_at = :lastSyncedAt WHERE id = :id")
+    @Query("UPDATE characters SET uuid = :uuid, hub_url = :hubUrl, campaign_id = :campaignId, server_revision = :serverRevision, sync_status = :syncStatus, last_synced_at = :lastSyncedAt WHERE id = :id")
     suspend fun updateSyncState(
         id: Long,
         uuid: String,
+        hubUrl: String?,
         campaignId: Int?,
         serverRevision: Int?,
         syncStatus: String,
@@ -50,6 +51,7 @@ interface CharacterDao {
         id: Long,
         snapshot: CharacterEntity,
         uuid: String,
+        hubUrl: String,
         campaignId: Int,
         serverRevision: Int,
         lastSyncedAt: String?,
@@ -60,6 +62,7 @@ interface CharacterDao {
             updateSyncState(
                 id = id,
                 uuid = effectiveUuid,
+                hubUrl = hubUrl,
                 campaignId = campaignId,
                 serverRevision = serverRevision,
                 syncStatus = "local",
@@ -70,6 +73,7 @@ interface CharacterDao {
         updateSyncState(
             id = id,
             uuid = effectiveUuid,
+            hubUrl = hubUrl,
             campaignId = campaignId,
             serverRevision = serverRevision,
             syncStatus = "synced",
@@ -91,6 +95,7 @@ interface CharacterDao {
         updateSyncState(
             id = id,
             uuid = effectiveUuid,
+            hubUrl = current.hubUrl,
             campaignId = current.campaignId,
             serverRevision = current.serverRevision,
             syncStatus = resolvedStatus,

@@ -22,6 +22,7 @@ import com.pathfindergod.spoke.data.network.EncounterResponse
 import com.pathfindergod.spoke.data.network.GenerateRequest
 import com.pathfindergod.spoke.data.network.HubApi
 import com.pathfindergod.spoke.data.network.HubCampaignSummary
+import com.pathfindergod.spoke.data.network.HubEndpoint
 import com.pathfindergod.spoke.data.network.LootResponse
 import com.pathfindergod.spoke.data.network.MapGenerateResponse
 import com.pathfindergod.spoke.data.network.MapRequest
@@ -52,6 +53,10 @@ import retrofit2.Response
 
 class CharacterRepositorySyncTest {
 
+    private companion object {
+        val DEFAULT_HUB = HubEndpoint.canonicalOrigin(HubEndpoint.DEFAULT_BASE_URL)
+    }
+
     private class FakeCharacterDao(
         val characters: MutableMap<Long, CharacterEntity> = mutableMapOf(),
     ) : CharacterDao {
@@ -78,6 +83,7 @@ class CharacterRepositorySyncTest {
         override suspend fun updateSyncState(
             id: Long,
             uuid: String,
+            hubUrl: String?,
             campaignId: Int?,
             serverRevision: Int?,
             syncStatus: String,
@@ -88,6 +94,7 @@ class CharacterRepositorySyncTest {
             if (current != null) {
                 characters[id] = current.copy(
                     uuid = uuid,
+                    hubUrl = hubUrl,
                     campaignId = campaignId,
                     serverRevision = serverRevision,
                     syncStatus = syncStatus,
@@ -173,6 +180,8 @@ class CharacterRepositorySyncTest {
             characterClass = "Fighter",
             level = 3,
             uuid = "hero-valeros-1",
+            hubUrl = DEFAULT_HUB,
+            campaignId = 1,
             serverRevision = 1,
             notes = "Local edits that must not be lost",
         )
@@ -301,6 +310,7 @@ class CharacterRepositorySyncTest {
             characterClass = "Barbarian",
             level = 2,
             uuid = "hero-amiri-1",
+            hubUrl = DEFAULT_HUB,
             campaignId = 1,
         )
         dao.upsert(hero)
@@ -400,6 +410,8 @@ class CharacterRepositorySyncTest {
                 characterClass = "Rogue",
                 level = 4,
                 uuid = "hero-merisiel-1",
+                hubUrl = DEFAULT_HUB,
+                campaignId = 1,
                 serverRevision = 2,
                 lastSyncedAt = "2026-11-11T00:00:00Z",
             ),
@@ -433,6 +445,7 @@ class CharacterRepositorySyncTest {
                 characterClass = "Ranger",
                 level = 5,
                 uuid = "hero-harsk-1",
+                hubUrl = DEFAULT_HUB,
                 campaignId = 1,
                 serverRevision = 3,
                 lastSyncedAt = "2026-11-11T00:00:00Z",
@@ -550,6 +563,7 @@ class CharacterRepositorySyncTest {
                 characterClass = "Druid",
                 level = 4,
                 uuid = "hero-lini-1",
+                hubUrl = DEFAULT_HUB,
                 campaignId = 2,
                 notes = "Before sync",
             ),
@@ -610,6 +624,7 @@ class CharacterRepositorySyncTest {
                 characterClass = "Witch",
                 level = 2,
                 uuid = "hero-feiya-1",
+                hubUrl = DEFAULT_HUB,
                 campaignId = 3,
             ),
         )
@@ -625,5 +640,228 @@ class CharacterRepositorySyncTest {
         val stored = dao.getById(1L)!!
         assertEquals(3, stored.level)
         assertEquals("local", stored.syncStatus)
+    }
+
+    @Test
+    fun syncAcrossHubsRequiresExplicitConfirmationAndResetsExpectedRevision() = runBlocking {
+        val dao = FakeCharacterDao()
+        val api = FakeHubApi()
+        var currentHub = "https://hub-a.example:8443"
+        var selectedCampaign: Int? = 7
+        val repo = CharacterRepository(
+            dao = dao,
+            apiProvider = { api },
+            selectedCampaignIdProvider = { selectedCampaign },
+            hubUrlProvider = { currentHub },
+        )
+
+        dao.upsert(
+            CharacterEntity(
+                id = 1L,
+                name = "Amiri",
+                characterClass = "Barbarian",
+                level = 4,
+                uuid = "hero-amiri-cross-hub",
+                hubUrl = "https://hub-a.example:8443",
+                campaignId = 7,
+                serverRevision = 4,
+                syncStatus = "synced",
+            ),
+        )
+
+        currentHub = "https://hub-b.example:8443"
+        selectedCampaign = null
+
+        var apiCalls = 0
+        var seenCampaignId = -1
+        var seenExpectedRevision: Int? = -1
+        api.onSync = { cid, req ->
+            apiCalls += 1
+            seenCampaignId = cid
+            seenExpectedRevision = req.expectedRevision
+            PartySyncResponse(
+                id = 201,
+                uuid = req.uuid,
+                name = req.name,
+                revision = 1,
+                updatedAt = "2026-11-14T02:00:00Z",
+                status = "synced",
+            )
+        }
+
+        val unconfigured = repo.syncCharacter(1L)
+        assertTrue(unconfigured is CharacterSyncResult.Error)
+        assertEquals(0, apiCalls)
+        assertEquals("https://hub-a.example:8443", dao.getById(1L)!!.hubUrl)
+        assertEquals(7, dao.getById(1L)!!.campaignId)
+        assertEquals(4, dao.getById(1L)!!.serverRevision)
+
+        selectedCampaign = 7
+        val confirmationNeeded = repo.syncCharacter(1L)
+        assertTrue(confirmationNeeded is CharacterSyncResult.CrossHubConfirmationRequired)
+        val prompt = confirmationNeeded as CharacterSyncResult.CrossHubConfirmationRequired
+        assertEquals("https://hub-a.example:8443", prompt.previousHubUrl)
+        assertEquals("https://hub-b.example:8443", prompt.targetHubUrl)
+        assertEquals(7, prompt.targetCampaignId)
+        assertEquals(0, apiCalls)
+
+        val confirmed = repo.syncCharacter(1L, campaignId = 7, confirmCrossHub = true)
+        assertTrue(confirmed is CharacterSyncResult.Success)
+        assertEquals(1, apiCalls)
+        assertEquals(7, seenCampaignId)
+        assertEquals(0, seenExpectedRevision)
+
+        val updated = dao.getById(1L)!!
+        assertEquals("https://hub-b.example:8443", updated.hubUrl)
+        assertEquals(7, updated.campaignId)
+        assertEquals(1, updated.serverRevision)
+        assertEquals("synced", updated.syncStatus)
+    }
+
+    @Test
+    fun legacyUnknownHubRowRequiresCrossHubConfirmationAndResetsExpectedRevision() = runBlocking {
+        val dao = FakeCharacterDao()
+        val api = FakeHubApi()
+        val repo = CharacterRepository(
+            dao = dao,
+            apiProvider = { api },
+            selectedCampaignIdProvider = { 7 },
+            hubUrlProvider = { "https://hub-a.example:8443" },
+        )
+
+        dao.upsert(
+            CharacterEntity(
+                id = 1L,
+                name = "Kyra",
+                characterClass = "Cleric",
+                level = 5,
+                uuid = "hero-kyra-v5",
+                hubUrl = null,
+                campaignId = 7,
+                serverRevision = 6,
+                syncStatus = "synced",
+            ),
+        )
+
+        var apiCalls = 0
+        var seenExpectedRevision: Int? = -1
+        api.onSync = { _, req ->
+            apiCalls += 1
+            seenExpectedRevision = req.expectedRevision
+            PartySyncResponse(
+                id = 301,
+                uuid = req.uuid,
+                name = req.name,
+                revision = 1,
+                updatedAt = "2026-11-14T02:05:00Z",
+                status = "synced",
+            )
+        }
+
+        val prompt = repo.syncCharacter(1L, campaignId = 7)
+        assertTrue(prompt is CharacterSyncResult.CrossHubConfirmationRequired)
+        assertEquals("", (prompt as CharacterSyncResult.CrossHubConfirmationRequired).previousHubUrl)
+        assertEquals(0, apiCalls)
+
+        val confirmed = repo.syncCharacter(1L, campaignId = 7, confirmCrossHub = true)
+        assertTrue(confirmed is CharacterSyncResult.Success)
+        assertEquals(1, apiCalls)
+        assertEquals(0, seenExpectedRevision)
+        assertEquals("https://hub-a.example:8443", dao.getById(1L)!!.hubUrl)
+    }
+
+    @Test
+    fun syncHttp404NonexistentCampaignMarksCampaignNotFoundWithoutCorruptingBoundState() = runBlocking {
+        val dao = FakeCharacterDao()
+        val api = FakeHubApi()
+        val repo = CharacterRepository(dao, api)
+
+        dao.upsert(
+            CharacterEntity(
+                id = 1L,
+                name = "Ezren",
+                characterClass = "Wizard",
+                level = 5,
+                uuid = "hero-ezren-404",
+                hubUrl = DEFAULT_HUB,
+                campaignId = 1,
+                serverRevision = 2,
+                syncStatus = "synced",
+            ),
+        )
+
+        api.onSync = { _, _ ->
+            val body = """{"detail":{"error":"campaign_not_found","campaign_id":999}}"""
+            throw HttpException(
+                Response.error<PartySyncResponse>(
+                    404,
+                    body.toResponseBody("application/json".toMediaType()),
+                ),
+            )
+        }
+
+        val result = repo.syncCharacter(1L, campaignId = 999)
+        assertTrue(result is CharacterSyncResult.Error)
+        assertEquals(404, (result as CharacterSyncResult.Error).statusCode)
+
+        val stored = dao.getById(1L)!!
+        assertEquals("campaign_not_found", stored.syncStatus)
+        assertEquals(1, stored.campaignId)
+        assertEquals(2, stored.serverRevision)
+        assertEquals(DEFAULT_HUB, stored.hubUrl)
+    }
+
+    @Test
+    fun hubEndpointCanonicalOriginAndHubScopedIdempotencyKeysDistinguishServers() = runBlocking {
+        assertEquals("http://10.0.2.2:8000", HubEndpoint.canonicalOrigin("http://10.0.2.2:8000/"))
+        assertEquals("https://hub.example.com:443", HubEndpoint.canonicalOrigin("HTTPS://HUB.EXAMPLE.COM/"))
+        assertEquals("http://hub.example.com:80", HubEndpoint.canonicalOrigin("http://HUB.EXAMPLE.COM:80/"))
+
+        val dao = FakeCharacterDao()
+        val api = FakeHubApi()
+        var currentHub = "https://hub-a.example:8443"
+        val repo = CharacterRepository(
+            dao = dao,
+            apiProvider = { api },
+            selectedCampaignIdProvider = { 7 },
+            hubUrlProvider = { currentHub },
+        )
+        dao.upsert(
+            CharacterEntity(
+                id = 1L,
+                name = "Seoni",
+                characterClass = "Sorcerer",
+                level = 3,
+                uuid = "shared-uuid-key-check",
+            ),
+        )
+        dao.upsert(
+            CharacterEntity(
+                id = 2L,
+                name = "Seoni",
+                characterClass = "Sorcerer",
+                level = 3,
+                uuid = "shared-uuid-key-check",
+            ),
+        )
+
+        val keys = mutableListOf<String>()
+        api.onSync = { _, req ->
+            keys += req.idempotencyKey!!
+            PartySyncResponse(
+                id = 1,
+                uuid = req.uuid,
+                name = req.name,
+                revision = 1,
+                updatedAt = "2026-11-14T02:10:00Z",
+                status = "synced",
+            )
+        }
+
+        assertTrue(repo.syncCharacter(1L, campaignId = 7) is CharacterSyncResult.Success)
+        currentHub = "https://hub-b.example:8443"
+        assertTrue(repo.syncCharacter(2L, campaignId = 7) is CharacterSyncResult.Success)
+        assertEquals(2, keys.size)
+        assertNotEquals(keys[0], keys[1])
     }
 }

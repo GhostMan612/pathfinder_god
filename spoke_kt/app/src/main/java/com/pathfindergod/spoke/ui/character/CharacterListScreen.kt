@@ -25,6 +25,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -90,9 +91,15 @@ internal fun rememberCharacterViewModel(): CharacterViewModel {
             { buildHubApi(prefs.restUrl()) },
             selectedCampaignIdProvider = { prefs.selectedCampaignId() },
             onCampaignSelected = { prefs.setSelectedCampaignId(it) },
+            hubUrlProvider = { prefs.baseUrl() },
         )
     }
-    return viewModel(factory = remember { CharacterVmFactory(repository) })
+    val vm: CharacterViewModel = viewModel(factory = remember { CharacterVmFactory(repository) })
+    DisposableEffect(prefs, vm) {
+        val dispose = prefs.observeChanges { vm.syncHubContext() }
+        onDispose(dispose)
+    }
+    return vm
 }
 
 @Composable
@@ -102,6 +109,10 @@ fun CharacterListScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var showForge by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        viewModel.syncHubContext()
+    }
 
     LaunchedEffect(showForge) {
         if (showForge) viewModel.clearForgeError()

@@ -37,7 +37,7 @@ abstract class AppDatabase : RoomDatabase() {
 
     companion object {
         const val FILE_NAME = "pathfinder_spoke.db"
-        const val VERSION = 5
+        const val VERSION = 6
 
         private const val CREATE_CAMPAIGNS =
             "CREATE TABLE IF NOT EXISTS `campaigns` (" +
@@ -100,7 +100,13 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `characters` ADD COLUMN `hub_url` TEXT")
+            }
+        }
+
+        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
 
         fun create(
             context: Context,

@@ -281,6 +281,13 @@
     <string name="character_sync_status_tls_error">TLS error: Certificate check failed</string>
     <string name="character_sync_status_network_error">Network error: Hub unreachable</string>
     <string name="character_sync_status_campaign_required">Select a Hub campaign first</string>
+    <string name="character_sync_status_campaign_not_found">Campaign not found on Hub</string>
+    <string name="character_sync_other_hub">Synced on another Hub (%1$s)</string>
+    <string name="character_sync_cross_hub_title">Sync to a different Hub?</string>
+    <string name="character_sync_cross_hub_message">This hero was previously synced to %1$s. Syncing to %2$s (Campaign #%3$d) starts a fresh revision history there.</string>
+    <string name="character_sync_cross_hub_message_unknown">This hero has revision history from an unrecorded Hub. Syncing to %1$s (Campaign #%2$d) starts a fresh revision history there.</string>
+    <string name="character_sync_cross_hub_confirm">Sync to this Hub</string>
+    <string name="character_sync_cross_hub_cancel">Cancel</string>
     <string name="character_sync_campaign_named">Target: #%1$d · %2$s</string>
     <string name="character_sync_campaign_id">Target: Campaign #%1$d</string>
     <string name="character_sync_campaign_none">Target: No Hub campaign selected</string>

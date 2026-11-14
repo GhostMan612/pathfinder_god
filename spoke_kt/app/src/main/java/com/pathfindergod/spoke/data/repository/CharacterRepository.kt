@@ -12,6 +12,7 @@ import com.pathfindergod.spoke.data.network.BuildCharacterRequest
 import com.pathfindergod.spoke.data.network.BuildCharacterResponse
 import com.pathfindergod.spoke.data.network.HubApi
 import com.pathfindergod.spoke.data.network.HubCampaignSummary
+import com.pathfindergod.spoke.data.network.HubEndpoint
 import com.pathfindergod.spoke.data.network.PartySyncRequest
 import java.security.MessageDigest
 import javax.net.ssl.SSLException
@@ -26,6 +27,11 @@ import kotlinx.serialization.json.intOrNull
 sealed class CharacterSyncResult {
     data class Success(val revision: Int) : CharacterSyncResult()
     data class LocalModifiedDuringSync(val serverRevision: Int) : CharacterSyncResult()
+    data class CrossHubConfirmationRequired(
+        val previousHubUrl: String,
+        val targetHubUrl: String,
+        val targetCampaignId: Int,
+    ) : CharacterSyncResult()
     data class Conflict(val currentRevision: Int, val serverCharacter: Map<String, JsonElement>?) : CharacterSyncResult()
     data class Error(val message: String, val statusCode: Int? = null) : CharacterSyncResult()
 }
@@ -35,6 +41,7 @@ class CharacterRepository(
     private val apiProvider: () -> HubApi,
     private val selectedCampaignIdProvider: () -> Int? = { null },
     private val onCampaignSelected: (Int) -> Unit = {},
+    private val hubUrlProvider: () -> String = { HubEndpoint.DEFAULT_BASE_URL },
 ) {
     constructor(dao: CharacterDao, api: HubApi) : this(dao, { api })
     constructor(db: AppDatabase, api: HubApi) : this(db.characterDao(), { api })
@@ -44,7 +51,14 @@ class CharacterRepository(
         apiProvider: () -> HubApi,
         selectedCampaignIdProvider: () -> Int?,
         onCampaignSelected: (Int) -> Unit,
-    ) : this(db.characterDao(), apiProvider, selectedCampaignIdProvider, onCampaignSelected)
+        hubUrlProvider: () -> String = { HubEndpoint.DEFAULT_BASE_URL },
+    ) : this(
+        db.characterDao(),
+        apiProvider,
+        selectedCampaignIdProvider,
+        onCampaignSelected,
+        hubUrlProvider,
+    )
 
     fun observeCharacters(): Flow<List<CharacterEntity>> =
         dao.observeAll()
@@ -73,16 +87,27 @@ class CharacterRepository(
         }
     }
 
+    fun currentHubIdentity(): String {
+        val raw = hubUrlProvider().trim()
+        if (raw.isEmpty()) return ""
+        return try {
+            HubEndpoint.canonicalOrigin(raw)
+        } catch (_: IllegalArgumentException) {
+            raw.lowercase()
+        }
+    }
+
     suspend fun listHubCampaigns(): List<HubCampaignSummary> =
         apiProvider().listCampaigns()
 
     private fun computeIdempotencyKey(
+        hubIdentity: String,
         campaignId: Int,
         uuid: String,
         expectedRevision: Int,
         stats: Map<String, JsonElement>,
     ): String {
-        val payload = "$campaignId|$uuid|$expectedRevision|${JsonObject(stats)}"
+        val payload = "$hubIdentity|$campaignId|$uuid|$expectedRevision|${JsonObject(stats)}"
         val digest = MessageDigest.getInstance("SHA-256")
             .digest(payload.toByteArray(Charsets.UTF_8))
         val hex = digest.joinToString("") { "%02x".format(it) }
@@ -93,6 +118,7 @@ class CharacterRepository(
         characterId: Long,
         campaignId: Int? = null,
         idempotencyKey: String? = null,
+        confirmCrossHub: Boolean = false,
     ): CharacterSyncResult {
         if (campaignId != null && campaignId < 1) {
             return CharacterSyncResult.Error("Invalid campaign ID")
@@ -100,6 +126,7 @@ class CharacterRepository(
         val entity = dao.getById(characterId)
             ?: return CharacterSyncResult.Error("Character not found")
 
+        val currentHub = currentHubIdentity()
         val effectiveUuid = if (entity.uuid.isBlank()) {
             val candidate = java.util.UUID.randomUUID().toString()
             dao.backfillUuidIfBlank(characterId, candidate)
@@ -111,14 +138,28 @@ class CharacterRepository(
             if (it.uuid != effectiveUuid) it.copy(uuid = effectiveUuid) else it
         }
 
-        val targetCampaignId = (campaignId ?: selectedCampaignIdProvider() ?: activeEntity.campaignId)
+        val boundToCurrentHub = !activeEntity.hubUrl.isNullOrBlank() && activeEntity.hubUrl == currentHub
+        val boundCampaignId = if (boundToCurrentHub) activeEntity.campaignId else null
+        val targetCampaignId = (campaignId ?: boundCampaignId ?: selectedCampaignIdProvider())
             ?.takeIf { it >= 1 }
             ?: run {
                 dao.commitSyncFailure(characterId, activeEntity, effectiveUuid, "campaign_required")
                 return CharacterSyncResult.Error("Select a Hub campaign before syncing")
             }
 
-        val expectedRevision = if (targetCampaignId == activeEntity.campaignId) {
+        val previousHub = activeEntity.hubUrl?.trim()?.ifEmpty { null }
+        val isCrossHubTransfer =
+            (previousHub != null && previousHub != currentHub) ||
+                (previousHub == null && activeEntity.serverRevision != null)
+        if (!confirmCrossHub && isCrossHubTransfer) {
+            return CharacterSyncResult.CrossHubConfirmationRequired(
+                previousHubUrl = previousHub.orEmpty(),
+                targetHubUrl = currentHub,
+                targetCampaignId = targetCampaignId,
+            )
+        }
+
+        val expectedRevision = if (boundToCurrentHub && targetCampaignId == activeEntity.campaignId) {
             activeEntity.serverRevision ?: 0
         } else {
             0
@@ -126,6 +167,7 @@ class CharacterRepository(
 
         val wireStats = CharacterMapper.toWire(activeEntity)
         val idemp = idempotencyKey ?: computeIdempotencyKey(
+            hubIdentity = currentHub,
             campaignId = targetCampaignId,
             uuid = effectiveUuid,
             expectedRevision = expectedRevision,
@@ -149,6 +191,7 @@ class CharacterRepository(
                 id = characterId,
                 snapshot = activeEntity,
                 uuid = effectiveUuid,
+                hubUrl = currentHub,
                 campaignId = targetCampaignId,
                 serverRevision = response.revision,
                 lastSyncedAt = response.updatedAt,
@@ -187,6 +230,9 @@ class CharacterRepository(
             } else if (code == 401 || code == 403) {
                 dao.commitSyncFailure(characterId, activeEntity, effectiveUuid, "auth_error")
                 CharacterSyncResult.Error("Authentication failed ($code)", code)
+            } else if (code == 404) {
+                dao.commitSyncFailure(characterId, activeEntity, effectiveUuid, "campaign_not_found")
+                CharacterSyncResult.Error("Campaign $targetCampaignId does not exist on Hub", code)
             } else {
                 dao.commitSyncFailure(characterId, activeEntity, effectiveUuid, "error")
                 CharacterSyncResult.Error("HTTP error $code", code)

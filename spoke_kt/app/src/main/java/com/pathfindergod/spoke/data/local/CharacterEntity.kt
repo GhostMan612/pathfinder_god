@@ -45,6 +45,7 @@ data class CharacterEntity(
     @ColumnInfo(name = "server_revision") val serverRevision: Int? = null,
     @ColumnInfo(name = "sync_status") val syncStatus: String = "local",
     @ColumnInfo(name = "last_synced_at") val lastSyncedAt: String? = null,
+    @ColumnInfo(name = "hub_url") val hubUrl: String? = null,
 ) {
     fun hasSameSheetContent(other: CharacterEntity): Boolean =
         copy(
@@ -53,11 +54,13 @@ data class CharacterEntity(
             serverRevision = null,
             syncStatus = "",
             lastSyncedAt = null,
+            hubUrl = null,
         ) == other.copy(
             uuid = "",
             campaignId = null,
             serverRevision = null,
             syncStatus = "",
             lastSyncedAt = null,
+            hubUrl = null,
         )
 }

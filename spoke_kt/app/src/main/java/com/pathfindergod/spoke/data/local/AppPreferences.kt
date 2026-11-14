@@ -6,6 +6,7 @@
 package com.pathfindergod.spoke.data.local
 
 import android.content.Context
+import android.content.SharedPreferences
 import com.pathfindergod.spoke.data.network.HubEndpoint
 
 class AppPreferences(context: Context) {
@@ -26,10 +27,38 @@ class AppPreferences(context: Context) {
         }
     }
 
+    fun currentHubIdentity(): String =
+        HubEndpoint.canonicalOrigin(baseUrl())
+
     fun updateBaseUrl(raw: String) {
         // Validate before writing. A malformed URL must not poison Settings.
+        val previousOrigin = try {
+            HubEndpoint.canonicalOrigin(baseUrl())
+        } catch (_: IllegalArgumentException) {
+            null
+        }
         val normalized = HubEndpoint.normalize(raw).trimEnd('/')
-        prefs.edit().putString(KEY_BASE_URL, normalized).apply()
+        val nextOrigin = HubEndpoint.canonicalOrigin(normalized)
+        prefs.edit().apply {
+            putString(KEY_BASE_URL, normalized)
+            if (previousOrigin != nextOrigin) {
+                remove(KEY_SELECTED_CAMPAIGN_ID)
+                remove(KEY_SELECTED_CAMPAIGN_HUB)
+            }
+            apply()
+        }
+    }
+
+    fun observeChanges(listener: () -> Unit): () -> Unit {
+        val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == KEY_BASE_URL || key == KEY_SELECTED_CAMPAIGN_ID || key == KEY_SELECTED_CAMPAIGN_HUB) {
+                listener()
+            }
+        }
+        prefs.registerOnSharedPreferenceChangeListener(prefListener)
+        return {
+            prefs.unregisterOnSharedPreferenceChangeListener(prefListener)
+        }
     }
 
     fun restUrl(): String = HubEndpoint.normalize(baseUrl())
@@ -67,16 +96,26 @@ class AppPreferences(context: Context) {
         prefs.edit().putBoolean(KEY_PIT, value).apply()
     }
 
-    fun selectedCampaignId(): Int? =
-        prefs.getInt(KEY_SELECTED_CAMPAIGN_ID, -1).takeIf { it >= 1 }
+    fun selectedCampaignId(): Int? {
+        val id = prefs.getInt(KEY_SELECTED_CAMPAIGN_ID, -1)
+        if (id < 1) return null
+        val boundHub = prefs.getString(KEY_SELECTED_CAMPAIGN_HUB, null) ?: return null
+        return if (boundHub == currentHubIdentity()) id else null
+    }
 
     fun setSelectedCampaignId(campaignId: Int) {
         require(campaignId >= 1) { "campaignId must be positive" }
-        prefs.edit().putInt(KEY_SELECTED_CAMPAIGN_ID, campaignId).apply()
+        prefs.edit()
+            .putInt(KEY_SELECTED_CAMPAIGN_ID, campaignId)
+            .putString(KEY_SELECTED_CAMPAIGN_HUB, currentHubIdentity())
+            .apply()
     }
 
     fun clearSelectedCampaignId() {
-        prefs.edit().remove(KEY_SELECTED_CAMPAIGN_ID).apply()
+        prefs.edit()
+            .remove(KEY_SELECTED_CAMPAIGN_ID)
+            .remove(KEY_SELECTED_CAMPAIGN_HUB)
+            .apply()
     }
 
     companion object {
@@ -91,5 +130,6 @@ class AppPreferences(context: Context) {
         private const val KEY_BGM_TRACK = "bgm_track"
         private const val KEY_PIT = "pit_enabled"
         private const val KEY_SELECTED_CAMPAIGN_ID = "selected_campaign_id"
+        private const val KEY_SELECTED_CAMPAIGN_HUB = "selected_campaign_hub"
     }
 }

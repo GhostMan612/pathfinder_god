@@ -118,7 +118,7 @@ fun NavGraphBuilder.appNavGraph(
         val state by characters.state.collectAsStateWithLifecycle()
         LaunchedEffect(characterId) {
             characters.select(characterId)
-            characters.refreshSelectedCampaignFromPrefs()
+            characters.syncHubContext()
         }
         val entity = state.characters.firstOrNull { it.id == characterId }
         if (entity == null) {
@@ -127,12 +127,16 @@ fun NavGraphBuilder.appNavGraph(
             CharacterDetailScreen(
                 entity = entity,
                 onBack = { navController.popBackStack() },
+                currentHubIdentity = state.currentHubIdentity,
                 selectedCampaignId = state.selectedCampaignId,
                 hubCampaigns = state.hubCampaigns,
                 isLoadingCampaigns = state.isLoadingCampaigns,
+                pendingCrossHubSync = state.pendingCrossHubSync?.takeIf { it.characterId == entity.id },
                 onLoadCampaigns = { characters.loadHubCampaigns() },
                 onSelectCampaign = { characters.selectCampaign(it) },
-                onSync = { id, cid -> characters.sync(id, cid) },
+                onSync = { id, cid, confirmed -> characters.sync(id, cid, confirmed) },
+                onConfirmCrossHubSync = { characters.confirmCrossHubSync() },
+                onDismissCrossHubSync = { characters.dismissCrossHubSync() },
                 isSyncing = state.syncingId == entity.id,
             )
         }

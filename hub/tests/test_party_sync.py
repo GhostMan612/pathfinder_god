@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from app import main
 from app.api.deps import get_repo
 from app.db.repository import (
+    CampaignNotFoundError,
     CampaignRepository,
     IdempotencyConflictError,
     RevisionConflictError,
@@ -22,7 +23,10 @@ from app.db.repository import (
 
 @pytest.fixture
 def repo(tmp_path):
-    return CampaignRepository(str(tmp_path / "campaign.db"))
+    instance = CampaignRepository(str(tmp_path / "campaign.db"))
+    instance.get_or_create_campaign(1, "Campaign 1")
+    instance.get_or_create_campaign(2, "Campaign 2")
+    return instance
 
 
 @pytest.fixture
@@ -500,6 +504,7 @@ def test_repo_enforces_unique_uuid_index_and_upgrades_non_unique(tmp_path):
 def test_repo_concurrent_first_time_sync_same_uuid_no_duplicate(tmp_path):
     db_file = tmp_path / "concurrent.db"
     repo_a = CampaignRepository(str(db_file))
+    repo_a.get_or_create_campaign(1, "Race Campaign")
     repo_b = CampaignRepository(str(db_file))
     barrier = threading.Barrier(2)
 
@@ -674,3 +679,41 @@ def test_api_list_campaigns_requires_auth_and_returns_campaigns(repo):
         assert "Kingmaker" in names
     finally:
         main.app.dependency_overrides.clear()
+
+
+def test_repo_and_api_reject_nonexistent_campaign_without_creating_it(tmp_path):
+    fresh_repo = CampaignRepository(str(tmp_path / "missing_campaign.db"))
+    with pytest.raises(CampaignNotFoundError) as exc_info:
+        fresh_repo.sync_party_member(
+            campaign_id=999,
+            uuid="uuid-missing-campaign",
+            name="GhostHero",
+            level=1,
+            expected_revision=0,
+            idempotency_key="idemp-missing-999",
+        )
+    assert exc_info.value.campaign_id == 999
+    assert fresh_repo.list_campaigns() == []
+    assert fresh_repo.get_party(999) == []
+
+    main.app.dependency_overrides[get_repo] = lambda: fresh_repo
+    try:
+        client = TestClient(main.app)
+        client.headers["X-API-Key"] = "pfg_test_key_12345"
+        for url in ("/campaign/999/party/sync", "/campaign/party/sync?campaign_id=999"):
+            resp = client.post(
+                url,
+                json={"uuid": "uuid-missing-campaign", "name": "GhostHero", "level": 1},
+            )
+            assert resp.status_code == 404
+            assert resp.json()["detail"]["error"] == "campaign_not_found"
+            assert resp.json()["detail"]["campaign_id"] == 999
+        assert fresh_repo.list_campaigns() == []
+        assert fresh_repo.get_party(999) == []
+    finally:
+        main.app.dependency_overrides.clear()
+
+    member_id = fresh_repo.upsert_party_member(campaign_id=42, name="LegacyHero", level=2)
+    assert member_id >= 1
+    assert fresh_repo.campaign_exists(42)
+    assert len(fresh_repo.get_party(42)) == 1

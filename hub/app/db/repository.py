@@ -78,6 +78,12 @@ class IdempotencyConflictError(RevisionConflictError):
         )
 
 
+class CampaignNotFoundError(Exception):
+    def __init__(self, campaign_id: int):
+        super().__init__(f"Campaign {campaign_id} not found")
+        self.campaign_id = campaign_id
+
+
 @dataclass
 class Campaign:
     id: int
@@ -1462,7 +1468,14 @@ class CampaignRepository:
         with self._conn() as conn:
             if self._active_connection() is None and not conn.in_transaction:
                 conn.execute("BEGIN IMMEDIATE")
-            self._ensure_campaign(conn, campaign_id)
+            if (
+                conn.execute(
+                    "SELECT 1 FROM campaigns WHERE id = ?",
+                    (campaign_id,),
+                ).fetchone()
+                is None
+            ):
+                raise CampaignNotFoundError(campaign_id)
 
             if idempotency_key is not None:
                 key_owner = conn.execute(

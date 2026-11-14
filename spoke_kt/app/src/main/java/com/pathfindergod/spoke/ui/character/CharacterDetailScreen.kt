@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -53,6 +54,7 @@ import com.pathfindergod.spoke.ui.designsystem.GodTags
 import com.pathfindergod.spoke.ui.designsystem.GodTextField
 import com.pathfindergod.spoke.ui.designsystem.Spacing
 import com.pathfindergod.spoke.ui.designsystem.godRtlText
+import com.pathfindergod.spoke.ui.designsystem.godTouchHeight
 import com.pathfindergod.spoke.ui.designsystem.godTouchSize
 import com.pathfindergod.spoke.ui.theme.CrimsonPrimary
 import com.pathfindergod.spoke.ui.theme.CritRed
@@ -60,6 +62,7 @@ import com.pathfindergod.spoke.ui.theme.GoldAccent
 import com.pathfindergod.spoke.ui.theme.ParchmentSurface
 import com.pathfindergod.spoke.ui.theme.TextPrimary
 import com.pathfindergod.spoke.ui.theme.TextSecondary
+import com.pathfindergod.spoke.ui.viewmodel.PendingCrossHubSync
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -102,17 +105,28 @@ private fun abilityModifier(score: Int): Int = Math.floorDiv(score - 10, 2)
 fun CharacterDetailScreen(
     entity: CharacterEntity,
     onBack: () -> Unit,
+    currentHubIdentity: String = "",
     selectedCampaignId: Int? = null,
     hubCampaigns: List<HubCampaignSummary> = emptyList(),
     isLoadingCampaigns: Boolean = false,
+    pendingCrossHubSync: PendingCrossHubSync? = null,
     onLoadCampaigns: (() -> Unit)? = null,
     onSelectCampaign: ((Int) -> Unit)? = null,
-    onSync: ((Long, Int) -> Unit)? = null,
+    onSync: ((Long, Int, Boolean) -> Unit)? = null,
+    onConfirmCrossHubSync: (() -> Unit)? = null,
+    onDismissCrossHubSync: (() -> Unit)? = null,
     isSyncing: Boolean = false,
 ) {
     val context = LocalContext.current
-    val effectiveCampaignId = selectedCampaignId ?: entity.campaignId
-    var manualCampaignInput by rememberSaveable(entity.id, effectiveCampaignId) {
+    val boundToCurrentHub = !entity.hubUrl.isNullOrBlank() &&
+        currentHubIdentity.isNotBlank() &&
+        entity.hubUrl == currentHubIdentity
+    val boundCampaignId = entity.campaignId?.takeIf { boundToCurrentHub }
+    var explicitCampaignId by rememberSaveable(entity.id, currentHubIdentity) {
+        mutableStateOf<Int?>(null)
+    }
+    val effectiveCampaignId = explicitCampaignId ?: boundCampaignId ?: selectedCampaignId
+    var manualCampaignInput by rememberSaveable(entity.id, currentHubIdentity, effectiveCampaignId) {
         mutableStateOf(effectiveCampaignId?.toString().orEmpty())
     }
     val derived = remember(entity.derived) { flatEntries(entity.derived).toMap() }
@@ -152,6 +166,7 @@ fun CharacterDetailScreen(
                             "tls_error" -> stringResource(R.string.character_sync_status_tls_error)
                             "network_error" -> stringResource(R.string.character_sync_status_network_error)
                             "campaign_required" -> stringResource(R.string.character_sync_status_campaign_required)
+                            "campaign_not_found" -> stringResource(R.string.character_sync_status_campaign_not_found)
                             else -> stringResource(R.string.character_sync_status_local)
                         }
                         Text(
@@ -161,13 +176,25 @@ fun CharacterDetailScreen(
                                 entity.syncStatus == "conflict" ||
                                 entity.syncStatus == "auth_error" ||
                                 entity.syncStatus == "tls_error" ||
-                                entity.syncStatus == "campaign_required"
+                                entity.syncStatus == "campaign_required" ||
+                                entity.syncStatus == "campaign_not_found"
                             ) {
                                 CritRed
                             } else {
                                 TextSecondary
                             },
                         )
+                        val entityHub = entity.hubUrl
+                        if (!entityHub.isNullOrBlank() &&
+                            currentHubIdentity.isNotBlank() &&
+                            entityHub != currentHubIdentity
+                        ) {
+                            Text(
+                                text = stringResource(R.string.character_sync_other_hub, entityHub),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = GoldAccent,
+                            )
+                        }
                         val matchedCampaign = hubCampaigns.firstOrNull { it.id == effectiveCampaignId }
                         val campaignText = when {
                             effectiveCampaignId == null -> stringResource(R.string.character_sync_campaign_none)
@@ -189,7 +216,7 @@ fun CharacterDetailScreen(
                             text = stringResource(
                                 if (isSyncing) R.string.character_sync_working else R.string.character_sync_action,
                             ),
-                            onClick = { effectiveCampaignId?.let { onSync(entity.id, it) } },
+                            onClick = { effectiveCampaignId?.let { onSync(entity.id, it, false) } },
                             enabled = !isSyncing && effectiveCampaignId != null,
                             testTag = GodTags.heroSync(entity.id),
                         )
@@ -228,6 +255,7 @@ fun CharacterDetailScreen(
                                     testTag = GodTags.heroCampaignChip(entity.id, campaign.id),
                                     onClick = {
                                         manualCampaignInput = campaign.id.toString()
+                                        explicitCampaignId = campaign.id
                                         onSelectCampaign(campaign.id)
                                     },
                                 )
@@ -262,7 +290,12 @@ fun CharacterDetailScreen(
                             role = Role.Button,
                             selectedStateRes = null,
                             testTag = GodTags.heroCampaignApply(entity.id),
-                            onClick = { parsedManual?.let(onSelectCampaign) },
+                            onClick = {
+                                parsedManual?.let { cid ->
+                                    explicitCampaignId = cid
+                                    onSelectCampaign(cid)
+                                }
+                            },
                         )
                     }
                 }
@@ -426,6 +459,70 @@ fun CharacterDetailScreen(
                     modifier = Modifier.padding(top = Spacing.xs),
                 )
             }
+        }
+        val crossHub = pendingCrossHubSync
+        if (crossHub != null && crossHub.characterId == entity.id) {
+            AlertDialog(
+                onDismissRequest = { onDismissCrossHubSync?.invoke() },
+                modifier = Modifier.testTag(GodTags.heroCrossHubDialog(entity.id)),
+                title = {
+                    Text(
+                        text = stringResource(R.string.character_sync_cross_hub_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = GoldAccent,
+                    )
+                },
+                text = {
+                    Text(
+                        text = if (crossHub.previousHubUrl.isNotBlank()) {
+                            stringResource(
+                                R.string.character_sync_cross_hub_message,
+                                crossHub.previousHubUrl,
+                                crossHub.targetHubUrl,
+                                crossHub.campaignId,
+                            )
+                        } else {
+                            stringResource(
+                                R.string.character_sync_cross_hub_message_unknown,
+                                crossHub.targetHubUrl,
+                                crossHub.campaignId,
+                            )
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextPrimary,
+                    )
+                },
+                confirmButton = {
+                    Text(
+                        text = stringResource(R.string.character_sync_cross_hub_confirm),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = GoldAccent,
+                        modifier = Modifier
+                            .testTag(GodTags.heroCrossHubConfirm(entity.id))
+                            .clickable(role = Role.Button) {
+                                onConfirmCrossHubSync?.invoke()
+                                    ?: onSync?.invoke(entity.id, crossHub.campaignId, true)
+                            }
+                            .godTouchHeight()
+                            .padding(Spacing.sm),
+                    )
+                },
+                dismissButton = {
+                    Text(
+                        text = stringResource(R.string.character_sync_cross_hub_cancel),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = TextPrimary,
+                        modifier = Modifier
+                            .testTag(GodTags.heroCrossHubCancel(entity.id))
+                            .clickable(role = Role.Button) {
+                                onDismissCrossHubSync?.invoke()
+                            }
+                            .godTouchHeight()
+                            .padding(Spacing.sm),
+                    )
+                },
+            )
         }
     }
 }

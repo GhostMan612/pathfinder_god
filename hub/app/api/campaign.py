@@ -43,7 +43,11 @@ from app.db.portability import (
     import_campaign_db,
     import_character_db,
 )
-from app.db.repository import CampaignRepository, RevisionConflictError
+from app.db.repository import (
+    CampaignNotFoundError,
+    CampaignRepository,
+    RevisionConflictError,
+)
 from app.llm.ollama_client import OllamaClient
 from app.llm.orchestrator import LLMOrchestrator
 
@@ -777,6 +781,15 @@ def _handle_party_sync(
             idempotency_key=member.idempotency_key,
         )
         return PartySyncResponse(**result)
+    except CampaignNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "campaign_not_found",
+                "message": str(exc),
+                "campaign_id": exc.campaign_id,
+            },
+        )
     except RevisionConflictError as exc:
         raise HTTPException(
             status_code=409,
