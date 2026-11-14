@@ -25,6 +25,8 @@ Interactive playground (hub running): `http://localhost:8000/docs`.
 | POST | `/campaign/import` | Export payload | Merged state (incl. sessions, notes, decisions) |
 | POST | `/campaign/summarize-session` | `{events[], campaign_name}` | `{summary, event_count}` — chronicler journal entry |
 | GET/POST | `/campaign/npcs`, `/campaign/party` | NPC/member JSON | IDs + names |
+| GET | `/campaign/{campaign_id}/party` | — | Scoped party members (ordered by name) |
+| POST | `/campaign/{campaign_id}/party/sync`, `/campaign/party/sync` | `PartySyncRequest` (`uuid`, `name`, `expected_revision?`, `idempotency_key?`, stats) | `{id, uuid, name, revision, updated_at, status}` (`409` on revision/UUID conflict) |
 | GET | `/campaign/backup` | - | Full export as download |
 | POST | `/campaign/create` | `{name, edition=2e, premise?, hero_prompt?}` | `{campaign_id, opening_narration, ...}` |
 | POST | `/campaign/{campaign_id}/turn` | `{action, actor=player, seed?}` | `TurnResponse` (dice, HP, conditions, narration, choices, encounter) |

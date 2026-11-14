@@ -27,4 +27,17 @@ interface CharacterDao {
 
     @Query("SELECT COUNT(*) FROM characters")
     suspend fun count(): Int
+
+    @Query("SELECT * FROM characters WHERE uuid = :uuid")
+    suspend fun getByUuid(uuid: String): CharacterEntity?
+
+    @Query("UPDATE characters SET uuid = :uuid, campaign_id = :campaignId, server_revision = :serverRevision, sync_status = :syncStatus, last_synced_at = :lastSyncedAt WHERE id = :id")
+    suspend fun updateSyncState(
+        id: Long,
+        uuid: String,
+        campaignId: Int,
+        serverRevision: Int?,
+        syncStatus: String,
+        lastSyncedAt: String?,
+    )
 }

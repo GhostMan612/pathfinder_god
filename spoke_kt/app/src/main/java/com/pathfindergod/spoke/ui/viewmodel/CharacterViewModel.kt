@@ -22,6 +22,7 @@ data class CharacterUiState(
     val selectedId: Long? = null,
     val isLoading: Boolean = false,
     val isForging: Boolean = false,
+    val syncingId: Long? = null,
     val error: UiText? = null,
     val lastForgedId: Long? = null,
 )
@@ -124,4 +125,16 @@ class CharacterViewModel(
     }
 
     suspend fun localCount(): Int = repository.characterCount()
+
+    fun sync(id: Long, campaignId: Int? = null) {
+        if (_state.value.syncingId != null) return
+        viewModelScope.launch {
+            _state.value = _state.value.copy(syncingId = id)
+            try {
+                repository.syncCharacter(id, campaignId)
+            } finally {
+                _state.value = _state.value.copy(syncingId = null)
+            }
+        }
+    }
 }

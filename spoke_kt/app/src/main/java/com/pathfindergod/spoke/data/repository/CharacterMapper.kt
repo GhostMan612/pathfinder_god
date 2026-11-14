@@ -6,6 +6,7 @@
 package com.pathfindergod.spoke.data.repository
 
 import com.pathfindergod.spoke.data.local.CharacterEntity
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -57,7 +58,55 @@ object CharacterMapper {
             derived = derived(wire),
             conditions = json(wire["conditions"]),
             notes = text(wire["notes"]),
+            uuid = text(wire["uuid"]) ?: java.util.UUID.randomUUID().toString(),
+            campaignId = int(wire["campaign_id"])?.takeIf { it >= 1 } ?: 1,
+            serverRevision = int(wire["server_revision"]) ?: int(wire["revision"]),
         )
+    }
+
+    fun toWire(entity: CharacterEntity): Map<String, JsonElement> = buildJsonObject {
+        put("uuid", JsonPrimitive(entity.uuid))
+        put("name", JsonPrimitive(entity.name))
+        entity.ancestry?.let { put("ancestry", JsonPrimitive(it)) }
+        entity.heritage?.let { put("heritage", JsonPrimitive(it)) }
+        entity.background?.let { put("background", JsonPrimitive(it)) }
+        entity.characterClass?.let {
+            put("character_class", JsonPrimitive(it))
+            put("class", JsonPrimitive(it))
+        }
+        entity.subclass?.let { put("subclass", JsonPrimitive(it)) }
+        put("level", JsonPrimitive(entity.level))
+        entity.deity?.let { put("deity", JsonPrimitive(it)) }
+        entity.alignment?.let { put("alignment", JsonPrimitive(it)) }
+        entity.size?.let { put("size", JsonPrimitive(it)) }
+        entity.gender?.let { put("gender", JsonPrimitive(it)) }
+        entity.age?.let { put("age", JsonPrimitive(it)) }
+        entity.eyes?.let { put("eyes", JsonPrimitive(it)) }
+        entity.hair?.let { put("hair", JsonPrimitive(it)) }
+        entity.height?.let { put("height", JsonPrimitive(it)) }
+        entity.weight?.let { put("weight", JsonPrimitive(it)) }
+        entity.languages?.let { put("languages", JsonPrimitive(it)) }
+        entity.senses?.let { put("senses", JsonPrimitive(it)) }
+        entity.speed?.let { put("speed", JsonPrimitive(it)) }
+        entity.notes?.let { put("notes", JsonPrimitive(it)) }
+        entity.serverRevision?.let { put("server_revision", JsonPrimitive(it)) }
+
+        parseJsonOrNull(entity.abilities)?.let { put("abilities", it) }
+        parseJsonOrNull(entity.proficiencies)?.let { put("proficiencies", it) }
+        parseJsonOrNull(entity.feats)?.let { put("feats", it) }
+        parseJsonOrNull(entity.spellcasting)?.let { put("spellcasting", it) }
+        parseJsonOrNull(entity.equipment)?.let { put("equipment", it) }
+        parseJsonOrNull(entity.conditions)?.let { put("conditions", it) }
+        parseJsonOrNull(entity.derived)?.let { put("derived", it) }
+    }
+
+    private fun parseJsonOrNull(raw: String?): JsonElement? {
+        if (raw.isNullOrBlank()) return null
+        return try {
+            Json.parseToJsonElement(raw)
+        } catch (_: Exception) {
+            JsonPrimitive(raw)
+        }
     }
 
     /**

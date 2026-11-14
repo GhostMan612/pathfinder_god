@@ -124,6 +124,8 @@ fun NavGraphBuilder.appNavGraph(
             CharacterDetailScreen(
                 entity = entity,
                 onBack = { navController.popBackStack() },
+                onSync = { characters.sync(it) },
+                isSyncing = state.syncingId == entity.id,
             )
         }
     }

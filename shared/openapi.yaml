@@ -920,6 +920,116 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /campaign/{campaign_id}/party:
+    get:
+      tags:
+      - campaign
+      summary: List Campaign Party
+      operationId: list_campaign_party_campaign__campaign_id__party_get
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          maximum: 2147483647
+          minimum: 1
+          title: Campaign Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                title: Response List Campaign Party Campaign  Campaign Id  Party Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /campaign/{campaign_id}/party/sync:
+    post:
+      tags:
+      - campaign
+      summary: Sync Campaign Party Member
+      operationId: sync_campaign_party_member_campaign__campaign_id__party_sync_post
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
+      parameters:
+      - name: campaign_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          maximum: 2147483647
+          minimum: 1
+          title: Campaign Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PartySyncRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartySyncResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /campaign/party/sync:
+    post:
+      tags:
+      - campaign
+      summary: Sync Party Member Legacy
+      operationId: sync_party_member_legacy_campaign_party_sync_post
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
+      parameters:
+      - name: campaign_id
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 2147483647
+          minimum: 1
+          default: 1
+          title: Campaign Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PartySyncRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartySyncResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /campaign/create:
     post:
       tags:
@@ -3601,6 +3711,100 @@ components:
       required:
       - name
       title: PartyMemberRequest
+    PartySyncRequest:
+      properties:
+        uuid:
+          type: string
+          maxLength: 64
+          minLength: 1
+          title: Uuid
+        name:
+          type: string
+          maxLength: 120
+          minLength: 1
+          title: Name
+        player_name:
+          anyOf:
+          - type: string
+            maxLength: 120
+          - type: 'null'
+          title: Player Name
+        class:
+          anyOf:
+          - type: string
+            maxLength: 60
+          - type: 'null'
+          title: Class
+        level:
+          type: integer
+          maximum: 20.0
+          minimum: 1.0
+          title: Level
+          default: 1
+        ancestry:
+          anyOf:
+          - type: string
+            maxLength: 60
+          - type: 'null'
+          title: Ancestry
+        background:
+          anyOf:
+          - type: string
+            maxLength: 120
+          - type: 'null'
+          title: Background
+        stats:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Stats
+        expected_revision:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Expected Revision
+        idempotency_key:
+          anyOf:
+          - type: string
+            maxLength: 64
+          - type: 'null'
+          title: Idempotency Key
+      type: object
+      required:
+      - uuid
+      - name
+      title: PartySyncRequest
+    PartySyncResponse:
+      properties:
+        id:
+          type: integer
+          title: Id
+        uuid:
+          type: string
+          title: Uuid
+        name:
+          type: string
+          title: Name
+        revision:
+          type: integer
+          title: Revision
+        updated_at:
+          type: string
+          title: Updated At
+        status:
+          type: string
+          title: Status
+          default: synced
+      type: object
+      required:
+      - id
+      - uuid
+      - name
+      - revision
+      - updated_at
+      title: PartySyncResponse
     PointResponse:
       properties:
         x:

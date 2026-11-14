@@ -271,6 +271,15 @@
     <string name="character_spellcasting">Spellcasting</string>
     <string name="character_conditions">Conditions</string>
     <string name="character_notes">Notes</string>
+    <string name="character_sync_title">Hub Sync</string>
+    <string name="character_sync_action">Sync to Hub</string>
+    <string name="character_sync_working">Syncing…</string>
+    <string name="character_sync_status_local">Local Only</string>
+    <string name="character_sync_status_synced">Synced (Rev %1$d)</string>
+    <string name="character_sync_status_conflict">Conflict: Hub revision differs</string>
+    <string name="character_sync_status_auth_error">Auth failed: Check API key</string>
+    <string name="character_sync_status_tls_error">TLS error: Certificate check failed</string>
+    <string name="character_sync_status_network_error">Network error: Hub unreachable</string>
     <string name="character_forge_title">Forge a hero</string>
     <string name="character_forge_prompt_label">Who walks the path?</string>
     <string name="character_forge_prompt_hint">e.g., a dwarven champion of Torag</string>

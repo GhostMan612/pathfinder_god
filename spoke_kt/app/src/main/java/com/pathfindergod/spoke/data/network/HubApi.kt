@@ -236,6 +236,30 @@ data class SoloStateResponse(
     val chronicle: String = "",
 )
 
+@Serializable
+data class PartySyncRequest(
+    val uuid: String,
+    val name: String,
+    @SerialName("player_name") val playerName: String? = null,
+    @SerialName("class") val characterClass: String? = null,
+    val level: Int = 1,
+    val ancestry: String? = null,
+    val background: String? = null,
+    val stats: Map<String, JsonElement>? = null,
+    @SerialName("expected_revision") val expectedRevision: Int? = null,
+    @SerialName("idempotency_key") val idempotencyKey: String? = null,
+)
+
+@Serializable
+data class PartySyncResponse(
+    val id: Int,
+    val uuid: String,
+    val name: String,
+    val revision: Int,
+    @SerialName("updated_at") val updatedAt: String,
+    val status: String = "synced",
+)
+
 interface HubApi {
     @POST("ask")
     suspend fun ask(@Body request: AskRequest): AskResponse
@@ -285,4 +309,15 @@ interface HubApi {
 
     @POST("encounter/generate")
     suspend fun generateEncounter(@Body request: EncounterRequest): EncounterResponse
+
+    @POST("campaign/{campaign_id}/party/sync")
+    suspend fun syncPartyMember(
+        @Path("campaign_id") campaignId: Int,
+        @Body request: PartySyncRequest,
+    ): PartySyncResponse
+
+    @GET("campaign/{campaign_id}/party")
+    suspend fun getCampaignParty(
+        @Path("campaign_id") campaignId: Int,
+    ): List<Map<String, JsonElement>>
 }

@@ -53,6 +53,7 @@ object GodTags {
     fun heroDelete(id: Long): String = "pg:hero:card:$id:delete"
     const val heroBack = "pg:hero:back"
     fun heroShare(id: Long): String = "pg:hero:detail:$id:share"
+    fun heroSync(id: Long): String = "pg:hero:detail:$id:sync"
     const val HERO_FORGE_FAB = "pg:hero:forge:fab"
     const val HERO_FORGE_PROMPT = "pg:hero:forge:prompt"
     const val HERO_FORGE_SUBMIT = "pg:hero:forge:submit"

@@ -87,7 +87,7 @@ internal fun rememberCharacterViewModel(): CharacterViewModel {
     val repository = remember {
         CharacterRepository(
             AppDatabase.get(context.applicationContext),
-            buildHubApi(prefs.restUrl()),
+            { buildHubApi(prefs.restUrl()) },
         )
     }
     return viewModel(factory = remember { CharacterVmFactory(repository) })

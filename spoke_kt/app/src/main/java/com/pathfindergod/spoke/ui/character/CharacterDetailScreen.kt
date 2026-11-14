@@ -40,6 +40,7 @@ import com.pathfindergod.spoke.data.local.CharacterEntity
 import com.pathfindergod.spoke.ui.designsystem.Dimens
 import com.pathfindergod.spoke.ui.designsystem.GodBackLink
 import com.pathfindergod.spoke.ui.designsystem.GodCard
+import com.pathfindergod.spoke.ui.designsystem.GodPrimaryButton
 import com.pathfindergod.spoke.ui.designsystem.GodStatTile
 import com.pathfindergod.spoke.ui.designsystem.GodTags
 import com.pathfindergod.spoke.ui.designsystem.Spacing
@@ -93,6 +94,8 @@ private fun abilityModifier(score: Int): Int = Math.floorDiv(score - 10, 2)
 fun CharacterDetailScreen(
     entity: CharacterEntity,
     onBack: () -> Unit,
+    onSync: ((Long) -> Unit)? = null,
+    isSyncing: Boolean = false,
 ) {
     val context = LocalContext.current
     val derived = remember(entity.derived) { flatEntries(entity.derived).toMap() }
@@ -109,6 +112,52 @@ fun CharacterDetailScreen(
             onClick = onBack,
             testTag = GodTags.heroBack,
         )
+        GodCard {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(end = Spacing.md)) {
+                    Text(
+                        text = stringResource(R.string.character_sync_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = GoldAccent,
+                    )
+                    val statusText = when (entity.syncStatus) {
+                        "synced" -> stringResource(R.string.character_sync_status_synced, entity.serverRevision ?: 1)
+                        "conflict" -> stringResource(R.string.character_sync_status_conflict)
+                        "auth_error" -> stringResource(R.string.character_sync_status_auth_error)
+                        "tls_error" -> stringResource(R.string.character_sync_status_tls_error)
+                        "network_error" -> stringResource(R.string.character_sync_status_network_error)
+                        else -> stringResource(R.string.character_sync_status_local)
+                    }
+                    Text(
+                        text = statusText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (
+                            entity.syncStatus == "conflict" ||
+                            entity.syncStatus == "auth_error" ||
+                            entity.syncStatus == "tls_error"
+                        ) {
+                            CritRed
+                        } else {
+                            TextSecondary
+                        },
+                    )
+                }
+                if (onSync != null) {
+                    GodPrimaryButton(
+                        text = stringResource(
+                            if (isSyncing) R.string.character_sync_working else R.string.character_sync_action,
+                        ),
+                        onClick = { onSync(entity.id) },
+                        enabled = !isSyncing,
+                        testTag = GodTags.heroSync(entity.id),
+                    )
+                }
+            }
+        }
         GodCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(

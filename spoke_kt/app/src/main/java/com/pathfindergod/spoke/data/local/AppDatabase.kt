@@ -37,7 +37,7 @@ abstract class AppDatabase : RoomDatabase() {
 
     companion object {
         const val FILE_NAME = "pathfinder_spoke.db"
-        const val VERSION = 4
+        const val VERSION = 5
 
         private const val CREATE_CAMPAIGNS =
             "CREATE TABLE IF NOT EXISTS `campaigns` (" +
@@ -80,7 +80,27 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `characters` ADD COLUMN `uuid` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `characters` ADD COLUMN `campaign_id` INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE `characters` ADD COLUMN `server_revision` INTEGER")
+                db.execSQL("ALTER TABLE `characters` ADD COLUMN `sync_status` TEXT NOT NULL DEFAULT 'local'")
+                db.execSQL("ALTER TABLE `characters` ADD COLUMN `last_synced_at` TEXT")
+                db.execSQL(
+                    "UPDATE `characters` SET `uuid` = lower(" +
+                        "hex(randomblob(4)) || '-' || " +
+                        "hex(randomblob(2)) || '-4' || " +
+                        "substr(hex(randomblob(2)), 2) || '-' || " +
+                        "substr('89ab', 1 + (abs(random()) % 4), 1) || " +
+                        "substr(hex(randomblob(2)), 2) || '-' || " +
+                        "hex(randomblob(6))) " +
+                        "WHERE `uuid` = ''",
+                )
+            }
+        }
+
+        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
 
         fun create(
             context: Context,
