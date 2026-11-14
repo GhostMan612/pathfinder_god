@@ -88,6 +88,8 @@ internal fun rememberCharacterViewModel(): CharacterViewModel {
         CharacterRepository(
             AppDatabase.get(context.applicationContext),
             { buildHubApi(prefs.restUrl()) },
+            selectedCampaignIdProvider = { prefs.selectedCampaignId() },
+            onCampaignSelected = { prefs.setSelectedCampaignId(it) },
         )
     }
     return viewModel(factory = remember { CharacterVmFactory(repository) })

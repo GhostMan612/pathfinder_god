@@ -143,6 +143,7 @@ CREATE TABLE IF NOT EXISTS party_members (
     stats_json TEXT,           -- Full character sheet JSON
     revision INTEGER NOT NULL DEFAULT 1,
     idempotency_key TEXT,
+    idempotency_hash TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(campaign_id, name)

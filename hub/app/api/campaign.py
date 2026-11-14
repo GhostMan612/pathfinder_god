@@ -118,6 +118,23 @@ class SummarizeSessionResponse(BaseModel):
     event_count: int
 
 
+class CampaignSummary(BaseModel):
+    id: int
+    name: str
+    edition: str
+    summary: str | None = None
+    created_at: str
+    updated_at: str
+
+
+@router.get("/list", response_model=list[CampaignSummary])
+async def list_campaigns(
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+) -> list[dict]:
+    return repo.list_campaigns()
+
+
 @router.get("", response_model=CampaignStateResponse)
 async def get_campaign(
     campaign_id: int = Query(1, ge=1, le=2147483647),
@@ -764,7 +781,7 @@ def _handle_party_sync(
         raise HTTPException(
             status_code=409,
             detail={
-                "error": "conflict",
+                "error": exc.error_code,
                 "message": str(exc),
                 "current_revision": exc.current_revision,
                 "expected_revision": exc.expected_revision,

@@ -260,6 +260,16 @@ data class PartySyncResponse(
     val status: String = "synced",
 )
 
+@Serializable
+data class HubCampaignSummary(
+    val id: Int,
+    val name: String,
+    val edition: String = "2e",
+    val summary: String? = null,
+    @SerialName("created_at") val createdAt: String = "",
+    @SerialName("updated_at") val updatedAt: String = "",
+)
+
 interface HubApi {
     @POST("ask")
     suspend fun ask(@Body request: AskRequest): AskResponse
@@ -320,4 +330,7 @@ interface HubApi {
     suspend fun getCampaignParty(
         @Path("campaign_id") campaignId: Int,
     ): List<Map<String, JsonElement>>
+
+    @GET("campaign/list")
+    suspend fun listCampaigns(): List<HubCampaignSummary>
 }

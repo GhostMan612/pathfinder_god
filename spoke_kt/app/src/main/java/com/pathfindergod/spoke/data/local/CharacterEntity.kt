@@ -41,8 +41,23 @@ data class CharacterEntity(
     val conditions: String? = null,
     val notes: String? = null,
     val uuid: String = java.util.UUID.randomUUID().toString(),
-    @ColumnInfo(name = "campaign_id") val campaignId: Int = 1,
+    @ColumnInfo(name = "campaign_id") val campaignId: Int? = null,
     @ColumnInfo(name = "server_revision") val serverRevision: Int? = null,
     @ColumnInfo(name = "sync_status") val syncStatus: String = "local",
     @ColumnInfo(name = "last_synced_at") val lastSyncedAt: String? = null,
-)
+) {
+    fun hasSameSheetContent(other: CharacterEntity): Boolean =
+        copy(
+            uuid = "",
+            campaignId = null,
+            serverRevision = null,
+            syncStatus = "",
+            lastSyncedAt = null,
+        ) == other.copy(
+            uuid = "",
+            campaignId = null,
+            serverRevision = null,
+            syncStatus = "",
+            lastSyncedAt = null,
+        )
+}

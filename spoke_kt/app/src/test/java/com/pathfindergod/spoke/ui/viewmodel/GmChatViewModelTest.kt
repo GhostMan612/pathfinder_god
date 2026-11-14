@@ -20,6 +20,7 @@ import com.pathfindergod.spoke.data.network.EndTurnResponse
 import com.pathfindergod.spoke.data.network.GenerateRequest
 import com.pathfindergod.spoke.data.network.GmStreamSource
 import com.pathfindergod.spoke.data.network.HubApi
+import com.pathfindergod.spoke.data.network.HubCampaignSummary
 import com.pathfindergod.spoke.data.network.LootResponse
 import com.pathfindergod.spoke.data.network.MapGenerateResponse
 import com.pathfindergod.spoke.data.network.MapRequest
@@ -165,6 +166,9 @@ class GmChatViewModelTest {
             throw UnsupportedOperationException()
 
         override suspend fun getCampaignParty(campaignId: Int): List<Map<String, JsonElement>> =
+            throw UnsupportedOperationException()
+
+        override suspend fun listCampaigns(): List<HubCampaignSummary> =
             throw UnsupportedOperationException()
     }
 

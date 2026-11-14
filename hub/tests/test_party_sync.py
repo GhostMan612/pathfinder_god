@@ -5,13 +5,19 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app import main
 from app.api.deps import get_repo
-from app.db.repository import CampaignRepository, RevisionConflictError
+from app.db.repository import (
+    CampaignRepository,
+    IdempotencyConflictError,
+    RevisionConflictError,
+)
 
 
 @pytest.fixture
@@ -425,3 +431,246 @@ def test_api_sync_invalid_campaign_id_rejected(authed_client):
         json={"uuid": "uuid-bad-cid", "name": "Valeros", "level": 1},
     )
     assert r.status_code == 422
+
+
+def test_repo_enforces_unique_uuid_index_and_upgrades_non_unique(tmp_path):
+    db_file = tmp_path / "upgrade_unique.db"
+    conn = sqlite3.connect(db_file)
+    conn.executescript(
+        """
+        CREATE TABLE campaigns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            edition TEXT NOT NULL DEFAULT '2e',
+            summary TEXT,
+            combat_json TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE encounters (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            campaign_id INTEGER NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'battle',
+            status TEXT NOT NULL DEFAULT 'pending',
+            location_id INTEGER
+        );
+        CREATE TABLE party_members (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+            uuid TEXT,
+            name TEXT NOT NULL,
+            player_name TEXT,
+            class TEXT,
+            level INTEGER DEFAULT 1,
+            ancestry TEXT,
+            background TEXT,
+            stats_json TEXT,
+            revision INTEGER NOT NULL DEFAULT 1,
+            idempotency_key TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(campaign_id, name)
+        );
+        CREATE INDEX idx_party_campaign_uuid ON party_members(campaign_id, uuid);
+        INSERT INTO campaigns (id, name) VALUES (1, 'Default');
+        INSERT INTO party_members (campaign_id, uuid, name) VALUES (1, NULL, 'NullOne');
+        INSERT INTO party_members (campaign_id, uuid, name) VALUES (1, NULL, 'NullTwo');
+        INSERT INTO party_members (campaign_id, uuid, name) VALUES (1, 'uuid-unique-1', 'Alpha');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    upgraded = CampaignRepository(str(db_file))
+    verify_conn = sqlite3.connect(db_file)
+    try:
+        idx_sql = verify_conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_party_campaign_uuid'"
+        ).fetchone()[0]
+        assert "UNIQUE" in idx_sql.upper()
+        with pytest.raises(sqlite3.IntegrityError):
+            verify_conn.execute(
+                "INSERT INTO party_members (campaign_id, uuid, name) VALUES (1, 'uuid-unique-1', 'Beta')"
+            )
+    finally:
+        verify_conn.close()
+    assert len(upgraded.get_party(1)) == 3
+
+
+def test_repo_concurrent_first_time_sync_same_uuid_no_duplicate(tmp_path):
+    db_file = tmp_path / "concurrent.db"
+    repo_a = CampaignRepository(str(db_file))
+    repo_b = CampaignRepository(str(db_file))
+    barrier = threading.Barrier(2)
+
+    def worker(r: CampaignRepository, name: str, key: str):
+        barrier.wait()
+        return r.sync_party_member(
+            campaign_id=1,
+            uuid="uuid-race-hero",
+            name=name,
+            level=1,
+            expected_revision=None,
+            idempotency_key=key,
+        )
+
+    outcomes = []
+    errors = []
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        f1 = pool.submit(worker, repo_a, "HeroAlpha", "idemp-race-a")
+        f2 = pool.submit(worker, repo_b, "HeroBeta", "idemp-race-b")
+        for fut in (f1, f2):
+            try:
+                outcomes.append(fut.result())
+            except RevisionConflictError as exc:
+                errors.append(exc)
+
+    assert len(outcomes) == 1
+    assert len(errors) == 1
+    assert outcomes[0]["revision"] == 1
+    assert len(repo_a.get_party(1)) == 1
+
+
+def test_repo_and_api_idempotency_mismatch_rejected(authed_client):
+    payload = {
+        "uuid": "uuid-idemp-guard",
+        "name": "Kyra",
+        "class": "Cleric",
+        "level": 1,
+        "idempotency_key": "idemp-fixed-key",
+    }
+    first = authed_client.post("/campaign/1/party/sync", json=payload)
+    assert first.status_code == 200
+    assert first.json()["revision"] == 1
+
+    mismatched = dict(payload)
+    mismatched["level"] = 9
+    second = authed_client.post("/campaign/1/party/sync", json=mismatched)
+    assert second.status_code == 409
+    detail = second.json()["detail"]
+    assert detail["error"] == "idempotency_conflict"
+    assert detail["current_revision"] == 1
+
+    other_char = {
+        "uuid": "uuid-different-hero",
+        "name": "Merisiel",
+        "level": 1,
+        "idempotency_key": "idemp-fixed-key",
+    }
+    third = authed_client.post("/campaign/1/party/sync", json=other_char)
+    assert third.status_code == 409
+    assert third.json()["detail"]["error"] == "idempotency_conflict"
+
+    party = authed_client.get("/campaign/1/party").json()
+    assert len(party) == 1
+    assert party[0]["level"] == 1
+
+
+def test_repo_older_retry_after_later_revision_conflicts(repo):
+    res1 = repo.sync_party_member(
+        campaign_id=1,
+        uuid="uuid-stale-retry",
+        name="Ezren",
+        level=1,
+        expected_revision=0,
+        idempotency_key="idemp-rev-1",
+    )
+    assert res1["revision"] == 1
+
+    res2 = repo.sync_party_member(
+        campaign_id=1,
+        uuid="uuid-stale-retry",
+        name="Ezren",
+        level=2,
+        expected_revision=1,
+        idempotency_key="idemp-rev-2",
+    )
+    assert res2["revision"] == 2
+
+    with pytest.raises(RevisionConflictError) as exc_info:
+        repo.sync_party_member(
+            campaign_id=1,
+            uuid="uuid-stale-retry",
+            name="Ezren",
+            level=1,
+            expected_revision=0,
+            idempotency_key="idemp-rev-1",
+        )
+    assert not isinstance(exc_info.value, IdempotencyConflictError)
+    assert exc_info.value.current_revision == 2
+    assert repo.get_party(1)[0]["level"] == 2
+
+
+def test_api_sync_preserves_existing_player_name_when_omitted_or_null(authed_client):
+    create_res = authed_client.post(
+        "/campaign/1/party/sync",
+        json={
+            "uuid": "uuid-player-preserve",
+            "name": "Seelah",
+            "player_name": "Alice",
+            "level": 1,
+            "idempotency_key": "idemp-p-1",
+        },
+    )
+    assert create_res.status_code == 200
+
+    omitted_res = authed_client.post(
+        "/campaign/1/party/sync",
+        json={
+            "uuid": "uuid-player-preserve",
+            "name": "Seelah",
+            "level": 2,
+            "expected_revision": 1,
+            "idempotency_key": "idemp-p-2",
+        },
+    )
+    assert omitted_res.status_code == 200
+    assert authed_client.get("/campaign/1/party").json()[0]["player_name"] == "Alice"
+
+    null_res = authed_client.post(
+        "/campaign/1/party/sync",
+        json={
+            "uuid": "uuid-player-preserve",
+            "name": "Seelah",
+            "player_name": None,
+            "level": 3,
+            "expected_revision": 2,
+            "idempotency_key": "idemp-p-3",
+        },
+    )
+    assert null_res.status_code == 200
+    assert authed_client.get("/campaign/1/party").json()[0]["player_name"] == "Alice"
+
+    explicit_res = authed_client.post(
+        "/campaign/1/party/sync",
+        json={
+            "uuid": "uuid-player-preserve",
+            "name": "Seelah",
+            "player_name": "Bob",
+            "level": 4,
+            "expected_revision": 3,
+            "idempotency_key": "idemp-p-4",
+        },
+    )
+    assert explicit_res.status_code == 200
+    assert authed_client.get("/campaign/1/party").json()[0]["player_name"] == "Bob"
+
+
+def test_api_list_campaigns_requires_auth_and_returns_campaigns(repo):
+    repo.create_campaign("Abomination Vaults", edition="2e")
+    repo.create_campaign("Kingmaker", edition="2e")
+
+    main.app.dependency_overrides[get_repo] = lambda: repo
+    try:
+        unauth = TestClient(main.app)
+        assert unauth.get("/campaign/list").status_code == 401
+
+        auth = TestClient(main.app)
+        auth.headers["X-API-Key"] = "pfg_test_key_12345"
+        resp = auth.get("/campaign/list")
+        assert resp.status_code == 200
+        names = [item["name"] for item in resp.json()]
+        assert "Abomination Vaults" in names
+        assert "Kingmaker" in names
+    finally:
+        main.app.dependency_overrides.clear()

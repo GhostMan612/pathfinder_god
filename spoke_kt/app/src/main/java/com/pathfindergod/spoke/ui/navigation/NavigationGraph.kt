@@ -116,7 +116,10 @@ fun NavGraphBuilder.appNavGraph(
     ) { entry ->
         val characterId = entry.longArg(NavRoutes.ARG_CHARACTER_ID)
         val state by characters.state.collectAsStateWithLifecycle()
-        LaunchedEffect(characterId) { characters.select(characterId) }
+        LaunchedEffect(characterId) {
+            characters.select(characterId)
+            characters.refreshSelectedCampaignFromPrefs()
+        }
         val entity = state.characters.firstOrNull { it.id == characterId }
         if (entity == null) {
             VanishedHero(onBack = { navController.popBackStack() })
@@ -124,7 +127,12 @@ fun NavGraphBuilder.appNavGraph(
             CharacterDetailScreen(
                 entity = entity,
                 onBack = { navController.popBackStack() },
-                onSync = { characters.sync(it) },
+                selectedCampaignId = state.selectedCampaignId,
+                hubCampaigns = state.hubCampaigns,
+                isLoadingCampaigns = state.isLoadingCampaigns,
+                onLoadCampaigns = { characters.loadHubCampaigns() },
+                onSelectCampaign = { characters.selectCampaign(it) },
+                onSync = { id, cid -> characters.sync(id, cid) },
                 isSyncing = state.syncingId == entity.id,
             )
         }

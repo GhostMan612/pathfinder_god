@@ -9,9 +9,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.pathfindergod.spoke.R
 import com.pathfindergod.spoke.data.local.CharacterEntity
+import com.pathfindergod.spoke.data.network.HubCampaignSummary
 import com.pathfindergod.spoke.data.repository.CharacterMapper
 import com.pathfindergod.spoke.data.repository.CharacterRepository
 import com.pathfindergod.spoke.ui.strings.UiText
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,7 +22,10 @@ import kotlinx.coroutines.launch
 data class CharacterUiState(
     val characters: List<CharacterEntity> = emptyList(),
     val selectedId: Long? = null,
+    val selectedCampaignId: Int? = null,
+    val hubCampaigns: List<HubCampaignSummary> = emptyList(),
     val isLoading: Boolean = false,
+    val isLoadingCampaigns: Boolean = false,
     val isForging: Boolean = false,
     val syncingId: Long? = null,
     val error: UiText? = null,
@@ -30,7 +35,12 @@ data class CharacterUiState(
 class CharacterViewModel(
     private val repository: CharacterRepository,
 ) : ViewModel() {
-    private val _state = MutableStateFlow(CharacterUiState(isLoading = true))
+    private val _state = MutableStateFlow(
+        CharacterUiState(
+            selectedCampaignId = repository.selectedCampaignId(),
+            isLoading = true,
+        ),
+    )
     val state: StateFlow<CharacterUiState> = _state.asStateFlow()
 
     init {
@@ -126,12 +136,44 @@ class CharacterViewModel(
 
     suspend fun localCount(): Int = repository.characterCount()
 
+    fun selectCampaign(campaignId: Int) {
+        if (campaignId < 1) return
+        repository.setSelectedCampaignId(campaignId)
+        _state.value = _state.value.copy(selectedCampaignId = campaignId)
+    }
+
+    fun refreshSelectedCampaignFromPrefs() {
+        _state.value = _state.value.copy(selectedCampaignId = repository.selectedCampaignId())
+    }
+
+    fun loadHubCampaigns() {
+        if (_state.value.isLoadingCampaigns) return
+        viewModelScope.launch {
+            _state.value = _state.value.copy(isLoadingCampaigns = true)
+            try {
+                val campaigns = repository.listHubCampaigns()
+                _state.value = _state.value.copy(
+                    hubCampaigns = campaigns,
+                    isLoadingCampaigns = false,
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _state.value = _state.value.copy(isLoadingCampaigns = false)
+            }
+        }
+    }
+
     fun sync(id: Long, campaignId: Int? = null) {
         if (_state.value.syncingId != null) return
+        val resolvedCampaignId = campaignId
+            ?: _state.value.selectedCampaignId
+            ?: repository.selectedCampaignId()
+            ?: _state.value.characters.firstOrNull { it.id == id }?.campaignId
         viewModelScope.launch {
             _state.value = _state.value.copy(syncingId = id)
             try {
-                repository.syncCharacter(id, campaignId)
+                repository.syncCharacter(id, resolvedCampaignId)
             } finally {
                 _state.value = _state.value.copy(syncingId = null)
             }

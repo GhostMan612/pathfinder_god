@@ -11,6 +11,7 @@ import com.pathfindergod.spoke.data.local.CharacterEntity
 import com.pathfindergod.spoke.data.network.BuildCharacterRequest
 import com.pathfindergod.spoke.data.network.BuildCharacterResponse
 import com.pathfindergod.spoke.data.network.HubApi
+import com.pathfindergod.spoke.data.network.HubCampaignSummary
 import com.pathfindergod.spoke.data.network.PartySyncRequest
 import java.security.MessageDigest
 import javax.net.ssl.SSLException
@@ -24,6 +25,7 @@ import kotlinx.serialization.json.intOrNull
 
 sealed class CharacterSyncResult {
     data class Success(val revision: Int) : CharacterSyncResult()
+    data class LocalModifiedDuringSync(val serverRevision: Int) : CharacterSyncResult()
     data class Conflict(val currentRevision: Int, val serverCharacter: Map<String, JsonElement>?) : CharacterSyncResult()
     data class Error(val message: String, val statusCode: Int? = null) : CharacterSyncResult()
 }
@@ -31,10 +33,18 @@ sealed class CharacterSyncResult {
 class CharacterRepository(
     private val dao: CharacterDao,
     private val apiProvider: () -> HubApi,
+    private val selectedCampaignIdProvider: () -> Int? = { null },
+    private val onCampaignSelected: (Int) -> Unit = {},
 ) {
     constructor(dao: CharacterDao, api: HubApi) : this(dao, { api })
     constructor(db: AppDatabase, api: HubApi) : this(db.characterDao(), { api })
     constructor(db: AppDatabase, apiProvider: () -> HubApi) : this(db.characterDao(), apiProvider)
+    constructor(
+        db: AppDatabase,
+        apiProvider: () -> HubApi,
+        selectedCampaignIdProvider: () -> Int?,
+        onCampaignSelected: (Int) -> Unit,
+    ) : this(db.characterDao(), apiProvider, selectedCampaignIdProvider, onCampaignSelected)
 
     fun observeCharacters(): Flow<List<CharacterEntity>> =
         dao.observeAll()
@@ -54,6 +64,18 @@ class CharacterRepository(
 
     suspend fun characterCount(): Int = dao.count()
 
+    fun selectedCampaignId(): Int? =
+        selectedCampaignIdProvider()?.takeIf { it >= 1 }
+
+    fun setSelectedCampaignId(campaignId: Int) {
+        if (campaignId >= 1) {
+            onCampaignSelected(campaignId)
+        }
+    }
+
+    suspend fun listHubCampaigns(): List<HubCampaignSummary> =
+        apiProvider().listCampaigns()
+
     private fun computeIdempotencyKey(
         campaignId: Int,
         uuid: String,
@@ -72,21 +94,30 @@ class CharacterRepository(
         campaignId: Int? = null,
         idempotencyKey: String? = null,
     ): CharacterSyncResult {
+        if (campaignId != null && campaignId < 1) {
+            return CharacterSyncResult.Error("Invalid campaign ID")
+        }
         val entity = dao.getById(characterId)
             ?: return CharacterSyncResult.Error("Character not found")
 
-        val effectiveUuid = entity.uuid.trim().ifEmpty {
-            java.util.UUID.randomUUID().toString()
-        }
-        val activeEntity = if (effectiveUuid != entity.uuid) {
-            val updated = entity.copy(uuid = effectiveUuid)
-            dao.upsert(updated)
-            updated
+        val effectiveUuid = if (entity.uuid.isBlank()) {
+            val candidate = java.util.UUID.randomUUID().toString()
+            dao.backfillUuidIfBlank(characterId, candidate)
+            dao.getById(characterId)?.uuid?.trim().orEmpty().ifEmpty { candidate }
         } else {
-            entity
+            entity.uuid.trim()
+        }
+        val activeEntity = (dao.getById(characterId) ?: entity).let {
+            if (it.uuid != effectiveUuid) it.copy(uuid = effectiveUuid) else it
         }
 
-        val targetCampaignId = (campaignId ?: activeEntity.campaignId).coerceAtLeast(1)
+        val targetCampaignId = (campaignId ?: selectedCampaignIdProvider() ?: activeEntity.campaignId)
+            ?.takeIf { it >= 1 }
+            ?: run {
+                dao.commitSyncFailure(characterId, activeEntity, effectiveUuid, "campaign_required")
+                return CharacterSyncResult.Error("Select a Hub campaign before syncing")
+            }
+
         val expectedRevision = if (targetCampaignId == activeEntity.campaignId) {
             activeEntity.serverRevision ?: 0
         } else {
@@ -114,15 +145,19 @@ class CharacterRepository(
 
         return try {
             val response = apiProvider().syncPartyMember(targetCampaignId, request)
-            dao.updateSyncState(
+            val committed = dao.commitSyncSuccess(
                 id = characterId,
+                snapshot = activeEntity,
                 uuid = effectiveUuid,
                 campaignId = targetCampaignId,
                 serverRevision = response.revision,
-                syncStatus = "synced",
                 lastSyncedAt = response.updatedAt,
             )
-            CharacterSyncResult.Success(response.revision)
+            if (committed) {
+                CharacterSyncResult.Success(response.revision)
+            } else {
+                CharacterSyncResult.LocalModifiedDuringSync(response.revision)
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: retrofit2.HttpException) {
@@ -147,55 +182,20 @@ class CharacterRepository(
                     }
                 } catch (_: Exception) {
                 }
-                dao.updateSyncState(
-                    id = characterId,
-                    uuid = effectiveUuid,
-                    campaignId = activeEntity.campaignId,
-                    serverRevision = activeEntity.serverRevision,
-                    syncStatus = "conflict",
-                    lastSyncedAt = activeEntity.lastSyncedAt,
-                )
+                dao.commitSyncFailure(characterId, activeEntity, effectiveUuid, "conflict")
                 CharacterSyncResult.Conflict(currentRevision, serverChar)
             } else if (code == 401 || code == 403) {
-                dao.updateSyncState(
-                    id = characterId,
-                    uuid = effectiveUuid,
-                    campaignId = activeEntity.campaignId,
-                    serverRevision = activeEntity.serverRevision,
-                    syncStatus = "auth_error",
-                    lastSyncedAt = activeEntity.lastSyncedAt,
-                )
+                dao.commitSyncFailure(characterId, activeEntity, effectiveUuid, "auth_error")
                 CharacterSyncResult.Error("Authentication failed ($code)", code)
             } else {
-                dao.updateSyncState(
-                    id = characterId,
-                    uuid = effectiveUuid,
-                    campaignId = activeEntity.campaignId,
-                    serverRevision = activeEntity.serverRevision,
-                    syncStatus = "error",
-                    lastSyncedAt = activeEntity.lastSyncedAt,
-                )
+                dao.commitSyncFailure(characterId, activeEntity, effectiveUuid, "error")
                 CharacterSyncResult.Error("HTTP error $code", code)
             }
         } catch (e: SSLException) {
-            dao.updateSyncState(
-                id = characterId,
-                uuid = effectiveUuid,
-                campaignId = activeEntity.campaignId,
-                serverRevision = activeEntity.serverRevision,
-                syncStatus = "tls_error",
-                lastSyncedAt = activeEntity.lastSyncedAt,
-            )
+            dao.commitSyncFailure(characterId, activeEntity, effectiveUuid, "tls_error")
             CharacterSyncResult.Error(e.message ?: "TLS error")
         } catch (e: Exception) {
-            dao.updateSyncState(
-                id = characterId,
-                uuid = effectiveUuid,
-                campaignId = activeEntity.campaignId,
-                serverRevision = activeEntity.serverRevision,
-                syncStatus = "network_error",
-                lastSyncedAt = activeEntity.lastSyncedAt,
-            )
+            dao.commitSyncFailure(characterId, activeEntity, effectiveUuid, "network_error")
             CharacterSyncResult.Error(e.message ?: "Network error")
         }
     }

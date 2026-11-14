@@ -83,7 +83,7 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_4_5 = object : Migration(4, 5) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `characters` ADD COLUMN `uuid` TEXT NOT NULL DEFAULT ''")
-                db.execSQL("ALTER TABLE `characters` ADD COLUMN `campaign_id` INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE `characters` ADD COLUMN `campaign_id` INTEGER")
                 db.execSQL("ALTER TABLE `characters` ADD COLUMN `server_revision` INTEGER")
                 db.execSQL("ALTER TABLE `characters` ADD COLUMN `sync_status` TEXT NOT NULL DEFAULT 'local'")
                 db.execSQL("ALTER TABLE `characters` ADD COLUMN `last_synced_at` TEXT")

@@ -377,6 +377,25 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /campaign/list:
+    get:
+      tags:
+      - campaign
+      summary: List Campaigns
+      operationId: list_campaigns_campaign_list_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/CampaignSummary'
+                type: array
+                title: Response List Campaigns Campaign List Get
+      security:
+      - HTTPBearer: []
+      - APIKeyHeader: []
   /campaign:
     get:
       tags:
@@ -2741,6 +2760,36 @@ components:
       - party
       - notes
       title: CampaignStateResponse
+    CampaignSummary:
+      properties:
+        id:
+          type: integer
+          title: Id
+        name:
+          type: string
+          title: Name
+        edition:
+          type: string
+          title: Edition
+        summary:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Summary
+        created_at:
+          type: string
+          title: Created At
+        updated_at:
+          type: string
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - edition
+      - created_at
+      - updated_at
+      title: CampaignSummary
     CombatEndTurnResponse:
       properties:
         phase:

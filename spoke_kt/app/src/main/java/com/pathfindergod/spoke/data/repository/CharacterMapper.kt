@@ -59,7 +59,7 @@ object CharacterMapper {
             conditions = json(wire["conditions"]),
             notes = text(wire["notes"]),
             uuid = text(wire["uuid"]) ?: java.util.UUID.randomUUID().toString(),
-            campaignId = int(wire["campaign_id"])?.takeIf { it >= 1 } ?: 1,
+            campaignId = int(wire["campaign_id"])?.takeIf { it >= 1 },
             serverRevision = int(wire["server_revision"]) ?: int(wire["revision"]),
         )
     }

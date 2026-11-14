@@ -67,6 +67,18 @@ class AppPreferences(context: Context) {
         prefs.edit().putBoolean(KEY_PIT, value).apply()
     }
 
+    fun selectedCampaignId(): Int? =
+        prefs.getInt(KEY_SELECTED_CAMPAIGN_ID, -1).takeIf { it >= 1 }
+
+    fun setSelectedCampaignId(campaignId: Int) {
+        require(campaignId >= 1) { "campaignId must be positive" }
+        prefs.edit().putInt(KEY_SELECTED_CAMPAIGN_ID, campaignId).apply()
+    }
+
+    fun clearSelectedCampaignId() {
+        prefs.edit().remove(KEY_SELECTED_CAMPAIGN_ID).apply()
+    }
+
     companion object {
         const val DEFAULT_BASE_URL = HubEndpoint.DEFAULT_BASE_URL
 
@@ -78,5 +90,6 @@ class AppPreferences(context: Context) {
         private const val KEY_HAPTICS = "haptics_enabled"
         private const val KEY_BGM_TRACK = "bgm_track"
         private const val KEY_PIT = "pit_enabled"
+        private const val KEY_SELECTED_CAMPAIGN_ID = "selected_campaign_id"
     }
 }

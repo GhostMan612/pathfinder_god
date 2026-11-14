@@ -84,6 +84,7 @@ internal fun rememberGmChatViewModel(): GmChatViewModel {
             api = HubApiFactory.get(prefs.restUrl()),
             streamClient = HubWebSocketClient(),
             streamUrlProvider = { prefs.streamUrl() },
+            onCampaignSelected = { prefs.setSelectedCampaignId(it) },
         )
     }
     return viewModel(factory = remember { GmChatVmFactory(delegate) })

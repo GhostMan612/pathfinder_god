@@ -21,6 +21,7 @@ import com.pathfindergod.spoke.data.network.EncounterRequest
 import com.pathfindergod.spoke.data.network.EncounterResponse
 import com.pathfindergod.spoke.data.network.GenerateRequest
 import com.pathfindergod.spoke.data.network.HubApi
+import com.pathfindergod.spoke.data.network.HubCampaignSummary
 import com.pathfindergod.spoke.data.network.LootResponse
 import com.pathfindergod.spoke.data.network.MapGenerateResponse
 import com.pathfindergod.spoke.data.network.MapRequest
@@ -68,10 +69,16 @@ class CharacterRepositorySyncTest {
         override suspend fun count(): Int = characters.size
         override suspend fun getByUuid(uuid: String): CharacterEntity? =
             characters.values.firstOrNull { it.uuid == uuid }
+        override suspend fun backfillUuidIfBlank(id: Long, uuid: String): Int {
+            val current = characters[id] ?: return 0
+            if (current.uuid.isNotBlank()) return 0
+            characters[id] = current.copy(uuid = uuid)
+            return 1
+        }
         override suspend fun updateSyncState(
             id: Long,
             uuid: String,
-            campaignId: Int,
+            campaignId: Int?,
             serverRevision: Int?,
             syncStatus: String,
             lastSyncedAt: String?,
@@ -91,7 +98,7 @@ class CharacterRepositorySyncTest {
     }
 
     private class FakeHubApi : HubApi {
-        var onSync: ((Int, PartySyncRequest) -> PartySyncResponse)? = null
+        var onSync: (suspend (Int, PartySyncRequest) -> PartySyncResponse)? = null
 
         override suspend fun syncPartyMember(campaignId: Int, request: PartySyncRequest): PartySyncResponse {
             val handler = onSync ?: throw IllegalStateException("onSync not configured")
@@ -99,6 +106,7 @@ class CharacterRepositorySyncTest {
         }
 
         override suspend fun getCampaignParty(campaignId: Int): List<Map<String, JsonElement>> = emptyList()
+        override suspend fun listCampaigns(): List<HubCampaignSummary> = emptyList()
         override suspend fun ask(request: AskRequest): AskResponse = error("unused")
         override suspend fun createSoloCampaign(request: CreateCampaignRequest): CreateCampaignResponse = error("unused")
         override suspend fun takeSoloTurn(campaignId: Int, request: TurnRequest): TurnResponse = error("unused")
@@ -372,7 +380,7 @@ class CharacterRepositorySyncTest {
             )
         }
 
-        val result = repo.syncCharacter(1L)
+        val result = repo.syncCharacter(1L, campaignId = 1)
         assertTrue(result is CharacterSyncResult.Success)
         val stored = dao.getById(1L)!!
         assertEquals(capturedUuid, stored.uuid)
@@ -401,7 +409,7 @@ class CharacterRepositorySyncTest {
             throw SSLException("Certificate pinning failure")
         }
 
-        val result = repo.syncCharacter(1L)
+        val result = repo.syncCharacter(1L, campaignId = 1)
         assertTrue(result is CharacterSyncResult.Error)
 
         val stored = dao.getById(1L)!!
@@ -457,5 +465,165 @@ class CharacterRepositorySyncTest {
         assertEquals(2, updated.campaignId)
         assertEquals(1, updated.serverRevision)
         assertEquals("synced", updated.syncStatus)
+    }
+
+    @Test
+    fun syncCharacterWithoutCampaignDoesNotDefaultToCampaignOne() = runBlocking {
+        val dao = FakeCharacterDao()
+        val api = FakeHubApi()
+        var called = false
+        api.onSync = { _, _ ->
+            called = true
+            error("must not call Hub without an explicit campaign")
+        }
+        val repo = CharacterRepository(dao, { api }, selectedCampaignIdProvider = { null })
+
+        dao.upsert(
+            CharacterEntity(
+                id = 1L,
+                name = "Lem",
+                characterClass = "Bard",
+                level = 2,
+                uuid = "hero-lem-1",
+                campaignId = null,
+            ),
+        )
+
+        val result = repo.syncCharacter(1L)
+        assertTrue(result is CharacterSyncResult.Error)
+        assertEquals(false, called)
+        val stored = dao.getById(1L)!!
+        assertEquals(null, stored.campaignId)
+        assertEquals("campaign_required", stored.syncStatus)
+    }
+
+    @Test
+    fun syncCharacterUsesSelectedCampaignProviderWhenOmitted() = runBlocking {
+        val dao = FakeCharacterDao()
+        val api = FakeHubApi()
+        val repo = CharacterRepository(dao, { api }, selectedCampaignIdProvider = { 7 })
+
+        dao.upsert(
+            CharacterEntity(
+                id = 1L,
+                name = "Sajan",
+                characterClass = "Monk",
+                level = 3,
+                uuid = "hero-sajan-1",
+                campaignId = null,
+            ),
+        )
+
+        var seenCampaignId = -1
+        api.onSync = { cid, req ->
+            seenCampaignId = cid
+            assertEquals(0, req.expectedRevision)
+            PartySyncResponse(
+                id = 33,
+                uuid = req.uuid,
+                name = req.name,
+                revision = 1,
+                updatedAt = "2026-11-12T02:00:00Z",
+                status = "synced",
+            )
+        }
+
+        val result = repo.syncCharacter(1L)
+        assertTrue(result is CharacterSyncResult.Success)
+        assertEquals(7, seenCampaignId)
+        val stored = dao.getById(1L)!!
+        assertEquals(7, stored.campaignId)
+        assertEquals(1, stored.serverRevision)
+        assertEquals("synced", stored.syncStatus)
+    }
+
+    @Test
+    fun syncCharacterEditedInFlightIsNotMarkedSynced() = runBlocking {
+        val dao = FakeCharacterDao()
+        val api = FakeHubApi()
+        val repo = CharacterRepository(dao, api)
+
+        dao.upsert(
+            CharacterEntity(
+                id = 1L,
+                name = "Lini",
+                characterClass = "Druid",
+                level = 4,
+                uuid = "hero-lini-1",
+                campaignId = 2,
+                notes = "Before sync",
+            ),
+        )
+
+        api.onSync = { _, req ->
+            val current = dao.getById(1L)!!
+            dao.upsert(current.copy(level = 5, notes = "Edited while request in-flight"))
+            PartySyncResponse(
+                id = 44,
+                uuid = req.uuid,
+                name = req.name,
+                revision = 1,
+                updatedAt = "2026-11-12T03:00:00Z",
+                status = "synced",
+            )
+        }
+
+        val firstResult = repo.syncCharacter(1L)
+        assertTrue(firstResult is CharacterSyncResult.LocalModifiedDuringSync)
+        assertEquals(1, (firstResult as CharacterSyncResult.LocalModifiedDuringSync).serverRevision)
+
+        val midState = dao.getById(1L)!!
+        assertEquals(5, midState.level)
+        assertEquals("Edited while request in-flight", midState.notes)
+        assertEquals(2, midState.campaignId)
+        assertEquals(1, midState.serverRevision)
+        assertEquals("local", midState.syncStatus)
+
+        api.onSync = { _, req ->
+            assertEquals(1, req.expectedRevision)
+            assertEquals(5, req.level)
+            PartySyncResponse(
+                id = 44,
+                uuid = req.uuid,
+                name = req.name,
+                revision = 2,
+                updatedAt = "2026-11-12T03:01:00Z",
+                status = "synced",
+            )
+        }
+        val followUp = repo.syncCharacter(1L)
+        assertTrue(followUp is CharacterSyncResult.Success)
+        assertEquals(2, dao.getById(1L)!!.serverRevision)
+        assertEquals("synced", dao.getById(1L)!!.syncStatus)
+    }
+
+    @Test
+    fun syncCharacterFailureDuringInFlightLocalEditKeepsLocalStatus() = runBlocking {
+        val dao = FakeCharacterDao()
+        val api = FakeHubApi()
+        val repo = CharacterRepository(dao, api)
+
+        dao.upsert(
+            CharacterEntity(
+                id = 1L,
+                name = "Feiya",
+                characterClass = "Witch",
+                level = 2,
+                uuid = "hero-feiya-1",
+                campaignId = 3,
+            ),
+        )
+
+        api.onSync = { _, _ ->
+            val current = dao.getById(1L)!!
+            dao.upsert(current.copy(level = 3))
+            throw IOException("Lost link mid-flight")
+        }
+
+        val result = repo.syncCharacter(1L)
+        assertTrue(result is CharacterSyncResult.Error)
+        val stored = dao.getById(1L)!!
+        assertEquals(3, stored.level)
+        assertEquals("local", stored.syncStatus)
     }
 }
