@@ -46,4 +46,22 @@ class TestHubUrlTest {
             TestHubUrl.choose("http://name:secret@hub.example.test", "", false)
         }
     }
+
+    @Test fun physicalDeviceCannotSilentlyUseLoopback() {
+        // A saved 127.0.0.1 reached the smoke test as a bare ConnectException
+        // because only 10.0.2.2 was validated. Loopback is equally meaningless
+        // on a handset: it names the phone, not the laptop.
+        assertThrows(IllegalStateException::class.java) {
+            TestHubUrl.choose(null, "http://127.0.0.1:8000", false)
+        }
+        assertThrows(IllegalStateException::class.java) {
+            TestHubUrl.choose("http://localhost:8000", "", false)
+        }
+        // Deliberately still allowed on an emulator: `adb reverse` can map the
+        // device's loopback onto the host, and 10.0.2.2 stays the default.
+        assertEquals(
+            "http://127.0.0.1:8000",
+            TestHubUrl.choose(null, "http://127.0.0.1:8000", true),
+        )
+    }
 }

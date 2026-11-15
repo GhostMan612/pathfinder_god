@@ -1,10 +1,28 @@
 import { tool } from "@opencode-ai/plugin"
 import { spawnSync } from "node:child_process"
-import { existsSync } from "node:fs"
+import { existsSync, readdirSync } from "node:fs"
 import path from "node:path"
 
-const JDK_TEMURIN = "C:\\Users\\612co\\AppData\\Local\\Temp\\opencode\\jdk17\\jdk-17.0.20.1+1"
-const JDK_JBR = "C:\\android\\Android Studio\\jbr"
+// The lane JDK is Temurin 17, but its location is NOT stable: the old pin lived under
+// %TEMP%\opencode\jdk17, and Windows purged that directory between sessions. A single
+// hardcoded path therefore turns a working lane into "no java.exe under ..." on a fresh
+// boot. Resolve by probing candidates and accepting the first that actually has a JVM.
+const JDK_JBR_DIRS = [
+  "C:\\android\\Android Studio\\jbr",
+  "C:\\Program Files\\Android\\Android Studio\\jbr",
+]
+
+// Studio/IntelliJ download toolchains into a jdks/ folder; pick any 17.x there.
+const JDK_SEARCH_ROOTS = [
+  "C:\\android\\Android Studio\\jbr\\jdks",
+  "C:\\Program Files\\Android\\Android Studio\\jbr\\jdks",
+  "C:\\Users\\612co\\.jdks",
+]
+
+const JDK_TEMURIN_17_PREFERRED = [
+  "C:\\android\\Android Studio\\jbr\\jdks\\eclipse_adoptium-17-amd64-windows.2",
+  "C:\\Users\\612co\\AppData\\Local\\Temp\\opencode\\jdk17\\jdk-17.0.20.1+1",
+]
 
 const TASKS: Record<string, string> = {
   assembleDebug: ":app:assembleDebug",
@@ -24,6 +42,43 @@ function tail(text: string, limit = 40): string {
   const interesting = lines.filter((l) => KEEP.test(l) && !NOISE.test(l))
   const chosen = (interesting.length > 0 ? interesting : lines).slice(-limit)
   return chosen.join("\n")
+}
+
+function hasJava(home: string): boolean {
+  return existsSync(path.join(home, "bin", "java.exe"))
+}
+
+function resolveJdk(label: "temurin17" | "jbr"): { home: string; tried: string[] } {
+  const candidates: string[] = []
+  const tried: string[] = []
+
+  if (label === "jbr") {
+    candidates.push(...JDK_JBR_DIRS)
+  } else {
+    // An explicit JAVA_HOME wins, but only if it is a real JVM directory: CI images and
+    // stale shells routinely export a path that no longer exists.
+    const envHome = process.env.JAVA_HOME
+    if (envHome) candidates.push(envHome)
+    candidates.push(...JDK_TEMURIN_17_PREFERRED)
+    for (const root of JDK_SEARCH_ROOTS) {
+      if (!existsSync(root)) continue
+      try {
+        for (const entry of readdirSync(root)) {
+          if (!/\b17\b|17[.\-]/.test(entry)) continue
+          candidates.push(path.join(root, entry))
+        }
+      } catch {
+        // An unreadable toolchain dir must not abort the search.
+      }
+    }
+  }
+
+  for (const home of candidates) {
+    if (tried.includes(home)) continue
+    tried.push(home)
+    if (hasJava(home)) return { home, tried }
+  }
+  return { home: "", tried }
 }
 
 export default tool({
@@ -48,9 +103,17 @@ export default tool({
       return `FAIL: gradlew.bat not found at ${gradlew}\nThe native lane lives in spoke_kt/, not spoke/.`
     }
 
-    const home = args.jdk === "jbr" ? JDK_JBR : JDK_TEMURIN
-    if (!existsSync(path.join(home, "bin", "java.exe"))) {
-      return `FAIL: no java.exe under ${home}\nPick the other jdk value, or fix the toolchain in WP-0.`
+    const label = args.jdk ?? "temurin17"
+    const { home, tried } = resolveJdk(label)
+    if (!home) {
+      return [
+        `FAIL: no JDK with bin/java.exe found for "${label}"`,
+        "Tried:",
+        ...tried.map((h) => `  ${h}`),
+        "Fix: export JAVA_HOME to a JDK 17 (Temurin), or install one via Android Studio's",
+        "SDK Manager > SDK Tools > JDK. The lane only needs a 17+ JVM to launch Gradle;",
+        "the foojay resolver provisions the compile toolchain from kotlin.jvmToolchain(17).",
+      ].join("\n")
     }
 
     const task = TASKS[args.action]

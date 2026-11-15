@@ -14,6 +14,15 @@ import java.net.URISyntaxException
 
 /** Resolve a Hub endpoint for real-device tests without hardcoded laptop IPs. */
 object TestHubUrl {
+    /**
+     * Addresses that only ever reach the machine running them. On a physical handset
+     * every one of these is the phone, so a saved "127.0.0.1" silently produced
+     * `ConnectException: Failed to connect to /127.0.0.1:8000` instead of the
+     * actionable misconfiguration message. `10.0.2.2` is the emulator's host alias
+     * and is handled separately.
+     */
+    private val LOOPBACK_HOSTS = setOf("127.0.0.1", "localhost", "::1", "[::1]")
+
     fun resolve(context: Context? = null): String {
         val ctx = context ?: InstrumentationRegistry.getInstrumentation().targetContext
         return choose(
@@ -40,12 +49,23 @@ object TestHubUrl {
                 (uri.rawPath.isNullOrEmpty() || uri.rawPath == "/")
         ) { "Test Hub URL must be an http(s) server root without credentials" }
 
-        if (!isEmulator && uri.host == "10.0.2.2") {
-            error(
-                "Physical-device smoke tests require hubBaseUrl=<laptop LAN URL> " +
-                    "as instrumentation argument or a custom Hub URL in Settings; " +
-                    "10.0.2.2 is emulator-only."
-            )
+        if (!isEmulator) {
+            val host = uri.host?.lowercase().orEmpty()
+            if (host == "10.0.2.2") {
+                error(
+                    "Physical-device smoke tests require hubBaseUrl=<laptop LAN URL> " +
+                        "as instrumentation argument or a custom Hub URL in Settings; " +
+                        "10.0.2.2 is emulator-only."
+                )
+            }
+            if (host in LOOPBACK_HOSTS) {
+                error(
+                    "Physical-device smoke tests cannot target $host: on a handset that " +
+                        "address is the phone itself, never the laptop. Pass " +
+                        "hubBaseUrl=http://<laptop-LAN-IP>:8000 as an instrumentation " +
+                        "argument, or set a custom Hub URL in Settings."
+                )
+            }
         }
         return value.trimEnd('/')
     }
