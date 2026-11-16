@@ -108,6 +108,26 @@ is pushed, committed, or PR'd without his explicit approval.
       `app/ tests/`. Native `assembleDebug` green; no CI result checked in the
       sweep.
 
+## In review — PR #40 (awaiting owner merge)
+
+- [x] **Phase 2 versioned character-sheet sync** (`feat/spoke-character-sync-phase2`,
+      head `50a4314`; PR #40 open, draft, mergeable; owner is the only merge
+      authority). Sheet sync with conflict detection, hub-scoped idempotency
+      keys, cross-Hub confirmation, Room vaults and the character-forge flow.
+      CI run `43797224851` green: Spoke Unit Tests, Spoke Build (debug), Hub
+      Tests, Hub Lint.
+- [x] **One immutable Hub binding per sync attempt** (`50a4314`): `syncCharacter()`
+      read the Hub identity, then obtained its client from a provider that
+      re-read Settings, so a switch in that window authorized and hashed for one
+      Hub and delivered to another. `HubBinding` now pairs the canonical origin
+      with its client from one Settings read; authorization, idempotency, the
+      cross-Hub prompt and delivery all use it, and `confirmedHubUrl` voids an
+      approval whose destination moved. Four deterministic tests (mid-flight
+      switch, stale approval at repository and ViewModel level, legacy
+      fail-closed) were mutation-checked against the old behaviour. Verified:
+      211 JVM tests, `assembleDebug` green, 53 instrumented tests (0 failed,
+      1 skipped).
+
 ## Decisions made — locked in
 
 - [x] **2D is the board, 3D is the stage.** Text-based tabletop at the core;
