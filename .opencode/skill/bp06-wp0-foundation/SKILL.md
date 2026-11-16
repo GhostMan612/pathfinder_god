@@ -21,7 +21,7 @@ No visual change. Makes every later WP's build and CI trustworthy.
 ## Tasks
 1. Ignore hygiene: `.kotlin/`, the daemon pin.
 2. Untrack the daemon pin; replace with `foojay-resolver-convention` so any machine resolves the toolchain.
-3. Resolve the JDK contradiction **once**, then make all four docs agree. Candidates: Temurin 17 at `C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1`, or Android Studio JBR at `C:\android\Android Studio\jbr` (verified OpenJDK 25.0.3). Do not leave two conflicting truths.
+3. Resolve the JDK contradiction **once**, then make all four docs agree. Candidates: Temurin 17 at `C:\android\Android Studio\jbr\jdks\eclipse_adoptium-17-amd64-windows.2` (17.0.21+9; the old `%TEMP%\opencode\jdk17` copy is purged by Windows), or Android Studio JBR at `C:\android\Android Studio\jbr` (OpenJDK 25). Do not leave two conflicting truths.
 4. CI: `working-directory: spoke_kt`; run `testDebugUnitTest` + `assembleDebug`; **never** `assembleRelease`; correct JDK setup; `chmod +x gradlew`; `git lfs pull` before build (58 MB LFS object).
 5. Manifest: add `VIBRATE`; `allowBackup="false"`; debug-only `networkSecurityConfig` for cleartext LAN hub; `<uses-feature>` Vulkan / OpenGL ES; `largeHeap`.
 6. Version catalog + explicit `kotlin.jvmToolchain(17)`; reconcile `targetSdk` with `RULES.md:123` (audit C-4).
