@@ -51,6 +51,7 @@ import com.pathfindergod.spoke.data.local.CharacterEntity
 import com.pathfindergod.spoke.data.network.HubApi
 import com.pathfindergod.spoke.data.network.HubApiFactory
 import com.pathfindergod.spoke.data.repository.CharacterRepository
+import com.pathfindergod.spoke.data.repository.HubBinding
 import com.pathfindergod.spoke.ui.designsystem.Dimens
 import com.pathfindergod.spoke.ui.designsystem.GodCard
 import com.pathfindergod.spoke.ui.designsystem.GodEmptyState
@@ -88,10 +89,14 @@ internal fun rememberCharacterViewModel(): CharacterViewModel {
     val repository = remember {
         CharacterRepository(
             AppDatabase.get(context.applicationContext),
-            { buildHubApi(prefs.restUrl()) },
+            apiProvider = { buildHubApi(prefs.restUrl()) },
             selectedCampaignIdProvider = { prefs.selectedCampaignId() },
             onCampaignSelected = { prefs.setSelectedCampaignId(it) },
             hubUrlProvider = { prefs.baseUrl() },
+            // One Settings read per sync attempt: the endpoint that authorizes
+            // the campaign and seeds the idempotency key is the same endpoint
+            // that carries the request, even if the URL changes mid-flight.
+            bindingProvider = { HubBinding.of(prefs.baseUrl(), ::buildHubApi) },
         )
     }
     val vm: CharacterViewModel = viewModel(factory = remember { CharacterVmFactory(repository) })

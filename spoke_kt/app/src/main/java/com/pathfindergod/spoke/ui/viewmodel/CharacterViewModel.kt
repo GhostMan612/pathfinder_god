@@ -212,7 +212,12 @@ class CharacterViewModel(
         }
     }
 
-    fun sync(id: Long, campaignId: Int? = null, confirmCrossHub: Boolean = false) {
+    fun sync(
+        id: Long,
+        campaignId: Int? = null,
+        confirmCrossHub: Boolean = false,
+        confirmedHubUrl: String? = null,
+    ) {
         syncHubContext()
         if (_state.value.syncingId != null) return
         val hero = _state.value.characters.firstOrNull { it.id == id }
@@ -231,6 +236,7 @@ class CharacterViewModel(
                     characterId = id,
                     campaignId = resolvedCampaignId,
                     confirmCrossHub = confirmCrossHub,
+                    confirmedHubUrl = confirmedHubUrl,
                 )
                 val pending = if (outcome is CharacterSyncResult.CrossHubConfirmationRequired) {
                     PendingCrossHubSync(
@@ -252,7 +258,15 @@ class CharacterViewModel(
     fun confirmCrossHubSync() {
         val pending = _state.value.pendingCrossHubSync ?: return
         _state.value = _state.value.copy(pendingCrossHubSync = null)
-        sync(pending.characterId, pending.campaignId, confirmCrossHub = true)
+        // Carry the approved destination into the call: if Settings moved to a
+        // different Hub after this prompt was shown, the repository voids the
+        // approval and prompts again instead of transferring somewhere unseen.
+        sync(
+            id = pending.characterId,
+            campaignId = pending.campaignId,
+            confirmCrossHub = true,
+            confirmedHubUrl = pending.targetHubUrl,
+        )
     }
 
     fun dismissCrossHubSync() {

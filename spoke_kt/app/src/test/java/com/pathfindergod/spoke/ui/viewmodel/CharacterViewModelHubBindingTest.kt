@@ -35,6 +35,7 @@ import com.pathfindergod.spoke.data.network.SummarizeResponse
 import com.pathfindergod.spoke.data.network.TurnRequest
 import com.pathfindergod.spoke.data.network.TurnResponse
 import com.pathfindergod.spoke.data.repository.CharacterRepository
+import com.pathfindergod.spoke.data.repository.HubBinding
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -330,5 +331,102 @@ class CharacterViewModelHubBindingTest {
         assertEquals(7, seenCampaignId)
         assertEquals(0, seenExpectedRevision)
         assertEquals("https://hub-b.example:8443", vm.state.value.characters.single().hubUrl)
+    }
+
+    private fun syncResponse(request: PartySyncRequest) = PartySyncResponse(
+        id = 77,
+        uuid = request.uuid,
+        name = request.name,
+        revision = 1,
+        updatedAt = "2026-11-15T00:00:00Z",
+        status = "synced",
+    )
+
+    @Test
+    fun confirmCrossHubSyncRePromptsWhenHubMovesAfterApproval() {
+        val hubA = "https://hub-a.example:8443"
+        val hubB = "https://hub-b.example:8443"
+        val hubC = "https://hub-c.example:8443"
+        var currentHub = hubB
+        val dao = InMemoryCharacterDao(
+            listOf(
+                CharacterEntity(
+                    id = 1L,
+                    name = "Amiri",
+                    characterClass = "Barbarian",
+                    level = 4,
+                    uuid = "amiri-reprompt-uuid",
+                    hubUrl = hubA,
+                    campaignId = 7,
+                    serverRevision = 4,
+                    syncStatus = "synced",
+                ),
+            ),
+        )
+        var callsA = 0
+        var callsB = 0
+        var callsC = 0
+        val apiA = FakeHubApi().apply {
+            onSync = { _, _ ->
+                callsA += 1
+                error("hub A was never approved")
+            }
+        }
+        val apiB = FakeHubApi().apply {
+            onSync = { _, request ->
+                callsB += 1
+                syncResponse(request)
+            }
+        }
+        val apiC = FakeHubApi().apply {
+            onSync = { _, request ->
+                callsC += 1
+                syncResponse(request)
+            }
+        }
+        val repo = CharacterRepository(
+            dao = dao,
+            apiProvider = { error("legacy provider must not be consulted") },
+            selectedCampaignIdProvider = { 7 },
+            hubUrlProvider = { currentHub },
+            bindingProvider = {
+                HubBinding.of(currentHub) { url ->
+                    when {
+                        url.contains("hub-a") -> apiA
+                        url.contains("hub-b") -> apiB
+                        else -> apiC
+                    }
+                }
+            },
+        )
+        val vm = CharacterViewModel(repo, dispatcher = Dispatchers.Unconfined)
+
+        vm.syncHubContext()
+        vm.sync(1L)
+        val first = vm.state.value.pendingCrossHubSync
+        assertNotNull(first)
+        assertEquals(hubA, first!!.previousHubUrl)
+        assertEquals(hubB, first.targetHubUrl)
+        assertEquals(0, callsB)
+
+        // Settings moves to hub C, but the preference listener has not run yet,
+        // so the dialog is still holding the hub B approval.
+        currentHub = hubC
+        vm.confirmCrossHubSync()
+
+        assertEquals(0, callsA)
+        assertEquals(0, callsB)
+        assertEquals(0, callsC)
+        val second = vm.state.value.pendingCrossHubSync
+        assertNotNull(second)
+        assertEquals("hub C must be approved explicitly", hubC, second!!.targetHubUrl)
+        assertEquals(hubA, second.previousHubUrl)
+        assertEquals(hubA, vm.state.value.characters.single().hubUrl)
+
+        vm.confirmCrossHubSync()
+        assertNull(vm.state.value.pendingCrossHubSync)
+        assertEquals(1, callsC)
+        assertEquals(0, callsB)
+        assertEquals(hubC, vm.state.value.characters.single().hubUrl)
     }
 }

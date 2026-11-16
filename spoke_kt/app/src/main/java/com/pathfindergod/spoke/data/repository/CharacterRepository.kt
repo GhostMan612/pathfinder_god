@@ -24,6 +24,38 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.intOrNull
 
+/**
+ * One Hub endpoint paired with the client that talks to it.
+ *
+ * A sync attempt must never authorize against one Hub and then deliver to
+ * another, so both halves are derived from a single Settings read and treated
+ * as immutable for the whole attempt. Prefer [of]; [hubUrl] must be a
+ * canonical origin (see `HubEndpoint.canonicalOrigin`).
+ */
+data class HubBinding(
+    val hubUrl: String,
+    val api: HubApi,
+) {
+    init {
+        require(hubUrl.isNotBlank()) { "Hub URL is required" }
+    }
+
+    companion object {
+        /**
+         * Derive both halves from one raw Hub URL.
+         *
+         * Normalization happens once, so the identity used for campaign
+         * authorization and idempotency and the client that carries the
+         * request cannot disagree even if Settings changes immediately after
+         * this call.
+         */
+        fun of(rawHubUrl: String, apiFor: (String) -> HubApi): HubBinding {
+            val normalized = HubEndpoint.normalize(rawHubUrl)
+            return HubBinding(HubEndpoint.canonicalOrigin(normalized), apiFor(normalized))
+        }
+    }
+}
+
 sealed class CharacterSyncResult {
     data class Success(val revision: Int) : CharacterSyncResult()
     data class LocalModifiedDuringSync(val serverRevision: Int) : CharacterSyncResult()
@@ -42,6 +74,7 @@ class CharacterRepository(
     private val selectedCampaignIdProvider: () -> Int? = { null },
     private val onCampaignSelected: (Int) -> Unit = {},
     private val hubUrlProvider: () -> String = { HubEndpoint.DEFAULT_BASE_URL },
+    private val bindingProvider: (() -> HubBinding)? = null,
 ) {
     constructor(dao: CharacterDao, api: HubApi) : this(dao, { api })
     constructor(db: AppDatabase, api: HubApi) : this(db.characterDao(), { api })
@@ -52,12 +85,14 @@ class CharacterRepository(
         selectedCampaignIdProvider: () -> Int?,
         onCampaignSelected: (Int) -> Unit,
         hubUrlProvider: () -> String = { HubEndpoint.DEFAULT_BASE_URL },
+        bindingProvider: (() -> HubBinding)? = null,
     ) : this(
         db.characterDao(),
         apiProvider,
         selectedCampaignIdProvider,
         onCampaignSelected,
         hubUrlProvider,
+        bindingProvider,
     )
 
     fun observeCharacters(): Flow<List<CharacterEntity>> =
@@ -97,6 +132,23 @@ class CharacterRepository(
         }
     }
 
+    /**
+     * Freeze the Hub destination for one sync attempt.
+     *
+     * With [bindingProvider] the caller supplies a URL/client pair built from a
+     * single Settings read, so the two cannot disagree. The legacy fallback
+     * cannot see inside [apiProvider], so it re-reads the identity around the
+     * client construction and refuses to sync if it moved (or is blank).
+     */
+    private fun resolveHubBinding(): HubBinding? {
+        bindingProvider?.let { return it() }
+        val before = currentHubIdentity()
+        val api = apiProvider()
+        val after = currentHubIdentity()
+        if (before != after || after.isBlank()) return null
+        return HubBinding(after, api)
+    }
+
     suspend fun listHubCampaigns(): List<HubCampaignSummary> =
         apiProvider().listCampaigns()
 
@@ -114,19 +166,46 @@ class CharacterRepository(
         return "sync-${hex.take(48)}"
     }
 
+    /**
+     * Pushes one character to the Hub campaign it belongs to.
+     *
+     * The attempt is bound to exactly one [HubBinding] before any state is
+     * read: the campaign authorization, the idempotency key, the user-facing
+     * cross-Hub prompt, and the delivered request all refer to that endpoint,
+     * even if Settings changes mid-flight.
+     *
+     * @param confirmCrossHub the user approved transferring a character that
+     *   belongs to another Hub.
+     * @param confirmedHubUrl the destination the user was shown when they
+     *   approved. When it no longer matches this attempt's binding, the
+     *   approval is void and a fresh [CharacterSyncResult.CrossHubConfirmationRequired]
+     *   is returned. Null means the approval is scoped to whatever endpoint
+     *   this attempt bound (programmatic callers only; the UI always passes
+     *   the prompted destination).
+     */
     suspend fun syncCharacter(
         characterId: Long,
         campaignId: Int? = null,
         idempotencyKey: String? = null,
         confirmCrossHub: Boolean = false,
+        confirmedHubUrl: String? = null,
     ): CharacterSyncResult {
         if (campaignId != null && campaignId < 1) {
             return CharacterSyncResult.Error("Invalid campaign ID")
         }
+        // Bind before reading any row: everything below must agree on one Hub.
+        val resolved = try {
+            resolveHubBinding()
+        } catch (e: IllegalArgumentException) {
+            return CharacterSyncResult.Error(e.message ?: "Hub endpoint is not configured")
+        }
+        val binding = resolved
+            ?: return CharacterSyncResult.Error("Hub endpoint changed while sync was starting; retry")
+        val currentHub = binding.hubUrl
+
         val entity = dao.getById(characterId)
             ?: return CharacterSyncResult.Error("Character not found")
 
-        val currentHub = currentHubIdentity()
         val effectiveUuid = if (entity.uuid.isBlank()) {
             val candidate = java.util.UUID.randomUUID().toString()
             dao.backfillUuidIfBlank(characterId, candidate)
@@ -151,7 +230,19 @@ class CharacterRepository(
         val isCrossHubTransfer =
             (previousHub != null && previousHub != currentHub) ||
                 (previousHub == null && activeEntity.serverRevision != null)
-        if (!confirmCrossHub && isCrossHubTransfer) {
+        // An approval names a destination. If Settings moved to another Hub
+        // after the prompt was shown, that approval no longer covers this
+        // attempt: ask again instead of transferring somewhere unapproved.
+        val approvedHub = confirmedHubUrl?.let { raw ->
+            try {
+                HubEndpoint.canonicalOrigin(raw)
+            } catch (_: IllegalArgumentException) {
+                null
+            }
+        }
+        val approvalCoversThisAttempt =
+            confirmCrossHub && (confirmedHubUrl == null || approvedHub == currentHub)
+        if (isCrossHubTransfer && !approvalCoversThisAttempt) {
             return CharacterSyncResult.CrossHubConfirmationRequired(
                 previousHubUrl = previousHub.orEmpty(),
                 targetHubUrl = currentHub,
@@ -186,7 +277,7 @@ class CharacterRepository(
         )
 
         return try {
-            val response = apiProvider().syncPartyMember(targetCampaignId, request)
+            val response = binding.api.syncPartyMember(targetCampaignId, request)
             val committed = dao.commitSyncSuccess(
                 id = characterId,
                 snapshot = activeEntity,

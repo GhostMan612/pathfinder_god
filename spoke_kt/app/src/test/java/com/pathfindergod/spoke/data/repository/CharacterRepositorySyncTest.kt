@@ -62,8 +62,14 @@ class CharacterRepositorySyncTest {
     ) : CharacterDao {
         var lastUpdatedSyncState: Triple<Long, Int?, String>? = null
 
+        /** Runs before each row read so a test can change Settings mid-flight. */
+        var onGetById: (() -> Unit)? = null
+
         override fun observeAll(): Flow<List<CharacterEntity>> = flowOf(characters.values.toList())
-        override suspend fun getById(id: Long): CharacterEntity? = characters[id]
+        override suspend fun getById(id: Long): CharacterEntity? {
+            onGetById?.invoke()
+            return characters[id]
+        }
         override suspend fun upsert(entity: CharacterEntity): Long {
             val id = if (entity.id == 0L) (characters.keys.maxOrNull() ?: 0L) + 1L else entity.id
             val saved = entity.copy(id = id)
@@ -863,5 +869,211 @@ class CharacterRepositorySyncTest {
         assertTrue(repo.syncCharacter(2L, campaignId = 7) is CharacterSyncResult.Success)
         assertEquals(2, keys.size)
         assertNotEquals(keys[0], keys[1])
+    }
+
+    private fun amiri(hubUrl: String) = CharacterEntity(
+        id = 1L,
+        name = "Amiri",
+        characterClass = "Barbarian",
+        level = 4,
+        uuid = "hero-amiri-hub-race",
+        hubUrl = hubUrl,
+        campaignId = 7,
+        serverRevision = 4,
+        syncStatus = "synced",
+    )
+
+    private fun responseFor(
+        request: PartySyncRequest,
+        revision: Int = 1,
+    ): PartySyncResponse = PartySyncResponse(
+        id = 1,
+        uuid = request.uuid,
+        name = request.name,
+        revision = revision,
+        updatedAt = "2026-11-15T00:00:00Z",
+        status = "synced",
+    )
+
+    @Test
+    fun syncCharacterKeepsOneHubBindingWhenSettingsChangeMidFlight() = runBlocking {
+        val hubA = "https://hub-a.example:8443"
+        val hubB = "https://hub-b.example:8443"
+
+        // Control: the same sheet synced while the Hub never moves. The
+        // idempotency key it produces is the one hub A must keep producing.
+        val controlDao = FakeCharacterDao()
+        controlDao.upsert(amiri(hubA))
+        val controlApi = FakeHubApi()
+        var controlKey: String? = null
+        controlApi.onSync = { _, request ->
+            controlKey = request.idempotencyKey
+            responseFor(request)
+        }
+        val controlRepo = CharacterRepository(
+            dao = controlDao,
+            apiProvider = { controlApi },
+            selectedCampaignIdProvider = { 7 },
+            hubUrlProvider = { hubA },
+        )
+        assertTrue(controlRepo.syncCharacter(1L, campaignId = 7) is CharacterSyncResult.Success)
+        val expectedKey = controlKey!!
+        assertTrue(expectedKey.startsWith("sync-"))
+
+        // Race: Settings flips to hub B while the attempt is already running.
+        val dao = FakeCharacterDao()
+        dao.upsert(amiri(hubA))
+        val apiA = FakeHubApi()
+        val apiB = FakeHubApi()
+        var callsA = 0
+        var callsB = 0
+        var racedKey: String? = null
+        apiA.onSync = { _, request ->
+            callsA += 1
+            racedKey = request.idempotencyKey
+            responseFor(request)
+        }
+        apiB.onSync = { _, request ->
+            callsB += 1
+            responseFor(request)
+        }
+        var currentHub = hubA
+        var bindingCalls = 0
+        dao.onGetById = {
+            // The first row read is the window the old code leaked through.
+            dao.onGetById = null
+            currentHub = hubB
+        }
+        val repo = CharacterRepository(
+            dao = dao,
+            apiProvider = { error("legacy provider must not be consulted once a binding is taken") },
+            selectedCampaignIdProvider = { 7 },
+            hubUrlProvider = { currentHub },
+            bindingProvider = {
+                bindingCalls += 1
+                HubBinding.of(currentHub) { url -> if (url.contains("hub-a")) apiA else apiB }
+            },
+        )
+
+        val result = repo.syncCharacter(1L, campaignId = 7)
+
+        assertTrue(result is CharacterSyncResult.Success)
+        assertEquals(1, bindingCalls)
+        assertEquals(1, callsA)
+        assertEquals(0, callsB)
+        assertEquals(expectedKey, racedKey)
+        assertEquals(hubA, dao.getById(1L)!!.hubUrl)
+        assertEquals(7, dao.getById(1L)!!.campaignId)
+        assertEquals(1, dao.getById(1L)!!.serverRevision)
+        // The flip was real: only the frozen binding kept the request on hub A.
+        assertEquals(hubB, repo.currentHubIdentity())
+    }
+
+    @Test
+    fun confirmedCrossHubSyncRePromptsWhenApprovedDestinationMoved() = runBlocking {
+        val hubA = "https://hub-a.example:8443"
+        val hubB = "https://hub-b.example:8443"
+        val hubC = "https://hub-c.example:8443"
+        val dao = FakeCharacterDao()
+        dao.upsert(amiri(hubA))
+        val apiB = FakeHubApi()
+        val apiC = FakeHubApi()
+        var callsB = 0
+        var callsC = 0
+        apiB.onSync = { _, request ->
+            callsB += 1
+            responseFor(request)
+        }
+        apiC.onSync = { _, request ->
+            callsC += 1
+            responseFor(request)
+        }
+        var currentHub = hubB
+        val repo = CharacterRepository(
+            dao = dao,
+            apiProvider = { error("unused") },
+            selectedCampaignIdProvider = { 7 },
+            hubUrlProvider = { currentHub },
+            bindingProvider = {
+                HubBinding.of(currentHub) { url -> if (url.contains("hub-b")) apiB else apiC }
+            },
+        )
+
+        val prompt = repo.syncCharacter(1L, campaignId = 7)
+        assertTrue(prompt is CharacterSyncResult.CrossHubConfirmationRequired)
+        assertEquals(
+            hubB,
+            (prompt as CharacterSyncResult.CrossHubConfirmationRequired).targetHubUrl,
+        )
+        assertEquals(0, callsB)
+
+        // The approval named hub B; Settings moves to hub C before it lands.
+        currentHub = hubC
+        val rePrompt = repo.syncCharacter(
+            characterId = 1L,
+            campaignId = 7,
+            confirmCrossHub = true,
+            confirmedHubUrl = hubB,
+        )
+        assertTrue(rePrompt is CharacterSyncResult.CrossHubConfirmationRequired)
+        val again = rePrompt as CharacterSyncResult.CrossHubConfirmationRequired
+        assertEquals(hubA, again.previousHubUrl)
+        assertEquals(hubC, again.targetHubUrl)
+        assertEquals(0, callsB)
+        assertEquals(0, callsC)
+        assertEquals(hubA, dao.getById(1L)!!.hubUrl)
+        assertEquals(4, dao.getById(1L)!!.serverRevision)
+
+        val confirmed = repo.syncCharacter(
+            characterId = 1L,
+            campaignId = 7,
+            confirmCrossHub = true,
+            confirmedHubUrl = hubC,
+        )
+        assertTrue(confirmed is CharacterSyncResult.Success)
+        assertEquals(0, callsB)
+        assertEquals(1, callsC)
+        assertEquals(hubC, dao.getById(1L)!!.hubUrl)
+        assertEquals(7, dao.getById(1L)!!.campaignId)
+    }
+
+    @Test
+    fun legacyHubProvidersFailClosedWhenIdentityMovesWhileClientIsBuilt() = runBlocking {
+        val hubA = "https://hub-a.example:8443"
+        val hubB = "https://hub-b.example:8443"
+        val dao = FakeCharacterDao()
+        dao.upsert(amiri(hubA))
+        val api = FakeHubApi()
+        var calls = 0
+        api.onSync = { _, request ->
+            calls += 1
+            responseFor(request)
+        }
+        var currentHub = hubA
+        val repo = CharacterRepository(
+            dao = dao,
+            // The client is built after the URL moved, so the identity read
+            // before it no longer describes the client: unprovable, so refuse.
+            apiProvider = {
+                currentHub = hubB
+                api
+            },
+            selectedCampaignIdProvider = { 7 },
+            hubUrlProvider = { currentHub },
+        )
+
+        val result = repo.syncCharacter(1L, campaignId = 7)
+
+        assertTrue(result is CharacterSyncResult.Error)
+        assertEquals(
+            "Hub endpoint changed while sync was starting; retry",
+            (result as CharacterSyncResult.Error).message,
+        )
+        assertEquals(0, calls)
+        val stored = dao.getById(1L)!!
+        assertEquals(hubA, stored.hubUrl)
+        assertEquals(7, stored.campaignId)
+        assertEquals(4, stored.serverRevision)
+        assertEquals("synced", stored.syncStatus)
     }
 }
