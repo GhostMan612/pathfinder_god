@@ -1,6 +1,6 @@
-import { tool } from "@opencode-ai/plugin"
 import path from "node:path"
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
+import type { PgTool } from "../lib/pg-tool"
 
 const MEDIA = /\.(wav|mp3|ogg|m4a|flac|png|webp|jpg|jpeg|svg|ttf|otf)$/i
 
@@ -23,14 +23,21 @@ function read(f: string) {
   }
 }
 
-export default tool({
+export const pgLicense = (root: string): PgTool => ({
+  name: "pg-license",
   description:
     "Audit shipped media in spoke_kt against the credit registers. Reports media with no license line in docs/asset-credits.md or docs/audio-credits.md (a CC BY compliance failure) and orphan media present on disk but never referenced from source. Read-only. Call once per work package.",
-  args: {
-    includeIcons: tool.schema.boolean().optional().describe("Also report launcher-scale bitmaps. Default false."),
+  input: {
+    type: "object",
+    properties: {
+      includeIcons: {
+        type: "boolean",
+        description: "Also report launcher-scale bitmaps. Default false.",
+      },
+    },
+    additionalProperties: false,
   },
-  async execute(args, context) {
-    const root = context.worktree
+  async execute(args) {
     const main = path.join(root, "spoke_kt", "app", "src", "main")
     const dirs = [
       path.join(main, "assets", "audio"),
@@ -68,6 +75,6 @@ export default tool({
     if (!registers.length) lines.push("", "No credit register exists. CC BY assets cannot ship until one does.")
     if (uncredited.length) lines.push("", "UNCREDITED:", ...uncredited.map((u) => `  - ${u}`))
     if (orphans.length) lines.push("", "ORPHANS:", ...orphans.map((o) => `  - ${o}`))
-    return lines.join("\n")
+    return { content: lines.join("\n") }
   },
 })
