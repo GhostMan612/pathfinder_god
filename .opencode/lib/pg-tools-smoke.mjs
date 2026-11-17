@@ -6,7 +6,9 @@
 //      bypassed, and fails with the lane's existing message when spoke_kt is absent;
 //   3. pg-gate / pg-license / pg-repo-guard run against an explicit root and
 //      return { content }, so V1 context.worktree semantics survive;
-//   4. root is honoured rather than the process cwd.
+//   4. root is honoured rather than the process cwd;
+//   5. pg-repo-guard staged mode reads the exact index blobs, so a credential
+//      staged then removed from the worktree still fails the guard.
 //
 // It never runs Gradle and never calls pg-hub-probe (RULES.md 1A.2 trap 3).
 //
@@ -111,6 +113,47 @@ assert.match(stagedGuard.content, /scope:\s+staged only/)
 assert.match(stagedGuard.content, /changed:\s+1 file\(s\), 0 \.kt/)
 assert.match(stagedGuard.content, /untracked: 1 — overlay\.md/)
 console.log("PASS  pg-repo-guard staged mode counts only the index")
+
+// pg-repo-guard staged mode must read the exact index blob. Divergent
+// index/worktree contents are the failure mode: a staged credential removed
+// from the worktree (or a staged file whose header exists only locally) must
+// be judged on what the commit would contain.
+const blobRepo = await mkdtemp(path.join(os.tmpdir(), "pg-guard-blob-"))
+const gitBlob = (args) => execFileSync("git", args, { cwd: blobRepo, encoding: "utf8" })
+gitBlob(["init", "-q"])
+gitBlob(["config", "core.autocrlf", "false"])
+gitBlob(["config", "user.email", "synthetic@example.test"])
+gitBlob(["config", "user.name", "Synthetic Test"])
+await writeFile(path.join(blobRepo, "baseline.txt"), "baseline\n")
+gitBlob(["add", "baseline.txt"])
+gitBlob(["commit", "-qm", "baseline"])
+
+// A: staged credential + clean worktree -> FAIL on the index blob.
+await writeFile(path.join(blobRepo, "staged-secret.md"), 'password = "s3cr3tValue123"\n')
+gitBlob(["add", "staged-secret.md"])
+await writeFile(path.join(blobRepo, "staged-secret.md"), "clean\n")
+const dirtyIndex = await pgRepoGuard(blobRepo).execute({ staged: true })
+assert.match(dirtyIndex.content, /pg-repo-guard\s+FAIL/)
+assert.match(dirtyIndex.content, /POSSIBLE SECRET\s+staged-secret\.md/)
+gitBlob(["reset", "--hard", "-q"])
+
+// B: clean staged content + credential only in the worktree -> PASS.
+await writeFile(path.join(blobRepo, "worktree-secret.md"), "clean\n")
+gitBlob(["add", "worktree-secret.md"])
+await writeFile(path.join(blobRepo, "worktree-secret.md"), 'password = "s3cr3tValue456"\n')
+const cleanIndex = await pgRepoGuard(blobRepo).execute({ staged: true })
+assert.match(cleanIndex.content, /pg-repo-guard\s+PASS/)
+assert.doesNotMatch(cleanIndex.content, /POSSIBLE SECRET/)
+gitBlob(["reset", "--hard", "-q"])
+
+// C: the Genesis header must come from the index too.
+await writeFile(path.join(blobRepo, "Staged.kt"), "fun main() = Unit\n")
+gitBlob(["add", "Staged.kt"])
+await writeFile(path.join(blobRepo, "Staged.kt"), "// As Above, So Below\nfun main() = Unit\n")
+const unstagedHeader = await pgRepoGuard(blobRepo).execute({ staged: true })
+assert.match(unstagedHeader.content, /MISSING GENESIS HEADER\s+Staged\.kt/)
+gitBlob(["reset", "--hard", "-q"])
+console.log("PASS  pg-repo-guard staged mode reads index blobs")
 
 // pg-hub-probe: schema only. Executing it mid-work is forbidden by RULES.md 1A.2.
 const probe = pgHubProbe()

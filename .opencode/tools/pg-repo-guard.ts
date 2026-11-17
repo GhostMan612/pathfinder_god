@@ -50,10 +50,54 @@ function git(args: string[], cwd: string): string {
   }
 }
 
+const TEXT_EXT = /\.(kt|xml|yml|yaml|md|toml|properties|kts)$/
+
+type StagedRead =
+  | { kind: "blob"; body: string }
+  | { kind: "absent" } // staged deletion: nothing will be committed at this path
+  | { kind: "error"; detail: string }
+
+// `staged=true` must inspect what will actually be committed, not the working
+// tree. A file can be staged with a credential and then edited (or reverted)
+// without restaging; reading the worktree would report PASS while the index
+// blob still carries the credential into the commit.
+function readStagedBlob(root: string, file: string): StagedRead {
+  try {
+    execFileSync("git", ["ls-files", "--error-unmatch", "--", file], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "ignore", "pipe"],
+    })
+  } catch (e) {
+    // ls-files --error-unmatch exits 1 when the path is not in the index
+    // (staged deletion). Anything else is an unexpected read failure and must
+    // fail closed rather than silently skip the file.
+    const status = (e as { status?: number }).status
+    const stderr = String((e as { stderr?: string }).stderr ?? "").trim()
+    if (status === 1) return { kind: "absent" }
+    return {
+      kind: "error",
+      detail: `git ls-files failed (status ${status ?? "?"}): ${stderr || (e as Error).message}`,
+    }
+  }
+  try {
+    return {
+      kind: "blob",
+      body: execFileSync("git", ["cat-file", "blob", `:${file}`], {
+        cwd: root,
+        encoding: "utf8",
+        maxBuffer: 64 * 1024 * 1024,
+      }),
+    }
+  } catch (e) {
+    return { kind: "error", detail: `git cat-file :${file} failed: ${(e as Error).message}` }
+  }
+}
+
 export const pgRepoGuard = (root: string): PgTool => ({
   name: "pg-repo-guard",
   description:
-    "RULES.md compliance guard for the current diff. Checks the Genesis header on every changed .kt, scans changed files for secrets, rejects build artifacts / local.properties / keystores / blueprints / the deleted Flutter spoke, and reports staged vs unstaged state. Read-only: it never stages or commits. Call once per work package, immediately before the commit.",
+    "RULES.md compliance guard for the current diff. Checks the Genesis header on every changed .kt, scans changed files for secrets, rejects build artifacts / local.properties / keystores / blueprints / the deleted Flutter spoke, and reports staged vs unstaged state. With staged=true it reads the exact index blobs, so the report matches what will be committed. Read-only: it never stages or commits. Call once per work package, immediately before the commit.",
   input: {
     type: "object",
     properties: {
@@ -89,20 +133,30 @@ export const pgRepoGuard = (root: string): PgTool => ({
         findings.push(`FORBIDDEN PATH   ${f}  (${bad.why})`)
         continue
       }
-      const full = path.join(root, f)
-      if (!existsSync(full)) continue
       let body: string
-      try {
-        body = readFileSync(full, "utf8")
-      } catch {
-        continue
+      if (stagedOnly) {
+        const staged = readStagedBlob(root, f)
+        if (staged.kind === "absent") continue
+        if (staged.kind === "error") {
+          findings.push(`STAGED READ ERROR   ${f}  ->  ${staged.detail}`)
+          continue
+        }
+        body = staged.body
+      } else {
+        const full = path.join(root, f)
+        if (!existsSync(full)) continue
+        try {
+          body = readFileSync(full, "utf8")
+        } catch {
+          continue
+        }
       }
       if (f.endsWith(".kt")) {
         kts++
         if (body.includes(GENESIS)) ok.push(`genesis ok  ${f}`)
         else findings.push(`MISSING GENESIS HEADER  ${f}`)
       }
-      if (/\.(kt|xml|yml|yaml|md|toml|properties|kts)$/.test(f)) {
+      if (TEXT_EXT.test(f)) {
         const m = body.match(SECRET)
         if (m) findings.push(`POSSIBLE SECRET   ${f}  ->  ${m[0].slice(0, 30)}`)
       }
