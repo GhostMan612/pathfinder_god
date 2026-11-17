@@ -108,14 +108,19 @@ is pushed, committed, or PR'd without his explicit approval.
       `app/ tests/`. Native `assembleDebug` green; no CI result checked in the
       sweep.
 
-## In review — PR #40 (awaiting owner merge)
+## Merged — PR #40 (Phase 2 versioned character-sheet sync)
 
-- [x] **Phase 2 versioned character-sheet sync** (`feat/spoke-character-sync-phase2`,
-      head `50a4314`; PR #40 open, draft, mergeable; owner is the only merge
-      authority). Sheet sync with conflict detection, hub-scoped idempotency
-      keys, cross-Hub confirmation, Room vaults and the character-forge flow.
-      CI run `43797224851` green: Spoke Unit Tests, Spoke Build (debug), Hub
-      Tests, Hub Lint.
+- [x] **Phase 2 versioned character-sheet sync merged** (`feat/spoke-character-sync-phase2`,
+      reviewed head `f952eab`, merged `2026-11-17T20:42:59Z` as merge commit
+      `d2bf810`; owner gave explicit GO for that exact head). Sheet sync with
+      conflict detection, hub-scoped idempotency keys, cross-Hub confirmation,
+      Room vaults and the character-forge flow. Pre-merge CI green on both
+      heads: `43797224851` (`50a4314`) and `43797900065` (`f952eab`) — Spoke
+      Unit Tests, Spoke Build (debug), Hub Tests, Hub Lint. Post-merge `main`
+      CI `44172217178` on `d2bf810` green: Hub Tests, Spoke Unit Tests, Hub
+      Lint, Docker Build & Push (Hub), Spoke Build (debug); Deploy skipped
+      (workflow_dispatch only). Merged remote branch pruned; Issue #33 remains
+      open by owner instruction.
 - [x] **One immutable Hub binding per sync attempt** (`50a4314`): `syncCharacter()`
       read the Hub identity, then obtained its client from a provider that
       re-read Settings, so a switch in that window authorized and hashed for one
