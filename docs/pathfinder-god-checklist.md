@@ -108,6 +108,35 @@ is pushed, committed, or PR'd without his explicit approval.
       `app/ tests/`. Native `assembleDebug` green; no CI result checked in the
       sweep.
 
+## Android hardening — P1 16 KB native libraries (branch `fix/android-16kb-native-libs`)
+
+- [x] **Root cause proven, not suppressed.** `mil.nga:sqlite-android:3450200` ships
+      `libsqliteX.so` with `PT_LOAD` alignment `0x1000` (4 KB) for `arm64-v8a`;
+      `3500400` ships the same library with `0x4000` (16 KB) on `arm64-v8a` and
+      `x86_64`. 32-bit `armeabi-v7a`/`x86` stay 4 KB — 16 KB page-size devices
+      are 64-bit arm64 only, which is what lint and Play check.
+- [x] **Driver bumped to `mil.nga:sqlite-android:3500400`** (SQLite 3.50.4).
+      Bridge compatibility checked with `javap` against the packed
+      `classes.jar`: `org.sqlite.database.sqlite.SQLiteDatabase`,
+      `SQLiteOpenHelper`, `SQLiteStatement` and `SQLiteTransactionListener`
+      keep every method `NgaSQLiteFactory.kt` calls; AAR `minSdkVersion` 21,
+      below the app's 26.
+- [x] **`StaticFieldLeak` fixed with ownership, not a suppression.**
+      `PitFrameGovernor` now holds its host Activity through `PitHostSlot`
+      (`WeakReference`) and `release()` clears only the matching host. Five JVM
+      tests cover bind/rebind/release-other/release-bound. Lint reports zero
+      `StaticFieldLeak` and zero `Aligned16KB` findings; 0 errors, 58 warnings.
+- [x] **Verification:** `assembleDebug` green; `testDebugUnitTest` **216 tests,
+      24 suites, 0 failures, 0 skipped**; `lintDebug` green; `zipalign -c -P 16`
+      reports `Verification successful` on arm64, armeabi-v7a, x86, x86_64 and
+      universal debug APKs; physical B160V suite **53 tests, 0 failures,
+      1 skipped**. One `DesignSystemSemanticsTest` a11y case flaked on the first
+      full run (process aborted with an empty failure node); it passed 9/9 in
+      isolation and the full suite then ran green, so it is not attributed to
+      this change.
+- [x] **Docs reconciled:** `AGENTS.md`, `KOTLIN_PORT_SPEC.md` and the version
+      catalog now name 3500400 / SQLite 3.50.4 and the 16 KB reason.
+
 ## Merged — PR #40 (Phase 2 versioned character-sheet sync)
 
 - [x] **Phase 2 versioned character-sheet sync merged** (`feat/spoke-character-sync-phase2`,
