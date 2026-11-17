@@ -8,8 +8,10 @@
 #
 # Pins that must not drift: AGP 9.0.1 (built-in Kotlin — no kotlin.android, no
 # kapt), KSP 2.3.4, Room 2.7.0 (2.6.1's processor crashes on this Kotlin),
-# Compose BOM 2024.10.01, Filament 1.76.0, mil.nga:sqlite-android:3450200
-# (io.requery:sqlite-android does not exist on Central).
+# Compose BOM 2024.10.01, Filament 1.76.0, mil.nga:sqlite-android:3500400
+# (io.requery:sqlite-android does not exist on Central). The FTS5 driver is
+# pinned at 3500400 because its 64-bit `libsqliteX.so` LOAD segments are 16 KB
+# aligned; 3450200 was 4 KB only and failed lint [Aligned16KB].
 
 [versions]
 agp = "9.0.1"
@@ -59,7 +61,7 @@ filament = "1.76.0"
 junit = "4.13.2"
 kotlinxCoroutines = "1.10.1"
 kotlinxSerialization = "1.8.1"
-    ngaSqliteAndroid = "3450200"
+    ngaSqliteAndroid = "3500400"
     okhttp = "4.12.0"
     retrofit = "2.11.0"
     room = "2.7.0"

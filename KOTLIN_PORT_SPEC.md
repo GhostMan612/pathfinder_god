@@ -122,8 +122,9 @@ acceptable; keep separate DBs only if migration risk demands it.
   created_at`.
 - **Rules FTS5 — resolved as-built.** The app bundles `pathfinder_rag.db` raw (a `.gz` name must not be used — AGP decompresses gzipped assets at build time and renames the entry, breaking the runtime open path)
   because `sqlite3_flutter_libs` ships FTS5, which AOSP SQLite lacks.
-  Native side runs Room on `mil.nga:sqlite-android:3450200` (SQLite 3.45
-  with FTS5) through the hand-rolled `NgaSQLiteOpenHelperFactory` bridge
+  Native side runs Room on `mil.nga:sqlite-android:3500400` (SQLite 3.50.4
+  with FTS5, 16 KB-aligned 64-bit libraries) through the hand-rolled
+  `NgaSQLiteOpenHelperFactory` bridge
   (`io.requery:sqlite-android` does not exist on Central — do not revert).
   `RuleFtsEntity` maps the real `rules` virtual table with `@RawQuery`
   `MATCH` + `bm25()`, and lives in `RulesDatabase` (its own Room database), so
@@ -245,7 +246,7 @@ libraries plus the activity base:
   Compose BOM 2024.10.01, navigation-compose 2.8.4 + material3-adaptive-
   navigation-suite 1.3.1, SDK floor compileSdk 37 (Filament 1.76 demands
   it) + targetSdk 34 + minSdk 26 (as built in `app/build.gradle.kts`),
-  `mil.nga:sqlite-android:3450200`, Filament + filamat 1.76.0,
+  `mil.nga:sqlite-android:3500400`, Filament + filamat 1.76.0,
   Retrofit 2.11/OkHttp 4.12, androidx.appcompat 1.7.0 (GameActivity needs
   it), AGDK games-activity/frame-pacing. `androidx.sqlite` 2.5 interfaces are
   Kotlin properties (`override val/var`, `Array<out Any?>` bind args).
