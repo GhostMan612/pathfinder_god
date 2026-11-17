@@ -151,6 +151,50 @@ is pushed, committed, or PR'd without his explicit approval.
       emulated 16 KB page-size environment. Debug APK alignment alone does not
       prove the release artifact.
 
+## Merged — PR #45 (OpenCode V2: five `pg-*` tools restored)
+
+- [x] **PR #45 merged** (`feat/pg-tools-v2`, final head `86f8d72`, merged
+      `2026-11-17T22:53:09Z` as merge commit `c7d7011`). Owner disposition:
+      HOLD only for the staged-content correction; the correction and its
+      regression tests passed. Reviewed implementation commits are `7288f83`
+      (migration) and `496e749` (correction); `86f8d72` is the branch update
+      onto `main` after PR #44. Branch pruned locally and on origin. Post-merge
+      `main` CI `44194331888` on `c7d7011` green: Hub Tests, Hub Lint, Spoke
+      Unit Tests, Docker Build & Push (Hub), Spoke Build (debug); Deploy
+      skipped.
+- [x] **V2 registration replaces the inert V1 definitions.**
+      `.opencode/plugins/pg-tools.ts` (`Plugin.define({ id: "pg.tools" })`)
+      registers `pg-build`, `pg-gate`, `pg-hub-probe`, `pg-license` and
+      `pg-repo-guard` through `ctx.tool.transform`. Each
+      `.opencode/tools/pg-*.ts` exports a factory taking the project root,
+      captured from `ctx.location.directory` in `setup` so a session moved into
+      a worktree follows the worktree. The plugin throws if any ID is missing.
+- [x] **SDK retired.** `@opencode-ai/plugin@1.18.24` removed from
+      `.opencode/package.json`, the lockfile and `node_modules`;
+      `@opencode/plugin@2.0.23` stays and the package is `"type": "module"`.
+      Tool IDs, command restrictions, path handling and error strings are
+      unchanged; `pg-build` keeps the debug-only enum plus an `Object.hasOwn`
+      guard and moves its 30-minute cap into `spawnSync` (V2 has no tool
+      timeout field).
+- [x] **Staged-content correction.** `pg-repo-guard staged=true` now reads the
+      exact index blob (`git ls-files --error-unmatch` + `git cat-file blob
+      :path`) instead of the working tree, so a credential staged then removed
+      from the worktree still fails; staged deletions are skipped and
+      unexpected read failures fail closed as `STAGED READ ERROR`.
+- [x] **Regression coverage.** `.opencode/lib/pg-tools-smoke.mjs` passes 9/9,
+      including divergent index/worktree cases: staged secret + clean worktree
+      → FAIL; clean index + secret worktree → PASS; Genesis header only in the
+      worktree → FAIL.
+- [x] **Live V2 proof.** All five IDs appear in the catalog; `pg-gate {wp:0}`
+      reported G6-0 PASS, `pg-license` PASS and `pg-repo-guard` PASS through
+      V2; `opencode plugin list` shows `pg.tools`; server reloads are clean.
+- [x] **Pre-merge CI.** Runs `44189989574` (`7288f83`), `44192404808`
+      (`496e749`) and `44193435881` (`86f8d72`) all green: Hub Tests, Hub Lint,
+      Spoke Unit Tests, Spoke Build (debug).
+- [ ] **P3 follow-up (next workstream):** `.opencode/` inventory — classify the
+      singular/plural directories and the 18 untracked overlay entries before
+      any pruning; never commit local overlays or session artifacts.
+
 ## Merged — PR #40 (Phase 2 versioned character-sheet sync)
 
 - [x] **Phase 2 versioned character-sheet sync merged** (`feat/spoke-character-sync-phase2`,
