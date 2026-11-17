@@ -25,6 +25,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,6 +51,7 @@ import com.pathfindergod.spoke.data.local.CharacterEntity
 import com.pathfindergod.spoke.data.network.HubApi
 import com.pathfindergod.spoke.data.network.HubApiFactory
 import com.pathfindergod.spoke.data.repository.CharacterRepository
+import com.pathfindergod.spoke.data.repository.HubBinding
 import com.pathfindergod.spoke.ui.designsystem.Dimens
 import com.pathfindergod.spoke.ui.designsystem.GodCard
 import com.pathfindergod.spoke.ui.designsystem.GodEmptyState
@@ -87,10 +89,22 @@ internal fun rememberCharacterViewModel(): CharacterViewModel {
     val repository = remember {
         CharacterRepository(
             AppDatabase.get(context.applicationContext),
-            buildHubApi(prefs.restUrl()),
+            apiProvider = { buildHubApi(prefs.restUrl()) },
+            selectedCampaignIdProvider = { prefs.selectedCampaignId() },
+            onCampaignSelected = { prefs.setSelectedCampaignId(it) },
+            hubUrlProvider = { prefs.baseUrl() },
+            // One Settings read per sync attempt: the endpoint that authorizes
+            // the campaign and seeds the idempotency key is the same endpoint
+            // that carries the request, even if the URL changes mid-flight.
+            bindingProvider = { HubBinding.of(prefs.baseUrl(), ::buildHubApi) },
         )
     }
-    return viewModel(factory = remember { CharacterVmFactory(repository) })
+    val vm: CharacterViewModel = viewModel(factory = remember { CharacterVmFactory(repository) })
+    DisposableEffect(prefs, vm) {
+        val dispose = prefs.observeChanges { vm.syncHubContext() }
+        onDispose(dispose)
+    }
+    return vm
 }
 
 @Composable
@@ -100,6 +114,10 @@ fun CharacterListScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var showForge by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        viewModel.syncHubContext()
+    }
 
     LaunchedEffect(showForge) {
         if (showForge) viewModel.clearForgeError()

@@ -15,6 +15,21 @@ from urllib.request import Request, urlopen
 from .model import SemanticSpineError, normalize_vector
 
 
+def _discard_http_error(exc: HTTPError) -> None:
+    """Drain and close an HTTPError's response body.
+
+    urllib attaches an open file object to every HTTPError. If it is merely dropped,
+    CPython's _TemporaryFileCloser.__del__ can raise during garbage collection, which
+    pytest reports as "Exception ignored in _TemporaryFileCloser.__del__". With
+    filterwarnings=error that unraisable exception fails whichever test happened to
+    trigger the GC -- a flaky failure far from the real defect. Close it here.
+    """
+    try:
+        exc.close()
+    except Exception:  # pragma: no cover - closing must never mask the real error
+        pass
+
+
 def _is_connection_refused(exc: BaseException) -> bool:
     """True when the failure is a refused connection — Ollama is down.
 
@@ -82,7 +97,16 @@ class OllamaEmbedder:
                 return result
             except (HTTPError, URLError, ValueError, TimeoutError, OSError) as exc:
                 last_exc = exc
+                if isinstance(exc, HTTPError):
+                    _discard_http_error(exc)
                 if _is_connection_refused(exc):
+                    raise SemanticSpineError(
+                        f"Local Ollama request failed: {type(exc).__name__}"
+                    ) from exc
+                # A 4xx other than 429 will never succeed on retry: the model is not
+                # installed, or the endpoint does not exist on this Ollama build.
+                # Retrying anyway cost two sleeps (~3s) on EVERY campaign search.
+                if isinstance(exc, HTTPError) and 400 <= exc.code < 500 and exc.code != 429:
                     raise SemanticSpineError(
                         f"Local Ollama request failed: {type(exc).__name__}"
                     ) from exc

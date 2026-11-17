@@ -84,6 +84,7 @@ class GmChatViewModel(
     private val streamClient: GmStreamSource,
     private val streamUrlProvider: () -> String,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Main,
+    private val onCampaignSelected: (Int) -> Unit = {},
 ) : ViewModel() {
     private val _state = MutableStateFlow(GmChatUiState())
     val state: StateFlow<GmChatUiState> = _state.asStateFlow()
@@ -289,6 +290,7 @@ class GmChatViewModel(
 
     fun setCampaignId(campaignId: Int) {
         val valid = campaignId.coerceAtLeast(1)
+        onCampaignSelected(valid)
         _state.value = _state.value.copy(
             campaignState = _state.value.campaignState.copy(campaignId = valid),
         )

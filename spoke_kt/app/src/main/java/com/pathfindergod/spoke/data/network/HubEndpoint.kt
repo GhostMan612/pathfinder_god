@@ -43,6 +43,19 @@ object HubEndpoint {
         return "$scheme://${uri.rawAuthority}/"
     }
 
+    fun canonicalOrigin(raw: String): String {
+        val uri = URI(normalize(raw))
+        val scheme = uri.scheme.lowercase()
+        val host = uri.host.lowercase()
+        val port = when {
+            uri.port > 0 -> uri.port
+            scheme == "https" -> 443
+            else -> 80
+        }
+        val formattedHost = if (host.contains(":") && !host.startsWith("[")) "[$host]" else host
+        return "$scheme://$formattedHost:$port"
+    }
+
     fun streamUrl(raw: String): String =
         normalize(raw).replaceFirst("http", "ws") + "stream"
 

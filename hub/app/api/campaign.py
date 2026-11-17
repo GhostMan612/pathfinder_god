@@ -24,6 +24,7 @@ from fastapi import (
     Response,
     UploadFile,
 )
+from fastapi import Path as FastApiPath
 from pydantic import BaseModel, Field
 
 from app.agents.continuity import ContinuityAgent, ContinuityKeeper
@@ -42,7 +43,11 @@ from app.db.portability import (
     import_campaign_db,
     import_character_db,
 )
-from app.db.repository import CampaignRepository
+from app.db.repository import (
+    CampaignNotFoundError,
+    CampaignRepository,
+    RevisionConflictError,
+)
 from app.llm.ollama_client import OllamaClient
 from app.llm.orchestrator import LLMOrchestrator
 
@@ -115,6 +120,23 @@ class SummarizeSessionRequest(BaseModel):
 class SummarizeSessionResponse(BaseModel):
     summary: str
     event_count: int
+
+
+class CampaignSummary(BaseModel):
+    id: int
+    name: str
+    edition: str
+    summary: str | None = None
+    created_at: str
+    updated_at: str
+
+
+@router.get("/list", response_model=list[CampaignSummary])
+async def list_campaigns(
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+) -> list[dict]:
+    return repo.list_campaigns()
 
 
 @router.get("", response_model=CampaignStateResponse)
@@ -716,9 +738,83 @@ class PartyMemberRequest(BaseModel):
     stats: dict | None = None
 
 
+class PartySyncRequest(BaseModel):
+    uuid: str = Field(..., min_length=1, max_length=64)
+    name: str = Field(..., min_length=1, max_length=120)
+    player_name: str | None = Field(None, max_length=120)
+    class_: str | None = Field(None, alias="class", max_length=60)
+    level: int = Field(1, ge=1, le=20)
+    ancestry: str | None = Field(None, max_length=60)
+    background: str | None = Field(None, max_length=120)
+    stats: dict | None = None
+    expected_revision: int | None = Field(None, ge=0)
+    idempotency_key: str | None = Field(None, max_length=64)
+    model_config = {"populate_by_name": True}
+
+
+class PartySyncResponse(BaseModel):
+    id: int
+    uuid: str
+    name: str
+    revision: int
+    updated_at: str
+    status: str = "synced"
+
+
+def _handle_party_sync(
+    campaign_id: int,
+    member: PartySyncRequest,
+    repo: CampaignRepository,
+) -> PartySyncResponse:
+    try:
+        result = repo.sync_party_member(
+            campaign_id=campaign_id,
+            uuid=member.uuid,
+            name=member.name,
+            player_name=member.player_name,
+            class_=member.class_,
+            level=member.level,
+            ancestry=member.ancestry,
+            background=member.background,
+            stats=member.stats,
+            expected_revision=member.expected_revision,
+            idempotency_key=member.idempotency_key,
+        )
+        return PartySyncResponse(**result)
+    except CampaignNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "campaign_not_found",
+                "message": str(exc),
+                "campaign_id": exc.campaign_id,
+            },
+        )
+    except RevisionConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": exc.error_code,
+                "message": str(exc),
+                "current_revision": exc.current_revision,
+                "expected_revision": exc.expected_revision,
+                "server_character": exc.server_character,
+            },
+        )
+
+
 @router.get("/party")
 async def list_party(
     campaign_id: int = Query(1, ge=1, le=2147483647),
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+) -> list[dict]:
+    return repo.get_party(campaign_id)
+
+
+@router.get("/{campaign_id}/party")
+async def list_campaign_party(
+    campaign_id: int = FastApiPath(..., ge=1, le=2147483647),
     repo: CampaignRepository = Depends(get_repo),
     user: dict = Depends(require_auth),
 ) -> list[dict]:
@@ -743,6 +839,26 @@ async def add_party_member(
         stats=member.stats,
     )
     return {"id": member_id, "name": member.name}
+
+
+@router.post("/{campaign_id}/party/sync", response_model=PartySyncResponse)
+async def sync_campaign_party_member(
+    member: PartySyncRequest,
+    campaign_id: int = FastApiPath(..., ge=1, le=2147483647),
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+) -> PartySyncResponse:
+    return _handle_party_sync(campaign_id, member, repo)
+
+
+@router.post("/party/sync", response_model=PartySyncResponse)
+async def sync_party_member_legacy(
+    member: PartySyncRequest,
+    campaign_id: int = Query(1, ge=1, le=2147483647),
+    repo: CampaignRepository = Depends(get_repo),
+    user: dict = Depends(require_auth),
+) -> PartySyncResponse:
+    return _handle_party_sync(campaign_id, member, repo)
 
 
 # ──────────────────────────────────────────────────────────────
