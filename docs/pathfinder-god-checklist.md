@@ -136,6 +136,8 @@ is pushed, committed, or PR'd without his explicit approval.
       this change.
 - [x] **Docs reconciled:** `AGENTS.md`, `KOTLIN_PORT_SPEC.md` and the version
       catalog now name 3500400 / SQLite 3.50.4 and the 16 KB reason.
+- [ ] **PR #43** (`fix/android-16kb-native-libs`, head `d1a1680`) open and CI
+      green — awaiting owner merge (`RULES.md` §1.3).
 
 ## Merged — PR #40 (Phase 2 versioned character-sheet sync)
 
