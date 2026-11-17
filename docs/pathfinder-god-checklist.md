@@ -108,8 +108,14 @@ is pushed, committed, or PR'd without his explicit approval.
       `app/ tests/`. Native `assembleDebug` green; no CI result checked in the
       sweep.
 
-## Android hardening — P1 16 KB native libraries (branch `fix/android-16kb-native-libs`)
+## Merged — PR #43 (Android P1 16 KB native libraries + pit host leak)
 
+- [x] **PR #43 merged** (`fix/android-16kb-native-libs`, reviewed head
+      `12e85bf`, merged `2026-11-17T22:08:31Z` as merge commit `b6f68cc`;
+      owner GO applied to the exact head). The branch was pruned locally and on
+      origin. Post-merge `main` CI `44187055320` on `b6f68cc` green: Hub Tests,
+      Spoke Unit Tests, Hub Lint, Docker Build & Push (Hub), Spoke Build
+      (debug); Deploy skipped (workflow_dispatch only).
 - [x] **Root cause proven, not suppressed.** `mil.nga:sqlite-android:3450200` ships
       `libsqliteX.so` with `PT_LOAD` alignment `0x1000` (4 KB) for `arm64-v8a`;
       `3500400` ships the same library with `0x4000` (16 KB) on `arm64-v8a` and
@@ -136,8 +142,14 @@ is pushed, committed, or PR'd without his explicit approval.
       this change.
 - [x] **Docs reconciled:** `AGENTS.md`, `KOTLIN_PORT_SPEC.md` and the version
       catalog now name 3500400 / SQLite 3.50.4 and the 16 KB reason.
-- [ ] **PR #43** (`fix/android-16kb-native-libs`, head `d1a1680`) open and CI
-      green — awaiting owner merge (`RULES.md` §1.3).
+- [x] **Evidence preserved** (local, gitignored):
+      `blueprints/evidence/android-16kb-2026-11-17/` holds the `llvm-readelf`
+      LOAD alignment for both driver versions, the green full device-suite
+      JUnit XML/log, the isolated a11y class log, and the first-run flake log.
+- [ ] **Release-time gate (not a debug-lane claim):** before a Play release,
+      validate the signed AAB and exercise native SQLite on a genuine or
+      emulated 16 KB page-size environment. Debug APK alignment alone does not
+      prove the release artifact.
 
 ## Merged — PR #40 (Phase 2 versioned character-sheet sync)
 
