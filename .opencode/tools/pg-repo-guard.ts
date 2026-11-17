@@ -1,7 +1,7 @@
-import { tool } from "@opencode-ai/plugin"
 import path from "node:path"
 import { execFileSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
+import type { PgTool } from "../lib/pg-tool"
 
 const GENESIS = "As Above, So Below"
 // A secret is a NAME BOUND TO A VALUE, not a name. The previous pattern matched the bare
@@ -50,21 +50,34 @@ function git(args: string[], cwd: string): string {
   }
 }
 
-export default tool({
+export const pgRepoGuard = (root: string): PgTool => ({
+  name: "pg-repo-guard",
   description:
     "RULES.md compliance guard for the current diff. Checks the Genesis header on every changed .kt, scans changed files for secrets, rejects build artifacts / local.properties / keystores / blueprints / the deleted Flutter spoke, and reports staged vs unstaged state. Read-only: it never stages or commits. Call once per work package, immediately before the commit.",
-  timeout: 60_000,
-  args: {
-    staged: tool.schema.boolean().optional().describe("Inspect the staged set only (pre-commit). Default false = everything dirty vs HEAD."),
+  input: {
+    type: "object",
+    properties: {
+      staged: {
+        type: "boolean",
+        description: "Inspect the staged set only (pre-commit). Default false = everything dirty vs HEAD.",
+      },
+    },
+    additionalProperties: false,
   },
-  async execute(args, context) {
-    const root = context.worktree
+  async execute(args) {
     const stagedOnly = args.staged === true
 
     const porcelain = git(["status", "--porcelain"], root)
     const entries = porcelain.split(/\r?\n/).filter(Boolean)
-    const files = [...new Set(entries.map((l) => (l.includes("->") ? l.split(" -> ")[1] : l).slice(3).trim().replace(/^"|"$/g, "")).filter(Boolean))]
-    const target = stagedOnly ? entries.filter((l) => !l.startsWith(" ")).map((l) => l.slice(3).trim()) : files
+    const pathOf = (l: string) => (l.includes(" -> ") ? l.split(" -> ")[1] : l).slice(3).trim().replace(/^"|"$/g, "")
+    const files = [...new Set(entries.map(pathOf).filter(Boolean))]
+    // Staged means an index status letter (M/A/R/D/C) in column 1. Untracked
+    // entries (`??`) and worktree-only edits (` M`) are not staged; including
+    // them made `staged=true` scan every local overlay and report them as part
+    // of the commit. Staged renames keep the destination path, like `files`.
+    const target = stagedOnly
+      ? entries.filter((l) => !l.startsWith(" ") && !l.startsWith("??")).map(pathOf)
+      : files
 
     const findings: string[] = []
     const ok: string[] = []
@@ -101,7 +114,7 @@ export default tool({
     const untracked = entries.filter((l) => l.startsWith("??")).map((l) => l.slice(3).trim())
     const head = git(["log", "--oneline", "-1"], root).trim()
 
-    return [
+    const report = [
       `pg-repo-guard  ${findings.length === 0 ? "PASS" : "FAIL"}`,
       `scope:     ${stagedOnly ? "staged only" : "all changes vs HEAD"}`,
       `head:      ${head || "(no commits)"}`,
@@ -116,5 +129,7 @@ export default tool({
         ? "Fix every finding before committing. Genesis header is mandatory on .kt (RULES.md section 2); CRLF breaks .gitattributes eol=lf."
         : "RULES.md section 2/5 satisfied for this diff. Stage explicit paths only — never `git add .` or `git add -A`.",
     ].join("\n")
+
+    return { content: report }
   },
 })

@@ -1,7 +1,7 @@
-import { tool } from "@opencode-ai/plugin"
 import path from "node:path"
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { execFileSync } from "node:child_process"
+import type { PgTool } from "../lib/pg-tool"
 
 type Check = { id: string; ok: boolean; evidence: string }
 
@@ -42,21 +42,25 @@ function gitTracked(root: string, file: string): boolean {
   }
 }
 
-export default tool({
+export const pgGate = (root: string): PgTool => ({
+  name: "pg-gate",
   description:
     "Run the mechanical half of a BP-06 gate (G6-0..G6-9) for one work package. Returns a PASS/FAIL list with evidence and separates HUMAN-ONLY checks. Does not mutate the repo. Call ONCE per work package, after implementation is finished — never mid-edit (RULES.md 1A.2).",
-  timeout: 120_000,
-  args: {
-    wp: tool.schema
-      .number()
-      .int()
-      .min(0)
-      .max(9)
-      .describe("BP-06 work package number, 0-9. Gate id is G6-<wp>."),
+  input: {
+    type: "object",
+    properties: {
+      wp: {
+        type: "integer",
+        minimum: 0,
+        maximum: 9,
+        description: "BP-06 work package number, 0-9. Gate id is G6-<wp>.",
+      },
+    },
+    required: ["wp"],
+    additionalProperties: false,
   },
-  async execute(args, context) {
-    const root = context.worktree
-    const wp = args.wp
+  async execute(args) {
+    const wp = args.wp as number
     const main = path.join(root, "spoke_kt", "app", "src", "main")
     const kotlin = path.join(main, "java", "com", "pathfindergod", "spoke")
     const checks: Check[] = []
@@ -282,7 +286,7 @@ export default tool({
     const failed = checks.filter((c) => !c.ok)
     const verdict = failed.length === 0 ? (human.length > 0 ? "PASS (mechanical) — HUMAN-ONLY outstanding" : "PASS") : "FAIL"
 
-    return [
+    const report = [
       `G6-${wp}: ${verdict}`,
       "",
       ...checks.map((c) => `${c.ok ? "PASS" : "FAIL"}  ${c.id}  —  ${c.evidence}`),
@@ -292,5 +296,7 @@ export default tool({
       "",
       failed.length === 0 ? "mechanical block complete" : `first failing: ${failed[0].id}`,
     ].join("\n")
+
+    return { content: report }
   },
 })
