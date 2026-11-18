@@ -274,7 +274,10 @@ class CharacterViewModel(
                 } else {
                     null
                 }
-                val conflict = if (outcome is CharacterSyncResult.Conflict) {
+                // A Conflict outcome means the Hub accepted a campaign for
+                // this attempt, so a campaign was resolved; the null check
+                // only satisfies the compiler (resolvedCampaignId is Int?).
+                val conflict = if (outcome is CharacterSyncResult.Conflict && resolvedCampaignId != null) {
                     PendingSyncConflict(
                         characterId = id,
                         campaignId = resolvedCampaignId,

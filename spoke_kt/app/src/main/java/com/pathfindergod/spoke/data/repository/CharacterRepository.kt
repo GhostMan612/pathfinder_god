@@ -114,7 +114,7 @@ class CharacterRepository(
         db: AppDatabase,
         apiProvider: () -> HubApi,
         selectedCampaignIdProvider: () -> Int?,
-        onCampaignSelected: (Int) -> Unit,
+        onCampaignSelected: (Int) -> Unit = {},
         hubUrlProvider: () -> String = { HubEndpoint.DEFAULT_BASE_URL },
         bindingProvider: (() -> HubBinding)? = null,
         scheduleRetry: () -> Unit = {},
@@ -650,17 +650,21 @@ class CharacterRepository(
     ): CharacterSyncResult {
         val entity = dao.getById(characterId)
             ?: return CharacterSyncResult.Error("Character not found")
-        val wire = (serverCharacter?.get("stats") as? JsonObject)
-            ?: (serverCharacter as? JsonObject)
+        // Bind the server row once: the parameter is nullable, and the
+        // Elvis chain below does not smart-cast it for the later reads.
+        val server = serverCharacter
+            ?: return CharacterSyncResult.Error("Server character could not be read")
+        val wire = (server["stats"] as? JsonObject)
+            ?: (server as? JsonObject)
             ?: return CharacterSyncResult.Error("Server character could not be read")
         val adopted = CharacterMapper.fromWire(wire)
             ?: return CharacterSyncResult.Error("Server character could not be read")
-        val revision = (serverCharacter["revision"] as? JsonPrimitive)?.intOrNull
+        val revision = (server["revision"] as? JsonPrimitive)?.intOrNull
             ?: entity.serverRevision
             ?: 1
-        val updatedAt = (serverCharacter["updated_at"] as? JsonPrimitive)
+        val updatedAt = (server["updated_at"] as? JsonPrimitive)
             ?.takeIf { it.isString }?.content
-        val serverUuid = (serverCharacter["uuid"] as? JsonPrimitive)
+        val serverUuid = (server["uuid"] as? JsonPrimitive)
             ?.takeIf { it.isString }?.content?.ifBlank { null }
         dao.upsert(
             adopted.copy(
