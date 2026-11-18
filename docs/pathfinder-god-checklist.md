@@ -220,44 +220,50 @@ is pushed, committed, or PR'd without his explicit approval.
       211 JVM tests, `assembleDebug` green, 53 instrumented tests (0 failed,
       1 skipped).
 
-## In progress — Issue #33 Phases 3–4 (offline sync)
+## Merged — PR #49 (Issue #33 Phases 3–4: durable offline sync)
 
-- [ ] **Phases 3–4 on branch `feat/issue33-offline-sync` (PR #49, draft):**
-      Phase 3 — durable Room outbox (`sync_outbox`, DB v6→v7 + `MIGRATION_6_7`):
-      a retryable sync failure (network down, TLS failure, Hub 5xx) queues the
-      exact attempted request, idempotency key included, instead of losing it;
-      a WorkManager `SyncRetryWorker` (one-time run after every failure plus a
-      15-minute periodic sweep, network-constrained) replays due entries
-      verbatim so the Hub dedupes them, with backoff 30s → 2m → 10m → 1h and
-      no cap on attempts; a stale payload (sheet edited while queued) is
-      replaced by a fresh sync; entries for a Hub the user moved away from
-      stay pending and never deliver silently. Phase 4 — 409 reconciliation:
-      a conflict surfaces a dialog, never an overwrite; "Keep mine" adopts
-      only the Hub's revision number and re-pushes the local sheet at it,
-      "Use Hub's" adopts the server row via `CharacterMapper.fromWire`;
-      authenticated handset verification (`GET /campaign/list` probe) names
-      the failure mode — `Ok` / `AuthFailed(401|403)` / `TlsFailed` /
-      `Unreachable` — surfaced on the hero detail screen. No Hub changes:
-      the Hub already returned everything (409 + `server_character`,
-      idempotency, 401/403/404). 16 new repository tests
-      (`SyncOutboxTest`); hub suite and Ruff re-verified before opening the
-      PR; Spoke compile + unit tests are CI's gate. Still on Glenn's side:
-      the physical-phone verification run (Hub reachable, key accepted, TLS
-      pin validates, outbox drains after airplane mode).
+- [x] **Phases 3–4 merged** (`feat/issue33-offline-sync`, reviewed head
+      `bf2fd75`, merged `2026-11-18T04:03:38Z` as merge commit `23071d1`).
+      Phase 3 — durable Room outbox (`sync_outbox`, DB v6→v7 +
+      `MIGRATION_6_7`): a retryable sync failure queues the exact attempted
+      request, idempotency key included; a WorkManager `SyncRetryWorker`
+      (one-time run after every failure plus a 15-minute periodic sweep,
+      network-constrained) replays due entries verbatim with backoff 30s →
+      2m → 10m → 1h and no attempt cap; a stale payload is replaced by a
+      fresh sync; entries for a moved-away Hub stay pending. Phase 4 — 409
+      reconciliation: a conflict surfaces a dialog, never an overwrite;
+      "Keep mine" adopts only the Hub's revision number and re-pushes the
+      local sheet at it, "Use Hub's" adopts the server row via
+      `CharacterMapper.fromWire`; authenticated handset verification
+      (`GET /campaign/list` probe) names the failure — `Ok` /
+      `AuthFailed(401|403)` / `TlsFailed` / `Unreachable`. No Hub changes:
+      the Hub already returned everything. Pre-merge CI green on `bf2fd75`
+      (Hub Tests, Hub Lint, Spoke Unit Tests, Spoke Build); post-merge
+      `main` CI on `23071d1` green (same four plus Docker Build & Push;
+      Deploy/Notify skipped). Merged remote branch pruned. Still on Glenn's
+      side: the physical-phone verification run (Hub reachable, key accepted,
+      TLS pin validates, outbox drains after airplane mode).
 
-## In progress — pit prebuilt materials
+## Merged — PR #50 (pit prebuilt .filamat materials)
 
-- [ ] **Prebuilt `.filamat` binaries on branch `feat/pit-prebuilt-materials`:**
-      the three pit materials are ported 1:1 from `PitMaterial.kt` into
-      `.mat` sources (`die.mat` / `felt.mat` / `shadow.mat` in
-      `spoke_kt/app/src/main/assets/pit/`) and baked with `matc` from
-      Filament 1.76.0 (`-p mobile -a opengl -a vulkan`); `matinfo` verifies
-      each binary (Version 76, `DieFace` / `FeltTable` / `ContactShadow`,
-      lit; die lists `roughness` / `metallic` + both samplers; shadow lists
-      `Culling: none`, transparent, no depth write). Bake is repeatable via
+- [x] **Prebuilt `.filamat` binaries merged** (`feat/pit-prebuilt-materials`,
+      reviewed head `6e31fe5`, merged `2026-11-18T08:29:45Z` as merge commit
+      `d3e4ff2`). The three pit materials are ported 1:1 from
+      `PitMaterial.kt` into `.mat` sources (`die.mat` / `felt.mat` /
+      `shadow.mat`) and baked with `matc` from Filament 1.76.0 (`-p mobile
+      -a opengl -a vulkan`); `matinfo` verifies each binary (Version 76,
+      `DieFace` / `FeltTable` / `ContactShadow`, lit; die lists `roughness` /
+      `metallic` + both samplers; shadow lists `Culling: none`, transparent,
+      no depth write). Bake is repeatable via
       `spoke_kt/scripts/bake-pit-materials.sh`; the README documents the
       Windows `matc.exe` equivalent. No `VERSION` bump — same program,
-      precompiled. Still on Glenn's side: the device run of
+      precompiled. The branch needed a checklist conflict resolution after
+      PR #49 merged first: `fd7ba31` (both "In progress" sections kept) plus
+      a main-merge `6e31fe5`, both verified before the merge. Pre-merge CI
+      green on `6e31fe5` (Hub Tests, Hub Lint, Spoke Unit Tests, Spoke
+      Build; Deploy/Docker/Notify skipped); post-merge `main` CI on
+      `d3e4ff2` green (same four plus Docker Build & Push). Merged remote
+      branch pruned. Still on Glenn's side: the device run of
       `PitMaterialSmokeTest` against the shipped binaries (runtime compile
       was the verified path on the BLU B160V; the prebuilt path needs one
       device confirmation).
