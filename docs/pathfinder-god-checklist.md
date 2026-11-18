@@ -245,6 +245,23 @@ is pushed, committed, or PR'd without his explicit approval.
       the physical-phone verification run (Hub reachable, key accepted, TLS
       pin validates, outbox drains after airplane mode).
 
+## In progress — pit prebuilt materials
+
+- [ ] **Prebuilt `.filamat` binaries on branch `feat/pit-prebuilt-materials`:**
+      the three pit materials are ported 1:1 from `PitMaterial.kt` into
+      `.mat` sources (`die.mat` / `felt.mat` / `shadow.mat` in
+      `spoke_kt/app/src/main/assets/pit/`) and baked with `matc` from
+      Filament 1.76.0 (`-p mobile -a opengl -a vulkan`); `matinfo` verifies
+      each binary (Version 76, `DieFace` / `FeltTable` / `ContactShadow`,
+      lit; die lists `roughness` / `metallic` + both samplers; shadow lists
+      `Culling: none`, transparent, no depth write). Bake is repeatable via
+      `spoke_kt/scripts/bake-pit-materials.sh`; the README documents the
+      Windows `matc.exe` equivalent. No `VERSION` bump — same program,
+      precompiled. Still on Glenn's side: the device run of
+      `PitMaterialSmokeTest` against the shipped binaries (runtime compile
+      was the verified path on the BLU B160V; the prebuilt path needs one
+      device confirmation).
+
 ## Decisions made — locked in
 
 - [x] **2D is the board, 3D is the stage.** Text-based tabletop at the core;
