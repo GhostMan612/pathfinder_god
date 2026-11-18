@@ -5,6 +5,7 @@
 
 package com.pathfindergod.spoke.data.repository
 
+import com.pathfindergod.spoke.data.local.CharacterEntity
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
@@ -95,5 +96,34 @@ class CharacterMapperTest {
         assertTrue(derived.contains("\"ac\":18"))
         assertTrue(derived.contains("\"hp\":22"))
         assertTrue(derived.contains("\"maxHp\":30"))
+    }
+
+    @Test
+    fun serializesEntityToWireFormatAndPreservesIdentity() {
+        val original = CharacterEntity(
+            id = 42,
+            name = "Kyra",
+            ancestry = "Human",
+            characterClass = "Cleric",
+            level = 5,
+            uuid = "test-uuid-kyra",
+            serverRevision = 3,
+            abilities = """{"wis":18,"str":14}""",
+            derived = """{"ac":19,"hp":45,"maxHp":45}""",
+            notes = "Devoted to Sarenrae.",
+        )
+
+        val wire = CharacterMapper.toWire(original)
+        val roundTripped = CharacterMapper.fromWire(wire)!!
+
+        assertEquals("Kyra", roundTripped.name)
+        assertEquals("Human", roundTripped.ancestry)
+        assertEquals("Cleric", roundTripped.characterClass)
+        assertEquals(5, roundTripped.level)
+        assertEquals("test-uuid-kyra", roundTripped.uuid)
+        assertEquals(3, roundTripped.serverRevision)
+        assertTrue(roundTripped.abilities!!.contains("\"wis\":18"))
+        assertTrue(roundTripped.derived!!.contains("\"ac\":19"))
+        assertEquals("Devoted to Sarenrae.", roundTripped.notes)
     }
 }

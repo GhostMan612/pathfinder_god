@@ -108,6 +108,118 @@ is pushed, committed, or PR'd without his explicit approval.
       `app/ tests/`. Native `assembleDebug` green; no CI result checked in the
       sweep.
 
+## Merged — PR #43 (Android P1 16 KB native libraries + pit host leak)
+
+- [x] **PR #43 merged** (`fix/android-16kb-native-libs`, reviewed head
+      `12e85bf`, merged `2026-11-17T22:08:31Z` as merge commit `b6f68cc`;
+      owner GO applied to the exact head). The branch was pruned locally and on
+      origin. Post-merge `main` CI `44187055320` on `b6f68cc` green: Hub Tests,
+      Spoke Unit Tests, Hub Lint, Docker Build & Push (Hub), Spoke Build
+      (debug); Deploy skipped (workflow_dispatch only).
+- [x] **Root cause proven, not suppressed.** `mil.nga:sqlite-android:3450200` ships
+      `libsqliteX.so` with `PT_LOAD` alignment `0x1000` (4 KB) for `arm64-v8a`;
+      `3500400` ships the same library with `0x4000` (16 KB) on `arm64-v8a` and
+      `x86_64`. 32-bit `armeabi-v7a`/`x86` stay 4 KB — 16 KB page-size devices
+      are 64-bit arm64 only, which is what lint and Play check.
+- [x] **Driver bumped to `mil.nga:sqlite-android:3500400`** (SQLite 3.50.4).
+      Bridge compatibility checked with `javap` against the packed
+      `classes.jar`: `org.sqlite.database.sqlite.SQLiteDatabase`,
+      `SQLiteOpenHelper`, `SQLiteStatement` and `SQLiteTransactionListener`
+      keep every method `NgaSQLiteFactory.kt` calls; AAR `minSdkVersion` 21,
+      below the app's 26.
+- [x] **`StaticFieldLeak` fixed with ownership, not a suppression.**
+      `PitFrameGovernor` now holds its host Activity through `PitHostSlot`
+      (`WeakReference`) and `release()` clears only the matching host. Five JVM
+      tests cover bind/rebind/release-other/release-bound. Lint reports zero
+      `StaticFieldLeak` and zero `Aligned16KB` findings; 0 errors, 58 warnings.
+- [x] **Verification:** `assembleDebug` green; `testDebugUnitTest` **216 tests,
+      24 suites, 0 failures, 0 skipped**; `lintDebug` green; `zipalign -c -P 16`
+      reports `Verification successful` on arm64, armeabi-v7a, x86, x86_64 and
+      universal debug APKs; physical B160V suite **53 tests, 0 failures,
+      1 skipped**. One `DesignSystemSemanticsTest` a11y case flaked on the first
+      full run (process aborted with an empty failure node); it passed 9/9 in
+      isolation and the full suite then ran green, so it is not attributed to
+      this change.
+- [x] **Docs reconciled:** `AGENTS.md`, `KOTLIN_PORT_SPEC.md` and the version
+      catalog now name 3500400 / SQLite 3.50.4 and the 16 KB reason.
+- [x] **Evidence preserved** (local, gitignored):
+      `blueprints/evidence/android-16kb-2026-11-17/` holds the `llvm-readelf`
+      LOAD alignment for both driver versions, the green full device-suite
+      JUnit XML/log, the isolated a11y class log, and the first-run flake log.
+- [ ] **Release-time gate (not a debug-lane claim):** before a Play release,
+      validate the signed AAB and exercise native SQLite on a genuine or
+      emulated 16 KB page-size environment. Debug APK alignment alone does not
+      prove the release artifact.
+
+## Merged — PR #45 (OpenCode V2: five `pg-*` tools restored)
+
+- [x] **PR #45 merged** (`feat/pg-tools-v2`, final head `86f8d72`, merged
+      `2026-11-17T22:53:09Z` as merge commit `c7d7011`). Owner disposition:
+      HOLD only for the staged-content correction; the correction and its
+      regression tests passed. Reviewed implementation commits are `7288f83`
+      (migration) and `496e749` (correction); `86f8d72` is the branch update
+      onto `main` after PR #44. Branch pruned locally and on origin. Post-merge
+      `main` CI `44194331888` on `c7d7011` green: Hub Tests, Hub Lint, Spoke
+      Unit Tests, Docker Build & Push (Hub), Spoke Build (debug); Deploy
+      skipped.
+- [x] **V2 registration replaces the inert V1 definitions.**
+      `.opencode/plugins/pg-tools.ts` (`Plugin.define({ id: "pg.tools" })`)
+      registers `pg-build`, `pg-gate`, `pg-hub-probe`, `pg-license` and
+      `pg-repo-guard` through `ctx.tool.transform`. Each
+      `.opencode/tools/pg-*.ts` exports a factory taking the project root,
+      captured from `ctx.location.directory` in `setup` so a session moved into
+      a worktree follows the worktree. The plugin throws if any ID is missing.
+- [x] **SDK retired.** `@opencode-ai/plugin@1.18.24` removed from
+      `.opencode/package.json`, the lockfile and `node_modules`;
+      `@opencode/plugin@2.0.23` stays and the package is `"type": "module"`.
+      Tool IDs, command restrictions, path handling and error strings are
+      unchanged; `pg-build` keeps the debug-only enum plus an `Object.hasOwn`
+      guard and moves its 30-minute cap into `spawnSync` (V2 has no tool
+      timeout field).
+- [x] **Staged-content correction.** `pg-repo-guard staged=true` now reads the
+      exact index blob (`git ls-files --error-unmatch` + `git cat-file blob
+      :path`) instead of the working tree, so a credential staged then removed
+      from the worktree still fails; staged deletions are skipped and
+      unexpected read failures fail closed as `STAGED READ ERROR`.
+- [x] **Regression coverage.** `.opencode/lib/pg-tools-smoke.mjs` passes 9/9,
+      including divergent index/worktree cases: staged secret + clean worktree
+      → FAIL; clean index + secret worktree → PASS; Genesis header only in the
+      worktree → FAIL.
+- [x] **Live V2 proof.** All five IDs appear in the catalog; `pg-gate {wp:0}`
+      reported G6-0 PASS, `pg-license` PASS and `pg-repo-guard` PASS through
+      V2; `opencode plugin list` shows `pg.tools`; server reloads are clean.
+- [x] **Pre-merge CI.** Runs `44189989574` (`7288f83`), `44192404808`
+      (`496e749`) and `44193435881` (`86f8d72`) all green: Hub Tests, Hub Lint,
+      Spoke Unit Tests, Spoke Build (debug).
+- [ ] **P3 follow-up (next workstream):** `.opencode/` inventory — classify the
+      singular/plural directories and the 18 untracked overlay entries before
+      any pruning; never commit local overlays or session artifacts.
+
+## Merged — PR #40 (Phase 2 versioned character-sheet sync)
+
+- [x] **Phase 2 versioned character-sheet sync merged** (`feat/spoke-character-sync-phase2`,
+      reviewed head `f952eab`, merged `2026-11-17T20:42:59Z` as merge commit
+      `d2bf810`; owner gave explicit GO for that exact head). Sheet sync with
+      conflict detection, hub-scoped idempotency keys, cross-Hub confirmation,
+      Room vaults and the character-forge flow. Pre-merge CI green on both
+      heads: `43797224851` (`50a4314`) and `43797900065` (`f952eab`) — Spoke
+      Unit Tests, Spoke Build (debug), Hub Tests, Hub Lint. Post-merge `main`
+      CI `44172217178` on `d2bf810` green: Hub Tests, Spoke Unit Tests, Hub
+      Lint, Docker Build & Push (Hub), Spoke Build (debug); Deploy skipped
+      (workflow_dispatch only). Merged remote branch pruned; Issue #33 remains
+      open by owner instruction.
+- [x] **One immutable Hub binding per sync attempt** (`50a4314`): `syncCharacter()`
+      read the Hub identity, then obtained its client from a provider that
+      re-read Settings, so a switch in that window authorized and hashed for one
+      Hub and delivered to another. `HubBinding` now pairs the canonical origin
+      with its client from one Settings read; authorization, idempotency, the
+      cross-Hub prompt and delivery all use it, and `confirmedHubUrl` voids an
+      approval whose destination moved. Four deterministic tests (mid-flight
+      switch, stale approval at repository and ViewModel level, legacy
+      fail-closed) were mutation-checked against the old behaviour. Verified:
+      211 JVM tests, `assembleDebug` green, 53 instrumented tests (0 failed,
+      1 skipped).
+
 ## Decisions made — locked in
 
 - [x] **2D is the board, 3D is the stage.** Text-based tabletop at the core;

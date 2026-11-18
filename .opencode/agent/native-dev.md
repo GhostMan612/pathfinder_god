@@ -55,7 +55,8 @@ work package, then gate it once. If you believe you cannot finish without a mid-
 `BLOCKED: … · <exact command> · <why>` and stop — do not run it.
 
 **Toolchain (RULES.md §5.2 — authoritative):**
-- JDK: **Temurin 17** at `C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1`, pinned in
+- JDK: **Temurin 17** at `C:\android\Android Studio\jbr\jdks\eclipse_adoptium-17-amd64-windows.2`
+  (17.0.21+9; the old `%TEMP%\opencode\jdk17` copy is purged by Windows between sessions, never pin it), pinned in
   `app/build.gradle.kts` via `kotlin.jvmToolchain(17)` and auto-resolved by the foojay resolver in
   `settings.gradle.kts`. Android Studio's bundled JBR **works** (OpenJDK 25.0.3) but is not the lane
   JDK — it is a choice, not a forbidden path.

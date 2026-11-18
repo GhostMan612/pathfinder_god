@@ -95,6 +95,40 @@ def _hermetic_settings(rules_db_dir: Path, monkeypatch):
         if isinstance(bound_settings, Settings):
             monkeypatch.setattr(module, "settings", test_settings)
 
+    from app.api.security import (
+        RateLimitMiddleware,
+        _api_rate_limiter,
+        _auth_rate_limiter,
+    )
+
+    _api_rate_limiter._requests.clear()
+    _auth_rate_limiter._requests.clear()
+    node = getattr(main.app, "middleware_stack", None)
+    while node is not None:
+        if isinstance(node, RateLimitMiddleware):
+            node.limiter._requests.clear()
+        node = getattr(node, "app", None)
+
+
+@pytest.fixture(autouse=True)
+def _no_live_ollama(monkeypatch):
+    """Refuse the semantic spine's HTTP egress instead of reaching a real daemon.
+
+    semantic_recall_enabled defaults to True, so CampaignRepository.search_sessions()
+    otherwise issues a genuine request to OLLAMA_HOST: HTTP 404 on a laptop without
+    the embedding model, a multi-second stall where Ollama is wedged, and a hard
+    dependency on a daemon that CI does not have. A refused connection is the
+    documented "Ollama is down" path, so these tests exercise the lexical fallback
+    that must always work. Tests that inject an embedder -- or patch OllamaEmbedder
+    to prove the recall no longer blocks the event loop -- never reach this seam.
+    """
+    import app.rag.semantic_spine.ollama as spine_ollama
+
+    def refuse(*_args, **_kwargs):
+        raise ConnectionRefusedError("hermetic test: no live Ollama")
+
+    monkeypatch.setattr(spine_ollama, "urlopen", refuse)
+
 
 def _create_test_client(rules_db_dir: Path) -> TestClient:
     """Create a test client with a fake LLM that bypasses auth.

@@ -25,8 +25,9 @@ python -m app.main        # starts on :8000 (uses C:\venv-hub)
 ### Spoke (Kotlin) — the client
 ```powershell
 cd spoke_kt
-$env:JAVA_HOME='C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1'
+$env:JAVA_HOME='C:\android\Android Studio\jbr\jdks\eclipse_adoptium-17-amd64-windows.2'
 .\gradlew.bat assembleDebug --no-daemon   # required before commit; daemons get reaped in this shell
+.\scripts\device-test.ps1                  # instrumented suite on a physical device (wakes it, stays awake)
 # Human runs Install/Run in Android Studio. Never commit APKs.
 ```
 
@@ -34,9 +35,10 @@ $env:JAVA_HOME='C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1
 - Python: `C:\venv-hub\venv\Scripts\python.exe` (3.14.6) — use as-is
 - Ollama: `ollama serve` on `0.0.0.0:11434` (hub `.env` maps `127.0.0.1:11450`, model `phi4-mini`)
 - Android SDK: `C:\android\sdk` (Gradle 9.3.1 cached)
-- Native JDK: Temurin 17 at `C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1` (`$env:JAVA_HOME` per command) — the lane JDK, pinned via `kotlin.jvmToolchain(17)`. Studio's bundled JBR (`C:\android\Android Studio\jbr`) is a working OpenJDK 25, not a stripped/broken one, but it is deliberately not the lane JDK
+- Native JDK: Temurin 17 at `C:\android\Android Studio\jbr\jdks\eclipse_adoptium-17-amd64-windows.2` (`$env:JAVA_HOME` per command) - the lane JDK, pinned via `kotlin.jvmToolchain(17)`. The previous `%TEMP%\opencode\jdk17` path is purged by Windows between sessions, so nothing may hardcode it; `.opencode/tools/pg-build.ts` probes `JAVA_HOME`, Studio's `jdks/`, and `~/.jdks`. Studio's bundled JBR (`C:\android\Android Studio\jbr`) is a working OpenJDK 25, not a stripped/broken one, but it is deliberately not the lane JDK
 - Native agents: `.opencode/agent/native-dev.md` owns `spoke_kt/` (AGP 9.0.1 + KSP + Room 2.7, compileSdk 37 / targetSdk 34)
-- Local grunt: `local_grunt` ships as an OpenCode plugin (`.opencode/plugins/pf-local-grunt.ts`) plus a stdlib-only CLI/MCP pair (`tools/local_grunt.py`, `tools/local_grunt_mcp.py`) that delegates 1–8 explicit files to `pf-grunt:3b` on `127.0.0.1:11450` for read/propose/apply; start it with `tools/ollama/Ensure_Local_Grunt.ps1`, details in `docs/LOCAL_GRUNT.md`
+- Local grunt: `local_grunt` ships as an OpenCode plugin (`.opencode/plugins/pf-local-grunt.ts`) plus a stdlib-only CLI/MCP pair (`tools/local_grunt.py`, `tools/local_grunt_mcp.py`) that delegates 1-8 explicit files to `pf-grunt:3b` on `127.0.0.1:11450` for read/propose/apply; start it with `tools/ollama/Ensure_Local_Grunt.ps1`, details in `docs/LOCAL_GRUNT.md`
+- OpenCode tools: the five `pg-*` lane tools register through the V2 plugin `.opencode/plugins/pg-tools.ts` (`ctx.tool.transform`), with their implementations in `.opencode/tools/`. V1 `@opencode-ai/plugin` `tool()` files are inert in V2 — never reintroduce that import or pin.
 
 ## Critical Rules (from RULES.md)
 
@@ -87,7 +89,7 @@ $env:JAVA_HOME='C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1
 
 ## Dependencies (spoke_kt)
 - Compose BOM 2024.10.01 (ui, material3, icons-extended, animation), activity-compose, lifecycle-viewmodel-compose
-- Room 2.7.0 (KSP 2.3.4) + `mil.nga:sqlite-android:3450200` (Android SQLite lacks FTS5 — never the platform driver)
+- Room 2.7.0 (KSP 2.3.4) + `mil.nga:sqlite-android:3500400` (SQLite 3.50.4; 16 KB-aligned 64-bit libs — Android SQLite lacks FTS5, never the platform driver)
 - Retrofit 2.11/OkHttp 4.12 + kotlinx-serialization converter; AGDK games-activity/frame-pacing
 - Audio is framework `SoundPool` + `MediaPlayer` (no Oboe dependency)
 
@@ -96,6 +98,7 @@ $env:JAVA_HOME='C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1
 - Real device debug build → hub at the current laptop LAN IP (`http://<laptop-LAN-IP>:8000`); a release build requires trusted HTTPS to a real phone
 - WebSocket drops on sleep → SOLVED: backoff reconnect lives in `HubForegroundService`
 - Re-bundling the rules DB → bump `DatabaseAssetManager.BUNDLE_VERSION` or devices keep the stale extract
+- **Instrumented suite needs an awake, unlocked phone**: with the screen asleep every Compose test fails `No compose hierarchies found in the app` (29/29 in one run) because the Activity never reaches the foreground. Run `spoke_kt/scripts/device-test.ps1`, not the bare Gradle task: it applies `svc power stayon true`, wakes and verifies the device, then restores the setting
 - Android SQLite has no FTS5 → always query via the NGA bridge (`NgaSQLiteOpenHelperFactory`)
 - `./gradlew` daemons get reaped in this shell → always `--no-daemon` with a capped heap
 - `io.requery:sqlite-android` does not exist on Central — the fork is `mil.nga:sqlite-android`, do not "fix" it

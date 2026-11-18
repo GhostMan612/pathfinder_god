@@ -20,9 +20,12 @@ import com.pathfindergod.spoke.data.network.EndTurnResponse
 import com.pathfindergod.spoke.data.network.GenerateRequest
 import com.pathfindergod.spoke.data.network.GmStreamSource
 import com.pathfindergod.spoke.data.network.HubApi
+import com.pathfindergod.spoke.data.network.HubCampaignSummary
 import com.pathfindergod.spoke.data.network.LootResponse
 import com.pathfindergod.spoke.data.network.MapGenerateResponse
 import com.pathfindergod.spoke.data.network.MapRequest
+import com.pathfindergod.spoke.data.network.PartySyncRequest
+import com.pathfindergod.spoke.data.network.PartySyncResponse
 import com.pathfindergod.spoke.data.network.SoloStateResponse
 import com.pathfindergod.spoke.data.network.StreamEvent
 import com.pathfindergod.spoke.data.network.StrikeRequest
@@ -36,6 +39,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
@@ -156,6 +160,15 @@ class GmChatViewModelTest {
             throw UnsupportedOperationException()
 
         override suspend fun generateEncounter(request: EncounterRequest): EncounterResponse =
+            throw UnsupportedOperationException()
+
+        override suspend fun syncPartyMember(campaignId: Int, request: PartySyncRequest): PartySyncResponse =
+            throw UnsupportedOperationException()
+
+        override suspend fun getCampaignParty(campaignId: Int): List<Map<String, JsonElement>> =
+            throw UnsupportedOperationException()
+
+        override suspend fun listCampaigns(): List<HubCampaignSummary> =
             throw UnsupportedOperationException()
     }
 

@@ -22,9 +22,12 @@ Interactive playground (hub running): `http://localhost:8000/docs`.
 | POST | `/campaign/note` | `{prompt, response}` | Updated state (+ background continuity) |
 | POST | `/campaign/reset` | — | Fresh state |
 | GET | `/campaign/export?campaign_id=` | — | Full dump (campaigns, sessions, npcs, locations, items, quests, decisions, party) |
+| GET | `/campaign/list` | — | List campaign summaries (`[{id, name, edition, summary, created_at, updated_at}]`) |
 | POST | `/campaign/import` | Export payload | Merged state (incl. sessions, notes, decisions) |
 | POST | `/campaign/summarize-session` | `{events[], campaign_name}` | `{summary, event_count}` — chronicler journal entry |
 | GET/POST | `/campaign/npcs`, `/campaign/party` | NPC/member JSON | IDs + names |
+| GET | `/campaign/{campaign_id}/party` | — | Scoped party members (ordered by name) |
+| POST | `/campaign/{campaign_id}/party/sync`, `/campaign/party/sync` | `PartySyncRequest` (`uuid`, `name`, `expected_revision?`, `idempotency_key?`, `player_name?`, stats; omits/null `player_name` preserves existing value on update) | `{id, uuid, name, revision, updated_at, status}` (`404` `campaign_not_found` if campaign missing; `409` with `error: "conflict"` on revision/UUID mismatch or stale retry after later revision; `error: "idempotency_conflict"` on idempotency key payload/UUID mismatch) |
 | GET | `/campaign/backup` | - | Full export as download |
 | POST | `/campaign/create` | `{name, edition=2e, premise?, hero_prompt?}` | `{campaign_id, opening_narration, ...}` |
 | POST | `/campaign/{campaign_id}/turn` | `{action, actor=player, seed?}` | `TurnResponse` (dice, HP, conditions, narration, choices, encounter) |

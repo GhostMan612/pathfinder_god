@@ -11,6 +11,7 @@ import android.os.Build
 import android.util.Log
 import android.view.Display
 import android.view.Surface
+import java.lang.ref.WeakReference
 
 data class PitDisplayMode(
     val modeId: Int,
@@ -80,12 +81,36 @@ interface PitFrameClient {
     fun onHostPause()
 }
 
+/**
+ * Holds the host Activity weakly so the [PitFrameGovernor] singleton can never
+ * outlive it: an Activity that is destroyed without a matching [release] (process
+ * teardown order, a crash in another callback) is still collectable.
+ */
+internal class PitHostSlot<T : Any> {
+    private var ref: WeakReference<T>? = null
+
+    fun bind(host: T) {
+        ref = WeakReference(host)
+    }
+
+    fun current(): T? = ref?.get()
+
+    /** Clears the slot only when [candidate] is the host currently bound. */
+    fun release(candidate: T): Boolean {
+        if (current() !== candidate) return false
+        ref = null
+        return true
+    }
+}
+
 object PitFrameGovernor {
 
     var telemetryEnabled: Boolean = false
         private set
 
-    private var host: Activity? = null
+    private val hostSlot = PitHostSlot<Activity>()
+    private val host: Activity?
+        get() = hostSlot.current()
     private var resumed = false
     private var targetRate = PitRefreshPolicy.FALLBACK_REFRESH_RATE
     private var liveRate = PitRefreshPolicy.FALLBACK_REFRESH_RATE
@@ -94,17 +119,16 @@ object PitFrameGovernor {
     private val telemetry = PitFrameTelemetry()
 
     fun bind(activity: Activity) {
-        host = activity
+        hostSlot.bind(activity)
         telemetryEnabled =
             (activity.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
         readDisplay()
     }
 
     fun release(activity: Activity) {
-        if (host !== activity) return
+        if (!hostSlot.release(activity)) return
         pauseClients()
         clients.clear()
-        host = null
         resumed = false
     }
 

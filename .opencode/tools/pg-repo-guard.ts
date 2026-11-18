@@ -1,7 +1,7 @@
-import { tool } from "@opencode-ai/plugin"
 import path from "node:path"
 import { execFileSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
+import type { PgTool } from "../lib/pg-tool"
 
 const GENESIS = "As Above, So Below"
 // A secret is a NAME BOUND TO A VALUE, not a name. The previous pattern matched the bare
@@ -50,21 +50,78 @@ function git(args: string[], cwd: string): string {
   }
 }
 
-export default tool({
+const TEXT_EXT = /\.(kt|xml|yml|yaml|md|toml|properties|kts)$/
+
+type StagedRead =
+  | { kind: "blob"; body: string }
+  | { kind: "absent" } // staged deletion: nothing will be committed at this path
+  | { kind: "error"; detail: string }
+
+// `staged=true` must inspect what will actually be committed, not the working
+// tree. A file can be staged with a credential and then edited (or reverted)
+// without restaging; reading the worktree would report PASS while the index
+// blob still carries the credential into the commit.
+function readStagedBlob(root: string, file: string): StagedRead {
+  try {
+    execFileSync("git", ["ls-files", "--error-unmatch", "--", file], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "ignore", "pipe"],
+    })
+  } catch (e) {
+    // ls-files --error-unmatch exits 1 when the path is not in the index
+    // (staged deletion). Anything else is an unexpected read failure and must
+    // fail closed rather than silently skip the file.
+    const status = (e as { status?: number }).status
+    const stderr = String((e as { stderr?: string }).stderr ?? "").trim()
+    if (status === 1) return { kind: "absent" }
+    return {
+      kind: "error",
+      detail: `git ls-files failed (status ${status ?? "?"}): ${stderr || (e as Error).message}`,
+    }
+  }
+  try {
+    return {
+      kind: "blob",
+      body: execFileSync("git", ["cat-file", "blob", `:${file}`], {
+        cwd: root,
+        encoding: "utf8",
+        maxBuffer: 64 * 1024 * 1024,
+      }),
+    }
+  } catch (e) {
+    return { kind: "error", detail: `git cat-file :${file} failed: ${(e as Error).message}` }
+  }
+}
+
+export const pgRepoGuard = (root: string): PgTool => ({
+  name: "pg-repo-guard",
   description:
-    "RULES.md compliance guard for the current diff. Checks the Genesis header on every changed .kt, scans changed files for secrets, rejects build artifacts / local.properties / keystores / blueprints / the deleted Flutter spoke, and reports staged vs unstaged state. Read-only: it never stages or commits. Call once per work package, immediately before the commit.",
-  timeout: 60_000,
-  args: {
-    staged: tool.schema.boolean().optional().describe("Inspect the staged set only (pre-commit). Default false = everything dirty vs HEAD."),
+    "RULES.md compliance guard for the current diff. Checks the Genesis header on every changed .kt, scans changed files for secrets, rejects build artifacts / local.properties / keystores / blueprints / the deleted Flutter spoke, and reports staged vs unstaged state. With staged=true it reads the exact index blobs, so the report matches what will be committed. Read-only: it never stages or commits. Call once per work package, immediately before the commit.",
+  input: {
+    type: "object",
+    properties: {
+      staged: {
+        type: "boolean",
+        description: "Inspect the staged set only (pre-commit). Default false = everything dirty vs HEAD.",
+      },
+    },
+    additionalProperties: false,
   },
-  async execute(args, context) {
-    const root = context.worktree
+  async execute(args) {
     const stagedOnly = args.staged === true
 
     const porcelain = git(["status", "--porcelain"], root)
     const entries = porcelain.split(/\r?\n/).filter(Boolean)
-    const files = [...new Set(entries.map((l) => (l.includes("->") ? l.split(" -> ")[1] : l).slice(3).trim().replace(/^"|"$/g, "")).filter(Boolean))]
-    const target = stagedOnly ? entries.filter((l) => !l.startsWith(" ")).map((l) => l.slice(3).trim()) : files
+    const pathOf = (l: string) => (l.includes(" -> ") ? l.split(" -> ")[1] : l).slice(3).trim().replace(/^"|"$/g, "")
+    const files = [...new Set(entries.map(pathOf).filter(Boolean))]
+    // Staged means an index status letter (M/A/R/D/C) in column 1. Untracked
+    // entries (`??`) and worktree-only edits (` M`) are not staged; including
+    // them made `staged=true` scan every local overlay and report them as part
+    // of the commit. Staged renames keep the destination path, like `files`.
+    const target = stagedOnly
+      ? entries.filter((l) => !l.startsWith(" ") && !l.startsWith("??")).map(pathOf)
+      : files
 
     const findings: string[] = []
     const ok: string[] = []
@@ -76,20 +133,30 @@ export default tool({
         findings.push(`FORBIDDEN PATH   ${f}  (${bad.why})`)
         continue
       }
-      const full = path.join(root, f)
-      if (!existsSync(full)) continue
       let body: string
-      try {
-        body = readFileSync(full, "utf8")
-      } catch {
-        continue
+      if (stagedOnly) {
+        const staged = readStagedBlob(root, f)
+        if (staged.kind === "absent") continue
+        if (staged.kind === "error") {
+          findings.push(`STAGED READ ERROR   ${f}  ->  ${staged.detail}`)
+          continue
+        }
+        body = staged.body
+      } else {
+        const full = path.join(root, f)
+        if (!existsSync(full)) continue
+        try {
+          body = readFileSync(full, "utf8")
+        } catch {
+          continue
+        }
       }
       if (f.endsWith(".kt")) {
         kts++
         if (body.includes(GENESIS)) ok.push(`genesis ok  ${f}`)
         else findings.push(`MISSING GENESIS HEADER  ${f}`)
       }
-      if (/\.(kt|xml|yml|yaml|md|toml|properties|kts)$/.test(f)) {
+      if (TEXT_EXT.test(f)) {
         const m = body.match(SECRET)
         if (m) findings.push(`POSSIBLE SECRET   ${f}  ->  ${m[0].slice(0, 30)}`)
       }
@@ -101,7 +168,7 @@ export default tool({
     const untracked = entries.filter((l) => l.startsWith("??")).map((l) => l.slice(3).trim())
     const head = git(["log", "--oneline", "-1"], root).trim()
 
-    return [
+    const report = [
       `pg-repo-guard  ${findings.length === 0 ? "PASS" : "FAIL"}`,
       `scope:     ${stagedOnly ? "staged only" : "all changes vs HEAD"}`,
       `head:      ${head || "(no commits)"}`,
@@ -116,5 +183,7 @@ export default tool({
         ? "Fix every finding before committing. Genesis header is mandatory on .kt (RULES.md section 2); CRLF breaks .gitattributes eol=lf."
         : "RULES.md section 2/5 satisfied for this diff. Stage explicit paths only — never `git add .` or `git add -A`.",
     ].join("\n")
+
+    return { content: report }
   },
 })

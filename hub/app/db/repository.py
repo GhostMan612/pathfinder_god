@@ -43,6 +43,47 @@ _RAW_LOG_MAX_CHARS = 100_000
 EDGE_KINDS = ("road", "trail", "door", "stairs", "portal", "other")
 
 
+class RevisionConflictError(Exception):
+    def __init__(
+        self,
+        current_revision: int,
+        expected_revision: int | None,
+        server_character: dict | None = None,
+        error_code: str = "conflict",
+        message: str | None = None,
+    ):
+        super().__init__(
+            message
+            or f"Revision conflict: current revision is {current_revision}, expected {expected_revision}"
+        )
+        self.current_revision = current_revision
+        self.expected_revision = expected_revision
+        self.server_character = server_character
+        self.error_code = error_code
+
+
+class IdempotencyConflictError(RevisionConflictError):
+    def __init__(
+        self,
+        current_revision: int,
+        expected_revision: int | None,
+        server_character: dict | None = None,
+    ):
+        super().__init__(
+            current_revision=current_revision,
+            expected_revision=expected_revision,
+            server_character=server_character,
+            error_code="idempotency_conflict",
+            message="Idempotency key reuse with mismatched request payload",
+        )
+
+
+class CampaignNotFoundError(Exception):
+    def __init__(self, campaign_id: int):
+        super().__init__(f"Campaign {campaign_id} not found")
+        self.campaign_id = campaign_id
+
+
 @dataclass
 class Campaign:
     id: int
@@ -432,6 +473,41 @@ class CampaignRepository:
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_encounters_location "
                     "ON encounters(campaign_id, location_id)"
+                )
+                try:
+                    conn.execute("ALTER TABLE party_members ADD COLUMN uuid TEXT")
+                except sqlite3.OperationalError:
+                    pass
+                try:
+                    conn.execute(
+                        "ALTER TABLE party_members ADD COLUMN revision INTEGER NOT NULL DEFAULT 1"
+                    )
+                except sqlite3.OperationalError:
+                    pass
+                try:
+                    conn.execute(
+                        "ALTER TABLE party_members ADD COLUMN idempotency_key TEXT"
+                    )
+                except sqlite3.OperationalError:
+                    pass
+                try:
+                    conn.execute(
+                        "ALTER TABLE party_members ADD COLUMN idempotency_hash TEXT"
+                    )
+                except sqlite3.OperationalError:
+                    pass
+                existing_idx = conn.execute(
+                    "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_party_campaign_uuid'"
+                ).fetchone()
+                if (
+                    existing_idx
+                    and existing_idx[0]
+                    and "UNIQUE" not in existing_idx[0].upper()
+                ):
+                    conn.execute("DROP INDEX IF EXISTS idx_party_campaign_uuid")
+                conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_party_campaign_uuid "
+                    "ON party_members(campaign_id, uuid) WHERE uuid IS NOT NULL"
                 )
                 # Older campaign.db files carry UNIQUE(campaign_id, name) on
                 # combatants, which collapsed duplicate monsters into one row:
@@ -1242,6 +1318,9 @@ class CampaignRepository:
                     -- an explicit empty dict intentionally clears the sheet.
                     stats_json = CASE WHEN ? = 1
                         THEN excluded.stats_json ELSE party_members.stats_json END,
+                    revision = COALESCE(party_members.revision, 1) + 1,
+                    idempotency_key = NULL,
+                    idempotency_hash = NULL,
                     updated_at = datetime('now')
                 RETURNING id
                 """,
@@ -1266,6 +1345,339 @@ class CampaignRepository:
                 (campaign_id,),
             ).fetchall()
             return [dict(r) for r in rows]
+
+    @staticmethod
+    def _serialize_conflict_row(row: sqlite3.Row) -> dict:
+        server_char = dict(row)
+        if server_char.get("stats_json"):
+            try:
+                server_char["stats"] = json.loads(server_char["stats_json"])
+            except Exception:
+                pass
+        return server_char
+
+    @staticmethod
+    def _sync_request_digest(
+        campaign_id: int,
+        uuid: str,
+        name: str,
+        player_name: str | None,
+        class_: str | None,
+        level: int,
+        ancestry: str | None,
+        background: str | None,
+        stats: dict | None,
+        expected_revision: int | None,
+    ) -> str:
+        payload = {
+            "campaign_id": campaign_id,
+            "uuid": uuid,
+            "name": name,
+            "player_name": player_name,
+            "class": class_,
+            "level": level,
+            "ancestry": ancestry,
+            "background": background,
+            "stats": stats,
+            "expected_revision": expected_revision,
+        }
+        canonical = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def _resolve_sync_integrity_conflict(
+        self,
+        conn: sqlite3.Connection,
+        campaign_id: int,
+        uuid: str,
+        name: str,
+        expected_revision: int | None,
+        idempotency_key: str | None,
+        request_digest: str | None,
+    ) -> dict:
+        row = conn.execute(
+            "SELECT * FROM party_members WHERE campaign_id = ? AND uuid = ?",
+            (campaign_id, uuid),
+        ).fetchone()
+        if row is None:
+            row = conn.execute(
+                "SELECT * FROM party_members WHERE campaign_id = ? AND name = ?",
+                (campaign_id, name),
+            ).fetchone()
+        if row is None:
+            raise RevisionConflictError(
+                current_revision=1,
+                expected_revision=expected_revision,
+                server_character=None,
+            )
+        row_dict = dict(row)
+        current_revision = (
+            row_dict.get("revision") if row_dict.get("revision") is not None else 1
+        )
+        if (
+            idempotency_key is not None
+            and row_dict.get("idempotency_key") == idempotency_key
+            and row_dict.get("uuid") == uuid
+            and row_dict.get("idempotency_hash") == request_digest
+        ):
+            return {
+                "id": row["id"],
+                "uuid": row["uuid"] or uuid,
+                "name": row["name"],
+                "revision": current_revision,
+                "updated_at": row["updated_at"],
+                "status": "synced",
+            }
+        raise RevisionConflictError(
+            current_revision=current_revision,
+            expected_revision=expected_revision,
+            server_character=self._serialize_conflict_row(row),
+        )
+
+    def sync_party_member(
+        self,
+        campaign_id: int,
+        uuid: str,
+        name: str,
+        player_name: str | None = None,
+        class_: str | None = None,
+        level: int = 1,
+        ancestry: str | None = None,
+        background: str | None = None,
+        stats: dict | None = None,
+        expected_revision: int | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict:
+        request_digest = (
+            self._sync_request_digest(
+                campaign_id=campaign_id,
+                uuid=uuid,
+                name=name,
+                player_name=player_name,
+                class_=class_,
+                level=level,
+                ancestry=ancestry,
+                background=background,
+                stats=stats,
+                expected_revision=expected_revision,
+            )
+            if idempotency_key is not None
+            else None
+        )
+        with self._conn() as conn:
+            if self._active_connection() is None and not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
+            if (
+                conn.execute(
+                    "SELECT 1 FROM campaigns WHERE id = ?",
+                    (campaign_id,),
+                ).fetchone()
+                is None
+            ):
+                raise CampaignNotFoundError(campaign_id)
+
+            if idempotency_key is not None:
+                key_owner = conn.execute(
+                    "SELECT * FROM party_members WHERE campaign_id = ? AND idempotency_key = ?",
+                    (campaign_id, idempotency_key),
+                ).fetchone()
+                if key_owner is not None:
+                    owner_dict = dict(key_owner)
+                    owner_rev = (
+                        owner_dict.get("revision")
+                        if owner_dict.get("revision") is not None
+                        else 1
+                    )
+                    if (
+                        owner_dict.get("uuid") == uuid
+                        and owner_dict.get("idempotency_hash") == request_digest
+                    ):
+                        return {
+                            "id": key_owner["id"],
+                            "uuid": key_owner["uuid"] or uuid,
+                            "name": key_owner["name"],
+                            "revision": owner_rev,
+                            "updated_at": key_owner["updated_at"],
+                            "status": "synced",
+                        }
+                    raise IdempotencyConflictError(
+                        current_revision=owner_rev,
+                        expected_revision=expected_revision,
+                        server_character=self._serialize_conflict_row(key_owner),
+                    )
+
+            row = conn.execute(
+                "SELECT * FROM party_members WHERE campaign_id = ? AND uuid = ?",
+                (campaign_id, uuid),
+            ).fetchone()
+            matched_by_uuid = row is not None
+            if row is None:
+                row = conn.execute(
+                    "SELECT * FROM party_members WHERE campaign_id = ? AND name = ?",
+                    (campaign_id, name),
+                ).fetchone()
+
+            if row is not None:
+                row_dict = dict(row)
+                current_revision = (
+                    row_dict.get("revision")
+                    if row_dict.get("revision") is not None
+                    else 1
+                )
+                existing_uuid = row_dict.get("uuid")
+                if not matched_by_uuid and existing_uuid is not None and existing_uuid != uuid:
+                    raise RevisionConflictError(
+                        current_revision=current_revision,
+                        expected_revision=expected_revision,
+                        server_character=self._serialize_conflict_row(row),
+                    )
+
+                if row["name"] != name:
+                    name_conflict = conn.execute(
+                        "SELECT * FROM party_members WHERE campaign_id = ? AND name = ? AND id != ?",
+                        (campaign_id, name, row["id"]),
+                    ).fetchone()
+                    if name_conflict is not None:
+                        conflict_dict = dict(name_conflict)
+                        conflict_rev = (
+                            conflict_dict.get("revision")
+                            if conflict_dict.get("revision") is not None
+                            else 1
+                        )
+                        raise RevisionConflictError(
+                            current_revision=conflict_rev,
+                            expected_revision=expected_revision,
+                            server_character=self._serialize_conflict_row(name_conflict),
+                        )
+
+                if existing_uuid is not None:
+                    effective_expected = 0 if expected_revision is None else expected_revision
+                    if effective_expected != current_revision:
+                        raise RevisionConflictError(
+                            current_revision=current_revision,
+                            expected_revision=expected_revision,
+                            server_character=self._serialize_conflict_row(row),
+                        )
+                elif expected_revision is not None and expected_revision != current_revision:
+                    raise RevisionConflictError(
+                        current_revision=current_revision,
+                        expected_revision=expected_revision,
+                        server_character=self._serialize_conflict_row(row),
+                    )
+
+                new_revision = current_revision + 1
+                stats_json = (
+                    json.dumps(stats) if stats is not None else row["stats_json"]
+                )
+                next_player_name = (
+                    player_name
+                    if player_name is not None
+                    else row_dict.get("player_name")
+                )
+                try:
+                    cur = conn.execute(
+                        """
+                        UPDATE party_members SET
+                            uuid = ?,
+                            name = ?,
+                            player_name = ?,
+                            class = ?,
+                            level = ?,
+                            ancestry = ?,
+                            background = ?,
+                            stats_json = ?,
+                            revision = ?,
+                            idempotency_key = ?,
+                            idempotency_hash = ?,
+                            updated_at = datetime('now')
+                        WHERE id = ?
+                        RETURNING id, uuid, name, revision, updated_at
+                        """,
+                        (
+                            uuid,
+                            name,
+                            next_player_name,
+                            class_,
+                            level,
+                            ancestry,
+                            background,
+                            stats_json,
+                            new_revision,
+                            idempotency_key,
+                            request_digest,
+                            row["id"],
+                        ),
+                    )
+                except sqlite3.IntegrityError:
+                    return self._resolve_sync_integrity_conflict(
+                        conn,
+                        campaign_id,
+                        uuid,
+                        name,
+                        expected_revision,
+                        idempotency_key,
+                        request_digest,
+                    )
+                updated = cur.fetchone()
+                return {
+                    "id": updated["id"],
+                    "uuid": updated["uuid"],
+                    "name": updated["name"],
+                    "revision": updated["revision"],
+                    "updated_at": updated["updated_at"],
+                    "status": "synced",
+                }
+            else:
+                if expected_revision is not None and expected_revision > 0:
+                    raise RevisionConflictError(
+                        current_revision=0,
+                        expected_revision=expected_revision,
+                        server_character=None,
+                    )
+                stats_json = json.dumps(stats if stats is not None else {})
+                try:
+                    cur = conn.execute(
+                        """
+                        INSERT INTO party_members (
+                            campaign_id, uuid, name, player_name, class, level, ancestry, background, stats_json, revision, idempotency_key, idempotency_hash
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                        RETURNING id, uuid, name, revision, updated_at
+                        """,
+                        (
+                            campaign_id,
+                            uuid,
+                            name,
+                            player_name,
+                            class_,
+                            level,
+                            ancestry,
+                            background,
+                            stats_json,
+                            idempotency_key,
+                            request_digest,
+                        ),
+                    )
+                except sqlite3.IntegrityError:
+                    return self._resolve_sync_integrity_conflict(
+                        conn,
+                        campaign_id,
+                        uuid,
+                        name,
+                        expected_revision,
+                        idempotency_key,
+                        request_digest,
+                    )
+                inserted = cur.fetchone()
+                return {
+                    "id": inserted["id"],
+                    "uuid": inserted["uuid"],
+                    "name": inserted["name"],
+                    "revision": inserted["revision"],
+                    "updated_at": inserted["updated_at"],
+                    "status": "synced",
+                }
 
     # ──────────────────────────────────────────────────────────────
     # Campaign State (for /campaign GET)
@@ -1437,6 +1849,9 @@ class CampaignRepository:
                         ancestry = excluded.ancestry,
                         background = excluded.background,
                         stats_json = excluded.stats_json,
+                        revision = COALESCE(party_members.revision, 1) + 1,
+                        idempotency_key = NULL,
+                        idempotency_hash = NULL,
                         updated_at = datetime('now')
                     """,
                     (

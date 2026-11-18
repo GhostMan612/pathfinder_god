@@ -133,6 +133,7 @@ CREATE TABLE IF NOT EXISTS player_decisions (
 CREATE TABLE IF NOT EXISTS party_members (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    uuid TEXT,
     name TEXT NOT NULL,
     player_name TEXT,
     class TEXT,
@@ -140,6 +141,9 @@ CREATE TABLE IF NOT EXISTS party_members (
     ancestry TEXT,
     background TEXT,
     stats_json TEXT,           -- Full character sheet JSON
+    revision INTEGER NOT NULL DEFAULT 1,
+    idempotency_key TEXT,
+    idempotency_hash TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(campaign_id, name)

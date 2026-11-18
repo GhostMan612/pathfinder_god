@@ -7,6 +7,7 @@ package com.pathfindergod.spoke.ui.character
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,11 +22,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -37,13 +43,18 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import com.pathfindergod.spoke.R
 import com.pathfindergod.spoke.data.local.CharacterEntity
+import com.pathfindergod.spoke.data.network.HubCampaignSummary
 import com.pathfindergod.spoke.ui.designsystem.Dimens
 import com.pathfindergod.spoke.ui.designsystem.GodBackLink
 import com.pathfindergod.spoke.ui.designsystem.GodCard
+import com.pathfindergod.spoke.ui.designsystem.GodChip
+import com.pathfindergod.spoke.ui.designsystem.GodPrimaryButton
 import com.pathfindergod.spoke.ui.designsystem.GodStatTile
 import com.pathfindergod.spoke.ui.designsystem.GodTags
+import com.pathfindergod.spoke.ui.designsystem.GodTextField
 import com.pathfindergod.spoke.ui.designsystem.Spacing
 import com.pathfindergod.spoke.ui.designsystem.godRtlText
+import com.pathfindergod.spoke.ui.designsystem.godTouchHeight
 import com.pathfindergod.spoke.ui.designsystem.godTouchSize
 import com.pathfindergod.spoke.ui.theme.CrimsonPrimary
 import com.pathfindergod.spoke.ui.theme.CritRed
@@ -51,6 +62,7 @@ import com.pathfindergod.spoke.ui.theme.GoldAccent
 import com.pathfindergod.spoke.ui.theme.ParchmentSurface
 import com.pathfindergod.spoke.ui.theme.TextPrimary
 import com.pathfindergod.spoke.ui.theme.TextSecondary
+import com.pathfindergod.spoke.ui.viewmodel.PendingCrossHubSync
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -93,8 +105,30 @@ private fun abilityModifier(score: Int): Int = Math.floorDiv(score - 10, 2)
 fun CharacterDetailScreen(
     entity: CharacterEntity,
     onBack: () -> Unit,
+    currentHubIdentity: String = "",
+    selectedCampaignId: Int? = null,
+    hubCampaigns: List<HubCampaignSummary> = emptyList(),
+    isLoadingCampaigns: Boolean = false,
+    pendingCrossHubSync: PendingCrossHubSync? = null,
+    onLoadCampaigns: (() -> Unit)? = null,
+    onSelectCampaign: ((Int) -> Unit)? = null,
+    onSync: ((Long, Int, Boolean) -> Unit)? = null,
+    onConfirmCrossHubSync: (() -> Unit)? = null,
+    onDismissCrossHubSync: (() -> Unit)? = null,
+    isSyncing: Boolean = false,
 ) {
     val context = LocalContext.current
+    val boundToCurrentHub = !entity.hubUrl.isNullOrBlank() &&
+        currentHubIdentity.isNotBlank() &&
+        entity.hubUrl == currentHubIdentity
+    val boundCampaignId = entity.campaignId?.takeIf { boundToCurrentHub }
+    var explicitCampaignId by rememberSaveable(entity.id, currentHubIdentity) {
+        mutableStateOf<Int?>(null)
+    }
+    val effectiveCampaignId = explicitCampaignId ?: boundCampaignId ?: selectedCampaignId
+    var manualCampaignInput by rememberSaveable(entity.id, currentHubIdentity, effectiveCampaignId) {
+        mutableStateOf(effectiveCampaignId?.toString().orEmpty())
+    }
     val derived = remember(entity.derived) { flatEntries(entity.derived).toMap() }
     val abilities = remember(entity.abilities) { flatEntries(entity.abilities).toMap() }
     val proficiencies = remember(entity.proficiencies) { flatEntries(entity.proficiencies) }
@@ -109,6 +143,164 @@ fun CharacterDetailScreen(
             onClick = onBack,
             testTag = GodTags.heroBack,
         )
+        GodCard {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = Spacing.md)) {
+                        Text(
+                            text = stringResource(R.string.character_sync_title),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = GoldAccent,
+                        )
+                        val statusText = when (entity.syncStatus) {
+                            "synced" -> stringResource(R.string.character_sync_status_synced, entity.serverRevision ?: 1)
+                            "conflict" -> stringResource(R.string.character_sync_status_conflict)
+                            "auth_error" -> stringResource(R.string.character_sync_status_auth_error)
+                            "tls_error" -> stringResource(R.string.character_sync_status_tls_error)
+                            "network_error" -> stringResource(R.string.character_sync_status_network_error)
+                            "campaign_required" -> stringResource(R.string.character_sync_status_campaign_required)
+                            "campaign_not_found" -> stringResource(R.string.character_sync_status_campaign_not_found)
+                            else -> stringResource(R.string.character_sync_status_local)
+                        }
+                        Text(
+                            text = statusText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (
+                                entity.syncStatus == "conflict" ||
+                                entity.syncStatus == "auth_error" ||
+                                entity.syncStatus == "tls_error" ||
+                                entity.syncStatus == "campaign_required" ||
+                                entity.syncStatus == "campaign_not_found"
+                            ) {
+                                CritRed
+                            } else {
+                                TextSecondary
+                            },
+                        )
+                        val entityHub = entity.hubUrl
+                        if (!entityHub.isNullOrBlank() &&
+                            currentHubIdentity.isNotBlank() &&
+                            entityHub != currentHubIdentity
+                        ) {
+                            Text(
+                                text = stringResource(R.string.character_sync_other_hub, entityHub),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = GoldAccent,
+                            )
+                        }
+                        val matchedCampaign = hubCampaigns.firstOrNull { it.id == effectiveCampaignId }
+                        val campaignText = when {
+                            effectiveCampaignId == null -> stringResource(R.string.character_sync_campaign_none)
+                            matchedCampaign != null -> stringResource(
+                                R.string.character_sync_campaign_named,
+                                matchedCampaign.id,
+                                matchedCampaign.name,
+                            )
+                            else -> stringResource(R.string.character_sync_campaign_id, effectiveCampaignId)
+                        }
+                        Text(
+                            text = campaignText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (effectiveCampaignId == null) CritRed else TextSecondary,
+                        )
+                    }
+                    if (onSync != null) {
+                        GodPrimaryButton(
+                            text = stringResource(
+                                if (isSyncing) R.string.character_sync_working else R.string.character_sync_action,
+                            ),
+                            onClick = { effectiveCampaignId?.let { onSync(entity.id, it, false) } },
+                            enabled = !isSyncing && effectiveCampaignId != null,
+                            testTag = GodTags.heroSync(entity.id),
+                        )
+                    }
+                }
+                if (onSelectCampaign != null || onLoadCampaigns != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (onLoadCampaigns != null) {
+                            GodChip(
+                                label = stringResource(
+                                    if (isLoadingCampaigns) {
+                                        R.string.character_sync_campaigns_loading
+                                    } else {
+                                        R.string.character_sync_campaigns_load
+                                    },
+                                ),
+                                selected = false,
+                                enabled = !isLoadingCampaigns,
+                                role = Role.Button,
+                                selectedStateRes = null,
+                                testTag = GodTags.heroCampaignRefresh(entity.id),
+                                onClick = onLoadCampaigns,
+                            )
+                        }
+                        if (onSelectCampaign != null) {
+                            hubCampaigns.forEach { campaign ->
+                                GodChip(
+                                    label = "#${campaign.id} ${campaign.name}",
+                                    selected = effectiveCampaignId == campaign.id,
+                                    testTag = GodTags.heroCampaignChip(entity.id, campaign.id),
+                                    onClick = {
+                                        manualCampaignInput = campaign.id.toString()
+                                        explicitCampaignId = campaign.id
+                                        onSelectCampaign(campaign.id)
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+                if (onSelectCampaign != null) {
+                    val parsedManual = manualCampaignInput.trim().toIntOrNull()?.takeIf { it >= 1 }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        GodTextField(
+                            value = manualCampaignInput,
+                            onValueChange = { next ->
+                                if (next.all { it.isDigit() }) {
+                                    manualCampaignInput = next
+                                }
+                            },
+                            label = stringResource(R.string.character_sync_campaign_hint),
+                            numeric = true,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag(GodTags.heroCampaignInput(entity.id)),
+                        )
+                        GodChip(
+                            label = stringResource(R.string.character_sync_campaign_set),
+                            selected = parsedManual != null && parsedManual == effectiveCampaignId,
+                            enabled = parsedManual != null,
+                            role = Role.Button,
+                            selectedStateRes = null,
+                            testTag = GodTags.heroCampaignApply(entity.id),
+                            onClick = {
+                                parsedManual?.let { cid ->
+                                    explicitCampaignId = cid
+                                    onSelectCampaign(cid)
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+        }
         GodCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
@@ -267,6 +459,70 @@ fun CharacterDetailScreen(
                     modifier = Modifier.padding(top = Spacing.xs),
                 )
             }
+        }
+        val crossHub = pendingCrossHubSync
+        if (crossHub != null && crossHub.characterId == entity.id) {
+            AlertDialog(
+                onDismissRequest = { onDismissCrossHubSync?.invoke() },
+                modifier = Modifier.testTag(GodTags.heroCrossHubDialog(entity.id)),
+                title = {
+                    Text(
+                        text = stringResource(R.string.character_sync_cross_hub_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = GoldAccent,
+                    )
+                },
+                text = {
+                    Text(
+                        text = if (crossHub.previousHubUrl.isNotBlank()) {
+                            stringResource(
+                                R.string.character_sync_cross_hub_message,
+                                crossHub.previousHubUrl,
+                                crossHub.targetHubUrl,
+                                crossHub.campaignId,
+                            )
+                        } else {
+                            stringResource(
+                                R.string.character_sync_cross_hub_message_unknown,
+                                crossHub.targetHubUrl,
+                                crossHub.campaignId,
+                            )
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextPrimary,
+                    )
+                },
+                confirmButton = {
+                    Text(
+                        text = stringResource(R.string.character_sync_cross_hub_confirm),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = GoldAccent,
+                        modifier = Modifier
+                            .testTag(GodTags.heroCrossHubConfirm(entity.id))
+                            .clickable(role = Role.Button) {
+                                onConfirmCrossHubSync?.invoke()
+                                    ?: onSync?.invoke(entity.id, crossHub.campaignId, true)
+                            }
+                            .godTouchHeight()
+                            .padding(Spacing.sm),
+                    )
+                },
+                dismissButton = {
+                    Text(
+                        text = stringResource(R.string.character_sync_cross_hub_cancel),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = TextPrimary,
+                        modifier = Modifier
+                            .testTag(GodTags.heroCrossHubCancel(entity.id))
+                            .clickable(role = Role.Button) {
+                                onDismissCrossHubSync?.invoke()
+                            }
+                            .godTouchHeight()
+                            .padding(Spacing.sm),
+                    )
+                },
+            )
         }
     }
 }

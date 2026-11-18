@@ -120,6 +120,7 @@ fun SettingsScreen(onOpenCredits: () -> Unit) {
                     onClick = {
                         try {
                             vault.clear()
+                            prefs.clearSelectedCampaignId()
                             editingApiKey = ""
                             showKeyInput = false
                             vaultVersion++
