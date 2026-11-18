@@ -312,7 +312,11 @@ is pushed, committed, or PR'd without his explicit approval.
 
 ## Later — after the GM is great
 
-- [ ] htmx face, first playable slice: a turn in the browser over SSE.
+- [x] htmx face, first playable slice: a turn in the browser over SSE.
+      `GET /play` renders the campaign dashboard and turn form; `face.js` consumes
+      `GET /play/turn/stream` with `Accept: text/event-stream` (no EventSource
+      auto-reconnect); `test_face.py` asserts the start/dice/narration/end frames
+      and rejects unauthenticated streams. Verified against `main` at `3744c86`.
 - [ ] Frozen installable app: PyInstaller-style + portable zip, then a real
       Windows installer. Ollama as prerequisite/bundled. Rules DB shipped or
       downloaded on first run.
