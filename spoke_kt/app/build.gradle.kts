@@ -78,6 +78,9 @@ dependencies {
     ksp(libs.androidx.room.compiler)
     implementation(libs.nga.sqlite.android)
 
+    // Issue #33 Phases 3-4: durable sync-outbox retry worker.
+    implementation(libs.androidx.work.runtime.ktx)
+
     implementation(libs.filament.android)
     implementation(libs.filamat.android)
 

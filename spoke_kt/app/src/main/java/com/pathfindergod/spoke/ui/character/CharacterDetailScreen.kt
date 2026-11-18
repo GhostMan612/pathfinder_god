@@ -62,7 +62,9 @@ import com.pathfindergod.spoke.ui.theme.GoldAccent
 import com.pathfindergod.spoke.ui.theme.ParchmentSurface
 import com.pathfindergod.spoke.ui.theme.TextPrimary
 import com.pathfindergod.spoke.ui.theme.TextSecondary
+import com.pathfindergod.spoke.data.repository.HandsetAuthResult
 import com.pathfindergod.spoke.ui.viewmodel.PendingCrossHubSync
+import com.pathfindergod.spoke.ui.viewmodel.PendingSyncConflict
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -110,11 +112,20 @@ fun CharacterDetailScreen(
     hubCampaigns: List<HubCampaignSummary> = emptyList(),
     isLoadingCampaigns: Boolean = false,
     pendingCrossHubSync: PendingCrossHubSync? = null,
+    pendingSyncConflict: PendingSyncConflict? = null,
+    pendingOutboxCount: Int = 0,
+    handsetAuth: HandsetAuthResult? = null,
     onLoadCampaigns: (() -> Unit)? = null,
     onSelectCampaign: ((Int) -> Unit)? = null,
     onSync: ((Long, Int, Boolean) -> Unit)? = null,
     onConfirmCrossHubSync: (() -> Unit)? = null,
     onDismissCrossHubSync: (() -> Unit)? = null,
+    onResolveConflictKeepMine: (() -> Unit)? = null,
+    onResolveConflictUseServer: (() -> Unit)? = null,
+    onDismissConflict: (() -> Unit)? = null,
+    onDismissQueuedSync: ((Long) -> Unit)? = null,
+    onVerifyHandset: (() -> Unit)? = null,
+    onDismissHandsetAuth: (() -> Unit)? = null,
     isSyncing: Boolean = false,
 ) {
     val context = LocalContext.current
@@ -184,6 +195,56 @@ fun CharacterDetailScreen(
                                 TextSecondary
                             },
                         )
+                        // Issue #33 Phase 3: queued syncs waiting on the
+                        // retry worker. Tap the line to discard the queue.
+                        if (pendingOutboxCount > 0) {
+                            Text(
+                                text = stringResource(
+                                    R.string.character_sync_outbox_pending,
+                                    pendingOutboxCount,
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = GoldAccent,
+                                modifier = Modifier
+                                    .testTag(GodTags.heroOutboxPending(entity.id))
+                                    .clickable(role = Role.Button) {
+                                        onDismissQueuedSync?.invoke(entity.id)
+                                    }
+                                    .godTouchHeight()
+                                    .padding(top = Spacing.xs),
+                            )
+                        }
+                        // Issue #33 Phase 4: the last handset verification
+                        // result, until dismissed.
+                        handsetAuth?.let { auth ->
+                            val authText = when (auth) {
+                                HandsetAuthResult.Ok ->
+                                    stringResource(R.string.character_sync_verify_ok)
+                                is HandsetAuthResult.AuthFailed ->
+                                    stringResource(
+                                        R.string.character_sync_verify_auth_failed,
+                                        auth.statusCode,
+                                    )
+                                HandsetAuthResult.TlsFailed ->
+                                    stringResource(R.string.character_sync_verify_tls_failed)
+                                is HandsetAuthResult.Unreachable ->
+                                    stringResource(
+                                        R.string.character_sync_verify_unreachable,
+                                        auth.message,
+                                    )
+                            }
+                            Text(
+                                text = authText,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (auth is HandsetAuthResult.Ok) TextSecondary else CritRed,
+                                modifier = Modifier
+                                    .clickable(role = Role.Button) {
+                                        onDismissHandsetAuth?.invoke()
+                                    }
+                                    .godTouchHeight()
+                                    .padding(top = Spacing.xs),
+                            )
+                        }
                         val entityHub = entity.hubUrl
                         if (!entityHub.isNullOrBlank() &&
                             currentHubIdentity.isNotBlank() &&
@@ -245,6 +306,17 @@ fun CharacterDetailScreen(
                                 selectedStateRes = null,
                                 testTag = GodTags.heroCampaignRefresh(entity.id),
                                 onClick = onLoadCampaigns,
+                            )
+                        }
+                        if (onVerifyHandset != null) {
+                            GodChip(
+                                label = stringResource(R.string.character_sync_verify_action),
+                                selected = false,
+                                enabled = true,
+                                role = Role.Button,
+                                selectedStateRes = null,
+                                testTag = GodTags.heroVerifyHandset(entity.id),
+                                onClick = onVerifyHandset,
                             )
                         }
                         if (onSelectCampaign != null) {
@@ -517,6 +589,62 @@ fun CharacterDetailScreen(
                             .testTag(GodTags.heroCrossHubCancel(entity.id))
                             .clickable(role = Role.Button) {
                                 onDismissCrossHubSync?.invoke()
+                            }
+                            .godTouchHeight()
+                            .padding(Spacing.sm),
+                    )
+                },
+            )
+        }
+        // Issue #33 Phase 4: a 409 is never resolved silently. The user
+        // picks: keep the local sheet (re-push at the Hub's revision) or
+        // adopt the Hub's row (replaces the local sheet).
+        val conflict = pendingSyncConflict
+        if (conflict != null && conflict.characterId == entity.id) {
+            AlertDialog(
+                onDismissRequest = { onDismissConflict?.invoke() },
+                modifier = Modifier.testTag(GodTags.heroConflictDialog(entity.id)),
+                title = {
+                    Text(
+                        text = stringResource(R.string.character_sync_conflict_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = GoldAccent,
+                    )
+                },
+                text = {
+                    Text(
+                        text = stringResource(
+                            R.string.character_sync_conflict_message,
+                            conflict.currentRevision,
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextPrimary,
+                    )
+                },
+                confirmButton = {
+                    Text(
+                        text = stringResource(R.string.character_sync_conflict_keep_mine),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = GoldAccent,
+                        modifier = Modifier
+                            .testTag(GodTags.heroConflictKeepMine(entity.id))
+                            .clickable(role = Role.Button) {
+                                onResolveConflictKeepMine?.invoke()
+                            }
+                            .godTouchHeight()
+                            .padding(Spacing.sm),
+                    )
+                },
+                dismissButton = {
+                    Text(
+                        text = stringResource(R.string.character_sync_conflict_use_server),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = TextPrimary,
+                        modifier = Modifier
+                            .testTag(GodTags.heroConflictUseServer(entity.id))
+                            .clickable(role = Role.Button) {
+                                onResolveConflictUseServer?.invoke()
                             }
                             .godTouchHeight()
                             .padding(Spacing.sm),

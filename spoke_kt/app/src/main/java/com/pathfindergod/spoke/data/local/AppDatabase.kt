@@ -20,6 +20,7 @@ import androidx.sqlite.db.SupportSQLiteOpenHelper
         MapEntity::class,
         CampaignEntity::class,
         RollEntity::class,
+        SyncOutboxEntry::class,
     ],
     version = AppDatabase.VERSION,
     exportSchema = false,
@@ -35,9 +36,11 @@ abstract class AppDatabase : RoomDatabase() {
 
     abstract fun rollDao(): RollDao
 
+    abstract fun syncOutboxDao(): SyncOutboxDao
+
     companion object {
         const val FILE_NAME = "pathfinder_spoke.db"
-        const val VERSION = 6
+        const val VERSION = 7
 
         private const val CREATE_CAMPAIGNS =
             "CREATE TABLE IF NOT EXISTS `campaigns` (" +
@@ -106,7 +109,35 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+        // Issue #33 Phase 3: the durable sync outbox. A fresh table — no
+        // existing rows to migrate — so the migration is a single CREATE.
+        // No DEFAULT clauses: Room compares column defaults at open time,
+        // and the entity declares none, so the table must carry none.
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `sync_outbox` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`character_id` INTEGER NOT NULL, " +
+                        "`uuid` TEXT NOT NULL, " +
+                        "`hub_url` TEXT NOT NULL, " +
+                        "`campaign_id` INTEGER NOT NULL, " +
+                        "`payload_json` TEXT NOT NULL, " +
+                        "`expected_revision` INTEGER NOT NULL, " +
+                        "`idempotency_key` TEXT NOT NULL, " +
+                        "`attempt_count` INTEGER NOT NULL, " +
+                        "`next_attempt_at` INTEGER NOT NULL, " +
+                        "`last_error` TEXT, " +
+                        "`created_at` INTEGER NOT NULL)",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_sync_outbox_next_attempt_at` " +
+                        "ON `sync_outbox` (`next_attempt_at`)",
+                )
+            }
+        }
+
+        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
 
         fun create(
             context: Context,
