@@ -220,6 +220,31 @@ is pushed, committed, or PR'd without his explicit approval.
       211 JVM tests, `assembleDebug` green, 53 instrumented tests (0 failed,
       1 skipped).
 
+## In progress — Issue #33 Phases 3–4 (offline sync)
+
+- [ ] **Phases 3–4 on branch `feat/issue33-offline-sync` (PR #49, draft):**
+      Phase 3 — durable Room outbox (`sync_outbox`, DB v6→v7 + `MIGRATION_6_7`):
+      a retryable sync failure (network down, TLS failure, Hub 5xx) queues the
+      exact attempted request, idempotency key included, instead of losing it;
+      a WorkManager `SyncRetryWorker` (one-time run after every failure plus a
+      15-minute periodic sweep, network-constrained) replays due entries
+      verbatim so the Hub dedupes them, with backoff 30s → 2m → 10m → 1h and
+      no cap on attempts; a stale payload (sheet edited while queued) is
+      replaced by a fresh sync; entries for a Hub the user moved away from
+      stay pending and never deliver silently. Phase 4 — 409 reconciliation:
+      a conflict surfaces a dialog, never an overwrite; "Keep mine" adopts
+      only the Hub's revision number and re-pushes the local sheet at it,
+      "Use Hub's" adopts the server row via `CharacterMapper.fromWire`;
+      authenticated handset verification (`GET /campaign/list` probe) names
+      the failure mode — `Ok` / `AuthFailed(401|403)` / `TlsFailed` /
+      `Unreachable` — surfaced on the hero detail screen. No Hub changes:
+      the Hub already returned everything (409 + `server_character`,
+      idempotency, 401/403/404). 16 new repository tests
+      (`SyncOutboxTest`); hub suite and Ruff re-verified before opening the
+      PR; Spoke compile + unit tests are CI's gate. Still on Glenn's side:
+      the physical-phone verification run (Hub reachable, key accepted, TLS
+      pin validates, outbox drains after airplane mode).
+
 ## In progress — pit prebuilt materials
 
 - [ ] **Prebuilt `.filamat` binaries on branch `feat/pit-prebuilt-materials`:**
