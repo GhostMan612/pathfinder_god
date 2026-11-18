@@ -14,11 +14,11 @@
 //
 // Run: node .opencode/lib/pg-tools-smoke.mjs
 import assert from "node:assert/strict"
-import { mkdtemp, writeFile } from "node:fs/promises"
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises"
 import { execFileSync } from "node:child_process"
 import os from "node:os"
 import path from "node:path"
-import { pgBuild } from "../tools/pg-build.ts"
+import { pgBuild, spawnGradlew } from "../tools/pg-build.ts"
 import { pgGate } from "../tools/pg-gate.ts"
 import { pgHubProbe } from "../tools/pg-hub-probe.ts"
 import { pgLicense } from "../tools/pg-license.ts"
@@ -64,6 +64,23 @@ const vanishedLane = await pgBuild(empty).execute({ action: "lint" })
 assert.match(vanishedLane.content, /gradlew\.bat not found/)
 assert.match(vanishedLane.content, /The native lane lives in spoke_kt\/, not spoke\//)
 console.log("PASS  pg-build reports a missing lane with the existing message")
+
+// pg-build must hand cmd.exe a verbatim double-wrapped command. Node's default
+// argv quoting escapes the inner quotes, so cmd sees \"C:\...\gradlew.bat\" and
+// fails before Gradle ever starts. A throwaway .bat (in a directory with a
+// space, like the real JDK path) proves the launch path, not just the source.
+if (process.platform === "win32") {
+  const laneDir = path.join(await mkdtemp(path.join(os.tmpdir(), "pg-build-cmd-")), "lane dir")
+  await mkdir(laneDir, { recursive: true })
+  const probeBat = path.join(laneDir, "echo lane.bat")
+  await writeFile(probeBat, "@echo off\r\necho pg-build-lane-ok\r\n")
+  const probe = spawnGradlew(probeBat, ":app:assembleDebug", laneDir, process.env, 30_000)
+  assert.equal(probe.status, 0, `expected the .bat to launch; stderr=${probe.stderr}`)
+  assert.match(String(probe.stdout), /pg-build-lane-ok/)
+  console.log("PASS  pg-build launches a .bat through cmd.exe with verbatim argv")
+} else {
+  console.log("SKIP  pg-build cmd.exe quoting check (non-Windows)")
+}
 
 // pg-gate: the mechanical gate still runs and still labels HUMAN-ONLY work.
 const gate = await pgGate(root).execute({ wp: 0 })
