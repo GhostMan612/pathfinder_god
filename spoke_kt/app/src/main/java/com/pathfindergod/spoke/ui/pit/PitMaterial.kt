@@ -6,14 +6,17 @@
 package com.pathfindergod.spoke.ui.pit
 
 import android.content.Context
+import android.util.Log
 import com.google.android.filament.Filament
 import com.google.android.filament.filamat.MaterialBuilder
 import java.io.File
 
 object PitMaterial {
 
+    private const val TAG = "PitMaterial"
+
     // Bump when the runtime material program changes; the file name is the cache key.
-    const val VERSION = "1.76.0-r2"
+    const val VERSION = "1.76.0-r3"
     const val CACHE_DIR = "filament"
     const val ASSET_DIR = "pit"
     const val NAME = "DieFace"
@@ -37,6 +40,10 @@ object PitMaterial {
             void material(inout MaterialInputs material) {
                 prepareMaterial(material);
                 material.baseColor = texture(materialParams_baseColorMap, getUV0());
+                // Sample normal map in tangent space; Filament expects the vector in material.normal
+                // after prepareMaterial has set up the TBN basis.
+                vec3 n = texture(materialParams_normalMap, getUV0()).xyz * 2.0 - 1.0;
+                material.normal = n;
                 material.roughness = materialParams.roughness;
                 material.metallic = materialParams.metallic;
             }
@@ -66,12 +73,18 @@ object PitMaterial {
             val bytes = shipped ?: cached
             if (bytes != null) {
                 resolved[kind] = bytes
+                Log.d(TAG, "loaded ${kind.name} from ${if (shipped != null) "assets" else "cache"} (${bytes.size} B)")
             } else {
                 missing.add(kind)
+                Log.w(TAG, "no prebuilt/cache for ${kind.name}; will attempt runtime compile")
             }
         }
-        if (missing.isNotEmpty() && !compile(context, missing, resolved)) {
-            return emptyMap()
+        if (missing.isNotEmpty()) {
+            val ok = compile(context, missing, resolved)
+            if (!ok) {
+                Log.e(TAG, "runtime compile failed for: ${missing.joinToString { it.name }}")
+                return emptyMap()
+            }
         }
         return resolved
     }
@@ -81,7 +94,8 @@ object PitMaterial {
             val bytes = stream.readBytes()
             if (bytes.isEmpty()) null else bytes
         }
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        Log.d(TAG, "asset miss ${assetPath(kind)}: ${e.message}")
         null
     }
 
@@ -92,7 +106,8 @@ object PitMaterial {
         } else {
             file.readBytes().takeIf { it.isNotEmpty() }
         }
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        Log.d(TAG, "cache miss ${fileName(kind)}: ${e.message}")
         null
     }
 
@@ -111,12 +126,19 @@ object PitMaterial {
             initialised = true
             val dir = File(context.filesDir, CACHE_DIR).apply { mkdirs() }
             missing.forEach { kind ->
-                val bytes = compileOne(kind) ?: return false
+                val bytes = compileOne(kind)
+                if (bytes == null) {
+                    Log.e(TAG, "compileOne(${kind.name}) returned null")
+                    return false
+                }
                 runCatching { File(dir, fileName(kind)).writeBytes(bytes) }
+                    .onFailure { Log.w(TAG, "failed to write cache for ${kind.name}", it) }
                 resolved[kind] = bytes
+                Log.i(TAG, "compiled ${kind.name} (${bytes.size} B)")
             }
             true
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            Log.e(TAG, "MaterialBuilder compile path threw", t)
             false
         } finally {
             if (initialised) {
@@ -139,18 +161,31 @@ object PitMaterial {
             )
             .material(fragmentShader(kind))
             .optimization(MaterialBuilder.Optimization.NONE)
+
         when (kind) {
-            Kind.DIE -> builder
-                .uniformParameter(MaterialBuilder.UniformType.FLOAT, "roughness")
-                .uniformParameter(MaterialBuilder.UniformType.FLOAT, "metallic")
-            Kind.SHADOW -> builder
-                .blending(MaterialBuilder.BlendingMode.TRANSPARENT)
-                .culling(MaterialBuilder.CullingMode.NONE)
-                .depthWrite(false)
+            Kind.DIE -> {
+                builder
+                    .samplerParameter(
+                        MaterialBuilder.SamplerType.SAMPLER_2D,
+                        MaterialBuilder.SamplerFormat.FLOAT,
+                        MaterialBuilder.ParameterPrecision.DEFAULT,
+                        "normalMap",
+                    )
+                    .uniformParameter(MaterialBuilder.UniformType.FLOAT, "roughness")
+                    .uniformParameter(MaterialBuilder.UniformType.FLOAT, "metallic")
+            }
+            Kind.SHADOW -> {
+                builder
+                    .blending(MaterialBuilder.BlendingMode.TRANSPARENT)
+                    .culling(MaterialBuilder.CullingMode.NONE)
+                    .depthWrite(false)
+            }
             Kind.FELT -> builder
         }
+
         val pack = builder.build()
         if (!pack.isValid) {
+            Log.e(TAG, "MaterialBuilder.build() invalid for ${kind.name}")
             null
         } else {
             val buffer = pack.buffer
@@ -158,7 +193,8 @@ object PitMaterial {
             buffer.get(bytes)
             bytes
         }
-    } catch (_: Throwable) {
+    } catch (t: Throwable) {
+        Log.e(TAG, "compileOne(${kind.name}) exception", t)
         null
     }
 
