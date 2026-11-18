@@ -295,6 +295,16 @@
     <string name="character_sync_campaigns_loading">Loading…</string>
     <string name="character_sync_campaign_hint">Campaign ID</string>
     <string name="character_sync_campaign_set">Set</string>
+    <string name="character_sync_outbox_pending">%1$d change(s) waiting to sync — tap to discard</string>
+    <string name="character_sync_conflict_title">Sync conflict</string>
+    <string name="character_sync_conflict_message">The Hub has a newer revision (Rev %1$d) of this hero. Keeping yours uploads your copy over it; using the Hub’s replaces your local copy.</string>
+    <string name="character_sync_conflict_keep_mine">Keep mine</string>
+    <string name="character_sync_conflict_use_server">Use Hub’s</string>
+    <string name="character_sync_verify_action">Verify handset</string>
+    <string name="character_sync_verify_ok">Handset verified: Hub reachable and authenticated</string>
+    <string name="character_sync_verify_auth_failed">Handset check failed: authentication rejected (%1$d)</string>
+    <string name="character_sync_verify_tls_failed">Handset check failed: TLS certificate check failed</string>
+    <string name="character_sync_verify_unreachable">Handset check failed: Hub unreachable (%1$s)</string>
     <string name="character_forge_title">Forge a hero</string>
     <string name="character_forge_prompt_label">Who walks the path?</string>
     <string name="character_forge_prompt_hint">e.g., a dwarven champion of Torag</string>

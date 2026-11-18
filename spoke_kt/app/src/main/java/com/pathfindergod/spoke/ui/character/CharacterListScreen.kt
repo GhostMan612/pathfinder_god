@@ -52,6 +52,7 @@ import com.pathfindergod.spoke.data.network.HubApi
 import com.pathfindergod.spoke.data.network.HubApiFactory
 import com.pathfindergod.spoke.data.repository.CharacterRepository
 import com.pathfindergod.spoke.data.repository.HubBinding
+import com.pathfindergod.spoke.service.SyncWorkScheduler
 import com.pathfindergod.spoke.ui.designsystem.Dimens
 import com.pathfindergod.spoke.ui.designsystem.GodCard
 import com.pathfindergod.spoke.ui.designsystem.GodEmptyState
@@ -97,6 +98,9 @@ internal fun rememberCharacterViewModel(): CharacterViewModel {
             // the campaign and seeds the idempotency key is the same endpoint
             // that carries the request, even if the URL changes mid-flight.
             bindingProvider = { HubBinding.of(prefs.baseUrl(), ::buildHubApi) },
+            // Issue #33 Phase 3: a failed sync queues an outbox entry; wake
+            // the retry worker right away instead of waiting for the sweep.
+            scheduleRetry = { SyncWorkScheduler.scheduleNow(context.applicationContext) },
         )
     }
     val vm: CharacterViewModel = viewModel(factory = remember { CharacterVmFactory(repository) })

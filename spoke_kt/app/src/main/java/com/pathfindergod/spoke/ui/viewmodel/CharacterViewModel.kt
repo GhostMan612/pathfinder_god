@@ -13,7 +13,9 @@ import com.pathfindergod.spoke.data.network.HubCampaignSummary
 import com.pathfindergod.spoke.data.repository.CharacterMapper
 import com.pathfindergod.spoke.data.repository.CharacterRepository
 import com.pathfindergod.spoke.data.repository.CharacterSyncResult
+import com.pathfindergod.spoke.data.repository.HandsetAuthResult
 import com.pathfindergod.spoke.ui.strings.UiText
+import kotlinx.serialization.json.JsonElement
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlinx.coroutines.CancellationException
@@ -31,6 +33,21 @@ data class PendingCrossHubSync(
     val targetHubUrl: String,
 )
 
+/**
+ * A 409 the user has not resolved yet (Issue #33 Phase 4).
+ *
+ * The Hub holds a newer revision of this character. Nothing is overwritten
+ * until the user picks "Keep mine" (re-push at the Hub's revision) or
+ * "Use Hub's" (adopt the server row). The server row rides along so the
+ * choice needs no extra fetch.
+ */
+data class PendingSyncConflict(
+    val characterId: Long,
+    val campaignId: Int,
+    val currentRevision: Int,
+    val serverCharacter: Map<String, JsonElement>?,
+)
+
 data class CharacterUiState(
     val characters: List<CharacterEntity> = emptyList(),
     val selectedId: Long? = null,
@@ -42,6 +59,9 @@ data class CharacterUiState(
     val isForging: Boolean = false,
     val syncingId: Long? = null,
     val pendingCrossHubSync: PendingCrossHubSync? = null,
+    val pendingSyncConflict: PendingSyncConflict? = null,
+    val pendingOutboxCount: Int = 0,
+    val handsetAuth: HandsetAuthResult? = null,
     val error: UiText? = null,
     val lastForgedId: Long? = null,
 )
@@ -69,6 +89,11 @@ class CharacterViewModel(
                     characters = characters,
                     isLoading = false,
                 )
+            }
+        }
+        viewModelScope.launch(launchContext) {
+            repository.observePendingOutboxCount().collect { count ->
+                _state.value = _state.value.copy(pendingOutboxCount = count)
             }
         }
     }
@@ -174,6 +199,7 @@ class CharacterViewModel(
                 hubCampaigns = emptyList(),
                 isLoadingCampaigns = false,
                 pendingCrossHubSync = null,
+                pendingSyncConflict = null,
             )
         } else if (nextSelected != _state.value.selectedCampaignId) {
             _state.value = _state.value.copy(selectedCampaignId = nextSelected)
@@ -248,7 +274,22 @@ class CharacterViewModel(
                 } else {
                     null
                 }
-                _state.value = _state.value.copy(pendingCrossHubSync = pending)
+                val conflict = if (outcome is CharacterSyncResult.Conflict) {
+                    PendingSyncConflict(
+                        characterId = id,
+                        campaignId = resolvedCampaignId,
+                        currentRevision = outcome.currentRevision,
+                        serverCharacter = outcome.serverCharacter,
+                    )
+                } else if (outcome is CharacterSyncResult.Success) {
+                    null
+                } else {
+                    _state.value.pendingSyncConflict?.takeIf { it.characterId == id }
+                }
+                _state.value = _state.value.copy(
+                    pendingCrossHubSync = pending,
+                    pendingSyncConflict = conflict,
+                )
             } finally {
                 _state.value = _state.value.copy(syncingId = null)
             }
@@ -272,6 +313,75 @@ class CharacterViewModel(
     fun dismissCrossHubSync() {
         if (_state.value.pendingCrossHubSync != null) {
             _state.value = _state.value.copy(pendingCrossHubSync = null)
+        }
+    }
+
+    /**
+     * Resolve a pending 409 by keeping the local sheet: adopt the Hub's
+     * revision number, then push the local sheet at that revision. If the
+     * Hub moved on again, the conflict simply comes back.
+     */
+    fun resolveConflictKeepMine() {
+        val pending = _state.value.pendingSyncConflict ?: return
+        if (_state.value.syncingId != null) return
+        _state.value = _state.value.copy(pendingSyncConflict = null)
+        viewModelScope.launch(launchContext) {
+            _state.value = _state.value.copy(syncingId = pending.characterId)
+            try {
+                val outcome = repository.resolveConflictKeepMine(
+                    characterId = pending.characterId,
+                    currentRevision = pending.currentRevision,
+                    campaignId = pending.campaignId,
+                )
+                if (outcome is CharacterSyncResult.Conflict) {
+                    _state.value = _state.value.copy(
+                        pendingSyncConflict = pending.copy(
+                            currentRevision = outcome.currentRevision,
+                            serverCharacter = outcome.serverCharacter,
+                        ),
+                    )
+                }
+            } finally {
+                _state.value = _state.value.copy(syncingId = null)
+            }
+        }
+    }
+
+    /** Resolve a pending 409 by adopting the Hub's character row. */
+    fun resolveConflictUseServer() {
+        val pending = _state.value.pendingSyncConflict ?: return
+        _state.value = _state.value.copy(pendingSyncConflict = null)
+        viewModelScope.launch(launchContext) {
+            repository.resolveConflictUseServer(
+                pending.characterId,
+                pending.serverCharacter,
+            )
+        }
+    }
+
+    fun dismissConflict() {
+        if (_state.value.pendingSyncConflict != null) {
+            _state.value = _state.value.copy(pendingSyncConflict = null)
+        }
+    }
+
+    /** Discard a queued sync without touching the local sheet. */
+    fun dismissQueuedSync(id: Long) {
+        viewModelScope.launch(launchContext) {
+            repository.clearQueuedSync(id)
+        }
+    }
+
+    /** Verify this handset can authenticate to its Hub (Issue #33 Phase 4). */
+    fun verifyHandset() {
+        viewModelScope.launch(launchContext) {
+            _state.value = _state.value.copy(handsetAuth = repository.verifyHandsetAuth())
+        }
+    }
+
+    fun dismissHandsetAuth() {
+        if (_state.value.handsetAuth != null) {
+            _state.value = _state.value.copy(handsetAuth = null)
         }
     }
 }
