@@ -44,6 +44,36 @@ function tail(text: string, limit = 40): string {
   return chosen.join("\n")
 }
 
+// cmd.exe is the only way to launch a .bat on Windows, and cmd /s /c strips one
+// layer of quotes, so the command must be double-wrapped:
+//   cmd /s /c ""C:\...\gradlew.bat" task ..."
+// Node's default argv quoting escapes those inner quotes, so cmd receives a
+// literal \"C:\...\gradlew.bat\" and reports the whole thing as an unknown
+// command. windowsVerbatimArguments passes the double-wrapped command through
+// untouched; a throwaway .bat in the smoke suite proves the launch path.
+export function gradlewCommand(gradlew: string, task: string): string {
+  return `""${gradlew}" ${task} --no-daemon --console=plain"`
+}
+
+export function spawnGradlew(
+  gradlew: string,
+  task: string,
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  timeoutMs = 1_800_000,
+): ReturnType<typeof spawnSync> {
+  return spawnSync("cmd.exe", ["/d", "/s", "/c", gradlewCommand(gradlew, task)], {
+    cwd,
+    encoding: "utf8",
+    maxBuffer: 256 * 1024 * 1024,
+    // V2 tool definitions have no timeout field, so the V1 30-minute lane cap
+    // lives here instead of in the harness.
+    timeout: timeoutMs,
+    windowsVerbatimArguments: true,
+    env,
+  })
+}
+
 function hasJava(home: string): boolean {
   return existsSync(path.join(home, "bin", "java.exe"))
 }
@@ -143,21 +173,13 @@ export const pgBuild = (root: string): PgTool => ({
     // cmd /s /c strips one layer of quotes, so a bare "path" wrapper makes cmd read
     // the .bat name as C:\...\gradlew.bat" <args> and fail to resolve it. The command
     // must therefore be double-wrapped: cmd /s /c ""C:\...\gradlew.bat" task ...".
-    const command = `""${gradlew}" ${task} --no-daemon --console=plain"`
+    const command = gradlewCommand(gradlew, task)
     const started = Date.now()
 
-    const res = spawnSync("cmd.exe", ["/d", "/s", "/c", command], {
-      cwd: spoke,
-      encoding: "utf8",
-      maxBuffer: 256 * 1024 * 1024,
-      // V2 tool definitions have no timeout field, so the V1 30-minute lane cap
-      // lives here instead of in the harness.
-      timeout: 1_800_000,
-      env: {
-        ...process.env,
-        JAVA_HOME: home,
-        PATH: `${home}\\bin;${process.env.PATH ?? ""}`,
-      },
+    const res = spawnGradlew(gradlew, task, spoke, {
+      ...process.env,
+      JAVA_HOME: home,
+      PATH: `${home}\\bin;${process.env.PATH ?? ""}`,
     })
 
     const secs = ((Date.now() - started) / 1000).toFixed(1)
