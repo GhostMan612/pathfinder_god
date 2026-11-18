@@ -1,0 +1,24 @@
+material {
+    name : DieFace,
+    parameters : [
+        { type : sampler2d, name : baseColorMap },
+        { type : sampler2d, name : normalMap },
+        { type : float, name : roughness },
+        { type : float, name : metallic }
+    ],
+    requires : [ uv0 ],
+    shadingModel : lit
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        material.baseColor = texture(materialParams_baseColorMap, getUV0());
+        // Sample normal map in tangent space; Filament expects the vector in material.normal
+        // after prepareMaterial has set up the TBN basis.
+        vec3 n = texture(materialParams_normalMap, getUV0()).xyz * 2.0 - 1.0;
+        material.normal = n;
+        material.roughness = materialParams.roughness;
+        material.metallic = materialParams.metallic;
+    }
+}

@@ -1,0 +1,18 @@
+material {
+    name : ContactShadow,
+    parameters : [
+        { type : sampler2d, name : baseColorMap }
+    ],
+    requires : [ uv0 ],
+    shadingModel : lit,
+    blending : transparent,
+    culling : none,
+    depthWrite : false
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        material.baseColor = texture(materialParams_baseColorMap, getUV0());
+    }
+}
