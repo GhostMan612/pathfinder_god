@@ -38,9 +38,10 @@ same chain running repeatedly.
 before it is mergeable. Tracked alongside it, judged second:
 first-review P0 count, first-review P1 count, CI first-pass, gate dwell.
 
-- A rework round is one findings file followed by a fix push that
-  still leaves findings open. A PR that merges after the first
-  review with zero findings is 0 rounds.
+- A rework round is one findings file followed by its fix push — one
+  review→fix cycle — whether or not that push closes everything. A PR
+  that merges after the first review with zero findings is 0 rounds; a
+  PR that takes exactly one findings file and one fix push is 1 round.
 - The metric is an outcome, not a checklist. `check-chain.sh`
   passing is necessary but not sufficient — it is gameable by wording.
   Rework rounds, P0s escaping review, and CI first-pass are not.
@@ -51,9 +52,9 @@ first-review P0 count, first-review P1 count, CI first-pass, gate dwell.
   exactly as built; the only new thing is the metrics file per PR.
   No chain changes during baseline, even if an obvious fix is spotted
   — log it in `decisions/DECISIONS.md` as a *proposed* change and wait.
-- PRs #40 and #41 merged before RSI started (17–18 Nov 2026) and are
-  **not** baseline data: the loop never ran on them and no metrics
-  file exists for them. Baseline starts with the next PR.
+- PRs #40, #41, #49, #50, and #51 merged before RSI started (17–18 Nov
+  2026) and are **not** baseline data: the loop never ran on them and no
+  metrics file exists for them. Baseline starts with the next PR.
 - **First live turn first.** The pilot's own bar (two full turns, no
   unsigned contributions, no gate bypassed, nothing sent on Glenn's
   behalf, presentation before any merge request) still comes before

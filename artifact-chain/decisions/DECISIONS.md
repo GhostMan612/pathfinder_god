@@ -14,3 +14,12 @@ Template: `decisions/decision-template.md`.
 - **Reason:** Pathfinder God is the active repo with the local-grunt OpenCode plugin already in place; the council design says the repo is the shared state between agents, and this pilot tests whether Muse and OpenCode can hand work back and forth through the chain instead of Glenn pasting reports between chats.
 - **Supersedes:** none.
 - **Signature:** Glenn / unknown / 2026-11-10T23:17:00Z
+
+## D-0002 — 2026-11-18 — Phoenix (for Glenn's approval)
+
+- **Artifact / gate:** artifact-chain/RSI.md (RSI spec), artifact-chain/evals/metrics/baseline.md
+- **Question:** Do the rework-round definition and the baseline exclusion list say what RSI means?
+- **Previous decision:** RSI.md: "A rework round is one findings file followed by a fix push that still leaves findings open." Baseline excludes only PRs #40 and #41 as merged before RSI started.
+- **New decision:** A rework round is one findings file followed by its fix push — one review→fix cycle — whether or not that push closes everything (0 rounds = merges after first review with zero findings; 1 round = one findings file + one fix push). Baseline excludes PRs #40, #41, #49, #50, #51 — all PRs merged 17–18 Nov 2026 before RSI started.
+- **Reason:** The definition as written scores a PR that needed exactly one fix round as 0, the same as a PR that needed none — the loop's only outcome metric would undercount. The exclusion list named only two of the five pre-RSI merges; an incomplete record invites retrofitted numbers later.
+- **Supersedes:** none (corrects wording, not a prior decision)
