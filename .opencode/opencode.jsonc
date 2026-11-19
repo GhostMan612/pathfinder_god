@@ -11,6 +11,11 @@
           "catalog": 15000,
           "execution": 180000
         }
+      },
+      "sovereign-chain": {
+        "type": "local",
+        "command": ["python3", "tools/chain-mcp/server.py"],
+        "cwd": "."
       }
     }
   }

@@ -5,12 +5,12 @@
 ```
 C:\pathfinder_god\
 ├── hub/                 # Python FastAPI service (WORKING: /health /ask /stream /rules/search /generate)
-├── spoke_kt/            # Native Kotlin app, 9 destinations (4 bottom tabs + navigation)
+├── spoke_kt/            # Native Kotlin app, 9 tabs (see Native Lane)
 ├── shared/openapi.yaml  # API contract (source of truth)
 ├── data/                # SQLite DBs (pathfinder_rag.db 58MB / 44,620 rows, gitignored, laptop only)
 ├── docs/                # Setup + architecture guides
 ├── blueprints/          # Session docs + phased blueprints
-├── tools/               # Command Center + local-grunt tooling (PySide6/Python)
+├── tools/               # gen_audio.py (sound synth), command_center/ (PySide6 standalone exe)
 └── assets/              # Images, audio
 ```
 
@@ -25,9 +25,8 @@ python -m app.main        # starts on :8000 (uses C:\venv-hub)
 ### Spoke (Kotlin) — the client
 ```powershell
 cd spoke_kt
-$env:JAVA_HOME='C:\android\Android Studio\jbr\jdks\eclipse_adoptium-17-amd64-windows.2'
+$env:JAVA_HOME='C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1'
 .\gradlew.bat assembleDebug --no-daemon   # required before commit; daemons get reaped in this shell
-.\scripts\device-test.ps1                  # instrumented suite on a physical device (wakes it, stays awake)
 # Human runs Install/Run in Android Studio. Never commit APKs.
 ```
 
@@ -35,17 +34,16 @@ $env:JAVA_HOME='C:\android\Android Studio\jbr\jdks\eclipse_adoptium-17-amd64-win
 - Python: `C:\venv-hub\venv\Scripts\python.exe` (3.14.6) — use as-is
 - Ollama: `ollama serve` on `0.0.0.0:11434` (hub `.env` maps `127.0.0.1:11450`, model `phi4-mini`)
 - Android SDK: `C:\android\sdk` (Gradle 9.3.1 cached)
-- Native JDK: Temurin 17 at `C:\android\Android Studio\jbr\jdks\eclipse_adoptium-17-amd64-windows.2` (`$env:JAVA_HOME` per command) - the lane JDK, pinned via `kotlin.jvmToolchain(17)`. The previous `%TEMP%\opencode\jdk17` path is purged by Windows between sessions, so nothing may hardcode it; `.opencode/tools/pg-build.ts` probes `JAVA_HOME`, Studio's `jdks/`, and `~/.jdks`. Studio's bundled JBR (`C:\android\Android Studio\jbr`) is a working OpenJDK 25, not a stripped/broken one, but it is deliberately not the lane JDK
+- Native JDK: Temurin 17 at `C:\Users\612co\AppData\Local\Temp\opencode\jdk17\jdk-17.0.20.1+1` (`$env:JAVA_HOME` per command) — the lane JDK, pinned via `kotlin.jvmToolchain(17)`. Studio's bundled JBR (`C:\android\Android Studio\jbr`) is a working OpenJDK 25, not a stripped/broken one, but it is deliberately not the lane JDK
 - Native agents: `.opencode/agent/native-dev.md` owns `spoke_kt/` (AGP 9.0.1 + KSP + Room 2.7, compileSdk 37 / targetSdk 34)
-- Local grunt: `local_grunt` ships as an OpenCode plugin (`.opencode/plugins/pf-local-grunt.ts`) plus a stdlib-only CLI/MCP pair (`tools/local_grunt.py`, `tools/local_grunt_mcp.py`) that delegates 1-8 explicit files to `pf-grunt:3b` on `127.0.0.1:11450` for read/propose/apply; start it with `tools/ollama/Ensure_Local_Grunt.ps1`, details in `docs/LOCAL_GRUNT.md`
-- OpenCode tools: the five `pg-*` lane tools register through the V2 plugin `.opencode/plugins/pg-tools.ts` (`ctx.tool.transform`), with their implementations in `.opencode/tools/`. V1 `@opencode-ai/plugin` `tool()` files are inert in V2 — never reintroduce that import or pin.
+- Local grunt: `local_grunt` ships as an OpenCode plugin (`.opencode/plugins/pf-local-grunt.ts`) plus a stdlib-only CLI/MCP pair (`tools/local_grunt.py`, `tools/local_grunt_mcp.py`) that delegates 1–8 explicit files to `pf-grunt:3b` on `127.0.0.1:11450` for read/propose/apply; start it with `tools/ollama/Ensure_Local_Grunt.ps1`, details in `docs/LOCAL_GRUNT.md`
 
 ## Critical Rules (from RULES.md)
 
 1. **Native lane ends at `assembleDebug`** — green debug compile required before commit. No release builds, no committed APKs. Human runs in Android Studio.
 2. **Hub lane ends at `pytest`** — `pytest hub/tests/` green before commit.
 3. **READ-ONLY external dirs** — never touch: `C:\sovereign_tagger_bak`, `C:\Recovery for All`, `C:\Sovereign Nodes`, `C:\sovereign_mantle`, `C:\sovereign_tagger_2`
-4. **Git: PR-first integration** — branch per change, explicit paths only (`git add <path>`), open/update the same PR until owner-authorized merge; no direct pushes to `main` (canonical: `RULES.md` §1.3; procedure: `docs/PR_WORKFLOW.md`).
+4. **Git: explicit paths only** — `git add <path>`, never `git add .` / `-A`
 5. **Synthetic data only** — no real names in code/tests
 6. **Every .py/.kt file needs Genesis header**:
    ```dart
@@ -68,16 +66,15 @@ $env:JAVA_HOME='C:\android\Android Studio\jbr\jdks\eclipse_adoptium-17-amd64-win
 
 ## Native Lane (`spoke_kt/`)
 - **Separation**: every micro-agent (GM, encounter, loot, continuity, maps) runs on the Python Hub. Kotlin is strictly state-management (`ViewModel`/`StateFlow`) + rendering (Compose) — no LLM, no rules logic on-device beyond the bundled FTS5 read path.
-- **Contract is law**: `shared/openapi.yaml` (verify live path count) — Retrofit endpoints and WS frames must match it byte-for-byte. Emulator → `http://10.0.2.2:8000`; real device → laptop LAN IP.
-- **Local-only LLM**: Hub Ollama (`127.0.0.1:11450`) → raw FTS5 excerpts. No cloud model dependency.
-- **Auth integration gap**: `HubApiFactory` and `HubWebSocketClient` currently do not attach `X-API-Key` or Bearer credentials, while many Hub campaign routes require `require_auth` when `PFGOD_API_KEY_SHA256` is configured. Do not claim the protected Android→Hub flow is integrated; design client credential storage, TLS and tests before enabling strict Hub authentication for a physical Spoke.
+- **Contract is law**: `shared/openapi.yaml` (26 paths) — Retrofit endpoints and WS frames must match it byte-for-byte. Emulator → `http://10.0.2.2:8000`; real device → laptop LAN IP.
+- **Local-only**: Hub LLM is Ollama (`127.0.0.1:11450`) → raw FTS5 excerpts. No cloud tiers, no API keys anywhere in the lane.
 - **Owner**: `.opencode/agent/native-dev.md` (AGP 9.0.1 + KSP 2.3.4 + Room 2.7.0, NGA sqlite-android for FTS5, Filament 1.76, compile 37 / target 34, min 26).
 - **Rendering**: Jetpack Compose for UI plus a real Filament 1.76 render surface for the 3D dice pit (`ui/pit/FilamentPit.kt`). No Unity/Godot. Game-feel comes from Compose canvas animation + SoundPool audio.
 
 ## Current State
-- **Spoke**: 9 destinations (Dice, God/loot, Hero, Rules, Combat, Encounter, Map, Campaign, Setup) using a 4-item bottom bar, dashboard and More navigation; CI verifies `assembleDebug`.
+- **Spoke**: 9-tab native app (Dice, God/loot, Hero, Rules, Combat, Encounter, Map, Campaign, Setup); `assembleDebug` green
 - **Offline Spoke**: rulebook asset bundled (19MB gz → FTS5 extract on first launch), dice engine + haptics/SFX, Room vaults — works with laptop off
-- **Hub**: FastAPI on configured host/port (default `:8000`), with Ollama + FTS5; see the current GitHub Actions `Hub - Tests` and `Hub - Lint` jobs for the live test count instead of relying on a historical 107-test snapshot.
+- **Hub**: Working service on :8000 (Ollama `phi4-mini`, FTS5 rules); `pytest hub/tests/` 107/107 green (hermetic harness)
 - **Native spoke_kt**: the client — Room 2.7/KSP + NGA FTS5 + Retrofit + Compose BOM 2024.10.01; FileProvider export; vault→tracker bridge
 - **Android identity**: applicationId/namespace `com.pathfindergod.spoke`, label "Pathfinder God", circular branded icons
 - **Command Center**: **Standalone exe** at `tools/command_center/dist/PathfinderGodCommandCenter.exe` (~48MB) — launches via `Start_CommandCenter.bat`, no venv required
@@ -89,21 +86,19 @@ $env:JAVA_HOME='C:\android\Android Studio\jbr\jdks\eclipse_adoptium-17-amd64-win
 
 ## Dependencies (spoke_kt)
 - Compose BOM 2024.10.01 (ui, material3, icons-extended, animation), activity-compose, lifecycle-viewmodel-compose
-- Room 2.7.0 (KSP 2.3.4) + `mil.nga:sqlite-android:3500400` (SQLite 3.50.4; 16 KB-aligned 64-bit libs — Android SQLite lacks FTS5, never the platform driver)
+- Room 2.7.0 (KSP 2.3.4) + `mil.nga:sqlite-android:3450200` (Android SQLite lacks FTS5 — never the platform driver)
 - Retrofit 2.11/OkHttp 4.12 + kotlinx-serialization converter; AGDK games-activity/frame-pacing
 - Audio is framework `SoundPool` + `MediaPlayer` (no Oboe dependency)
 
 ## Gotchas
 - Android emulator → hub at `http://10.0.2.2:8000` (not localhost)
-- Real device debug build → hub at the current laptop LAN IP (`http://<laptop-LAN-IP>:8000`); a release build requires trusted HTTPS to a real phone
+- Real device → hub at laptop's LAN IP (e.g., `http://192.168.4.144:8000`)
 - WebSocket drops on sleep → SOLVED: backoff reconnect lives in `HubForegroundService`
 - Re-bundling the rules DB → bump `DatabaseAssetManager.BUNDLE_VERSION` or devices keep the stale extract
-- **Instrumented suite needs an awake, unlocked phone**: with the screen asleep every Compose test fails `No compose hierarchies found in the app` (29/29 in one run) because the Activity never reaches the foreground. Run `spoke_kt/scripts/device-test.ps1`, not the bare Gradle task: it applies `svc power stayon true`, wakes and verifies the device, then restores the setting
 - Android SQLite has no FTS5 → always query via the NGA bridge (`NgaSQLiteOpenHelperFactory`)
 - `./gradlew` daemons get reaped in this shell → always `--no-daemon` with a capped heap
 - `io.requery:sqlite-android` does not exist on Central — the fork is `mil.nga:sqlite-android`, do not "fix" it
 - **Command Center**: Use the standalone exe at `tools/command_center/dist/PathfinderGodCommandCenter.exe` (no venv needed). `Start_CommandCenter.bat` updated.
 ## Session start (OpenCode / any agent)
 - Before doing anything else, read `docs/MASTER_PROMPT.md` — it is the current mission brief: verified repo state, architecture facts, house rules, toolchain routing, and the prioritized task list.
-- Then read `docs/pathfinder-god-checklist.md` — the living tracker of what is done, decided, and next.
-- The repository owner is the only merge authority. Work on a scoped branch and keep its PR open through review/patch/CI; never push directly to `main`. `RULES.md` §1.3 overrides any older main-only instructions in `docs/MASTER_PROMPT.md` or dated `docs/FOR_MUSE.md` entries.
+- Then read `artifact-chain/CHAIN.md` (status board) and `COUNCIL.md` (roles and gates). Glenn is the only merge authority; nothing merges or pushes to `main` without his explicit say-so.
