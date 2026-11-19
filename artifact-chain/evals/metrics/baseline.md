@@ -24,7 +24,10 @@ CI first-pass, gate dwell.
 
 - PR #40 (Phase 2 character sheet sync) — merged 17 Nov 2026, before RSI started.
 - PR #41 (pit material hardening) — merged 18 Nov 2026, before RSI started.
-- Neither ran through the council loop and neither has a metrics file.
+- PR #49 (Issue #33 Phases 3–4 offline sync) — merged 18 Nov 2026, before RSI started.
+- PR #50 (pit prebuilt .filamat materials) — merged 18 Nov 2026, before RSI started.
+- PR #51 (checklist merged records for #49/#50) — merged 18 Nov 2026, before RSI started.
+- None ran through the council loop and none has a metrics file.
   Retrofitting numbers would be guessing, not measuring.
 
 ## After the batch

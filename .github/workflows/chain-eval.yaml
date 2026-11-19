@@ -1,0 +1,43 @@
+# Chain eval — golden fixtures for the council chain checker.
+#
+# Runs check-chain.sh against the good fixture (must pass), the broken
+# fixture (must fail naming both planted faults), and the live chain's
+# spec/plan dirs (must have no orphan requirements or tasks).
+# Scoped to the pilot branch only; the product CI in ci.yml is untouched.
+name: Chain eval
+
+on:
+  pull_request:
+    branches: [council-chain-pilot]
+    paths:
+      - 'artifact-chain/evals/**'
+      - '.github/workflows/chain-eval.yaml'
+  push:
+    branches: [council-chain-pilot]
+    paths:
+      - 'artifact-chain/evals/**'
+      - '.github/workflows/chain-eval.yaml'
+  workflow_dispatch:
+
+jobs:
+  chain-eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Golden fixture — good must pass
+        run: bash artifact-chain/evals/check-chain.sh artifact-chain/evals/fixtures/good
+
+      - name: Golden fixture — broken must fail naming both faults
+        run: |
+          set +e
+          out=$(bash artifact-chain/evals/check-chain.sh artifact-chain/evals/fixtures/broken 2>&1)
+          rc=$?
+          set -e
+          echo "$out"
+          [ "$rc" -eq 1 ] || { echo "expected exit 1 on broken fixture, got $rc"; exit 1; }
+          echo "$out" | grep -q "ORPHAN REQUIREMENT: R5" || { echo "missing R5 finding"; exit 1; }
+          echo "$out" | grep -q "ORPHAN TASK: T2" || { echo "missing T2 finding"; exit 1; }
+
+      - name: Live chain — spec/plan consistency
+        run: bash artifact-chain/evals/check-chain.sh artifact-chain
