@@ -32,10 +32,17 @@ import com.pathfindergod.spoke.ui.designsystem.GodSectionHeader
 import com.pathfindergod.spoke.ui.designsystem.GodTags
 import com.pathfindergod.spoke.ui.designsystem.Spacing
 import com.pathfindergod.spoke.ui.navigation.Destination
-import com.pathfindergod.spoke.ui.navigation.overflowDestinations
+import com.pathfindergod.spoke.ui.navigation.Destinations
 import com.pathfindergod.spoke.ui.theme.GoldAccent
 import com.pathfindergod.spoke.ui.theme.ParchmentSurface
 import com.pathfindergod.spoke.ui.theme.TextPrimary
+
+// The More sheet is grouped by role: where the game is, and the GM/setup
+// destinations that live in the sheet only. Campaign moved to the bottom bar.
+private val gameAndWorld: List<Destination> =
+    listOf(Destinations.Home, Destinations.Encounter, Destinations.Map)
+private val gmAndSetup: List<Destination> =
+    listOf(Destinations.God, Destinations.Setup, Destinations.AudioCredits)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,42 +72,66 @@ fun MoreSheet(
                     prominent = true,
                 )
             }
-            items(overflowDestinations, key = { it.route }) { destination ->
-                val here = destination.route == currentRoute
-                GodCard(
-                    contentPadding = PaddingValues(Dimens.cardPaddingTight),
-                    onClick = { onOpen(destination) },
-                    onClickLabel = stringResource(R.string.a11y_open_destination),
-                    contentDescription = stringResource(destination.labelRes),
-                    stateDescription = if (here) {
-                        stringResource(R.string.a11y_current_destination)
-                    } else {
-                        null
-                    },
-                    testTag = GodTags.moreDestination(destination.route),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(Spacing.md),
-                    ) {
-                        Icon(
-                            painter = painterResource(destination.iconRes),
-                            contentDescription = null,
-                            tint = GoldAccent,
-                            modifier = Modifier.size(Dimens.statusDot * 2),
-                        )
-                        Text(
-                            text = stringResource(destination.labelRes),
-                            style = MaterialTheme.typography.titleMedium,
-                            color = TextPrimary,
-                            modifier = Modifier.weight(1f),
-                        )
-                        if (here) {
-                            GodBadge(text = stringResource(R.string.more_here))
-                        }
-                    }
-                }
+            item {
+                GodSectionHeader(
+                    text = stringResource(R.string.more_section_game_world),
+                    prominent = true,
+                )
+            }
+            items(gameAndWorld, key = { it.route }) { destination ->
+                MoreDestinationCard(destination, currentRoute, onOpen)
+            }
+            item {
+                GodSectionHeader(
+                    text = stringResource(R.string.more_section_gm_setup),
+                    prominent = true,
+                )
+            }
+            items(gmAndSetup, key = { it.route }) { destination ->
+                MoreDestinationCard(destination, currentRoute, onOpen)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MoreDestinationCard(
+    destination: Destination,
+    currentRoute: String?,
+    onOpen: (Destination) -> Unit,
+) {
+    val here = destination.route == currentRoute
+    GodCard(
+        contentPadding = PaddingValues(Dimens.cardPaddingTight),
+        onClick = { onOpen(destination) },
+        onClickLabel = stringResource(R.string.a11y_open_destination),
+        contentDescription = stringResource(destination.labelRes),
+        stateDescription = if (here) {
+            stringResource(R.string.a11y_current_destination)
+        } else {
+            null
+        },
+        testTag = GodTags.moreDestination(destination.route),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+        ) {
+            Icon(
+                painter = painterResource(destination.iconRes),
+                contentDescription = null,
+                tint = GoldAccent,
+                modifier = Modifier.size(Dimens.statusDot * 2),
+            )
+            Text(
+                text = stringResource(destination.labelRes),
+                style = MaterialTheme.typography.titleMedium,
+                color = TextPrimary,
+                modifier = Modifier.weight(1f),
+            )
+            if (here) {
+                GodBadge(text = stringResource(R.string.more_here))
             }
         }
     }

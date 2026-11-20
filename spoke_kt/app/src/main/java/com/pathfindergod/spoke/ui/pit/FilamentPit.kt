@@ -11,8 +11,11 @@ import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -48,7 +51,10 @@ import com.google.android.filament.Texture
 import com.google.android.filament.TextureSampler
 import com.google.android.filament.VertexBuffer
 import com.pathfindergod.spoke.R
+import com.pathfindergod.spoke.ui.designsystem.GodChip
 import com.pathfindergod.spoke.ui.designsystem.GodStatusText
+import com.pathfindergod.spoke.ui.designsystem.GodTags
+import com.pathfindergod.spoke.ui.designsystem.Spacing
 import com.pathfindergod.spoke.ui.dice.Die
 import com.pathfindergod.spoke.ui.dice.Impact
 import kotlinx.coroutines.Dispatchers
@@ -454,7 +460,7 @@ private class PitRig {
 fun FilamentPit(
     die: Die,
     face: Int,
-    rollToken: Int,
+    rollTrigger: Int,
     impact: Impact = Impact.NORMAL,
     modifier: Modifier = Modifier,
     onImpact: () -> Unit = {},
@@ -463,6 +469,7 @@ fun FilamentPit(
     val lifecycleOwner = LocalLifecycleOwner.current
     val rig = remember { PitRig() }
     var failed by remember { mutableStateOf(false) }
+    var retry by remember { mutableStateOf(0) }
     Box(
         modifier = modifier.pointerInput(Unit) {
             detectTransformGestures { _, pan, zoom, _ -> rig.orbit(pan.x, pan.y, zoom) }
@@ -507,7 +514,23 @@ fun FilamentPit(
             modifier = Modifier.fillMaxSize(),
         )
         if (failed) {
-            GodStatusText(text = stringResource(R.string.pit_failed))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                GodStatusText(
+                    text = stringResource(R.string.pit_failed),
+                    modifier = Modifier.padding(end = Spacing.md),
+                )
+                GodChip(
+                    label = stringResource(R.string.pit_ignite_again),
+                    onClick = {
+                        failed = false
+                        retry++
+                    },
+                    testTag = GodTags.PIT_IGNITE_AGAIN,
+                )
+            }
         }
     }
     LaunchedEffect(die) {
@@ -523,8 +546,25 @@ fun FilamentPit(
             failed = true
         }
     }
-    LaunchedEffect(rollToken) {
-        if (rollToken == 0) return@LaunchedEffect
+    LaunchedEffect(retry) {
+        if (retry == 0) return@LaunchedEffect
+        // Re-prepare and re-install after "Ignite again" — the same path the
+        // first launch takes, so the retry is equally capable of failing and
+        // the chip reappears on a fresh failure.
+        val assets = withContext(Dispatchers.Default) { prepareAssets(context, die) }
+        if (assets == null) {
+            failed = true
+            return@LaunchedEffect
+        }
+        try {
+            rig.install(assets)
+            failed = false
+        } catch (_: Throwable) {
+            failed = true
+        }
+    }
+    LaunchedEffect(rollTrigger) {
+        if (rollTrigger == 0) return@LaunchedEffect
         rig.roll(impact != Impact.NORMAL, face, onImpact)
     }
     DisposableEffect(lifecycleOwner) {

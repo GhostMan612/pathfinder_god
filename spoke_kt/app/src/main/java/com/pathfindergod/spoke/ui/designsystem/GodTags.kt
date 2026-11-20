@@ -22,7 +22,9 @@ object GodTags {
     const val HOME_ENCOUNTER = "pg:home:encounter"
 
     const val DICE_PIT = "pg:dice:pit"
+    const val PIT_IGNITE_AGAIN = "pg:pit:ignite:again"
     const val DICE_RESULT = "pg:dice:result"
+    const val DICE_FACE = "pg:dice:face"
     const val DICE_ROLL_BUTTON = "pg:dice:roll"
     const val DICE_HISTORY_CLEAR = "pg:dice:history:clear"
 

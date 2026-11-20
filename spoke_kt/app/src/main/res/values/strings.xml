@@ -44,6 +44,8 @@
     <string name="hero_missing_back">‹ Roster</string>
     <string name="map_viewer_title">Map</string>
     <string name="more_title">More</string>
+    <string name="more_section_game_world">Game &amp; World</string>
+    <string name="more_section_gm_setup">GM &amp; Setup</string>
     <string name="more_here">HERE</string>
     <string name="more_audio_credits">Credits</string>
 
@@ -132,7 +134,8 @@
 
     <string name="dice_face_pattern">d%1$d</string>
     <string name="dice_roll">ROLL</string>
-    <string name="dice_no_result">—</string>
+    <string name="dice_no_result">-</string>
+    <string name="dice_face_chip">Face: %1$d</string>
     <string name="dice_prompt">Choose a die and roll.</string>
     <string name="dice_crit_success">%1$s — critical success!</string>
     <string name="dice_crit_failure">%1$s — critical failure.</string>
@@ -163,6 +166,7 @@
     <string name="dice_history_heading">ROLLS</string>
     <string name="dice_history_clear">CLEAR</string>
     <string name="pit_failed">Pit failed to ignite.</string>
+    <string name="pit_ignite_again">Ignite again</string>
 
     <string name="campaign_empty">No chronicle begun — name a campaign below.</string>
     <string name="campaign_summarizing">The chronicler writes…</string>

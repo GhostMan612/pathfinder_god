@@ -57,7 +57,7 @@ private fun glyphScale(glyph: Float): Float =
 fun DiceCanvas(
     die: Die,
     face: Int,
-    rollToken: Int,
+    rollTrigger: Int,
     modifier: Modifier = Modifier,
     impact: Impact = Impact.NORMAL,
     onImpact: () -> Unit = {},
@@ -80,8 +80,8 @@ fun DiceCanvas(
     // BP-08 O8: was the raw pixel constant -260f, so the throw was ~3x longer
     // on a xxxhdpi device than on an mdpi one. Convert a dp token to pixels.
     val dropStartPx = with(LocalDensity.current) { Dimens.diceDropTravel.toPx() }
-    LaunchedEffect(rollToken, dropStartPx) {
-        if (rollToken == 0) return@LaunchedEffect
+    LaunchedEffect(rollTrigger, dropStartPx) {
+        if (rollTrigger == 0) return@LaunchedEffect
         launch {
             drop.snapTo(dropStartPx)
             drop.animateTo(0f, spring(dampingRatio = DAMPING, stiffness = settle))
