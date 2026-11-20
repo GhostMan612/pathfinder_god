@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:name="glint" android:pivotX="54" android:pivotY="54">
+        <path
+            android:fillColor="#C8A846"
+            android:pathData="M 54 6 A 48 48 0 1 1 54 102 A 48 48 0 1 1 54 6" />
+    </group>
+    <path
+        android:fillColor="#12100E"
+        android:pathData="M 54 26 A 28 28 0 1 1 54 82 A 28 28 0 1 1 54 26" />
+    <path
+        android:fillColor="#C8A846"
+        android:pathData="M 90 54 L 67.84 59.77 L 79.46 79.46 L 59.77 67.84 L 54 90 L 48.23 67.84 L 28.54 79.46 L 40.16 59.77 L 18 54 L 40.16 48.23 L 28.54 28.54 L 48.23 40.16 L 54 18 L 59.77 40.16 L 79.46 28.54 L 67.84 48.23 Z" />
+</vector>

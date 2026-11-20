@@ -91,9 +91,8 @@ object Destinations {
 
 val overflowDestinations: List<Destination> = listOf(
     Destinations.Home,
-    Destinations.Campaign,
-    Destinations.Map,
     Destinations.Encounter,
+    Destinations.Map,
     Destinations.God,
     Destinations.Setup,
     Destinations.AudioCredits,
@@ -103,7 +102,9 @@ enum class NavigationItem(val destination: Destination) {
     DICE(Destinations.Dice),
     COMBAT(Destinations.Combat),
     HERO(Destinations.Hero),
-    RULES(Destinations.Rules);
+    RULES(Destinations.Rules),
+    CAMPAIGN(Destinations.Campaign),
+    ;
 
     fun matches(route: String?): Boolean = destination.entry == route?.substringBefore("?")
 }

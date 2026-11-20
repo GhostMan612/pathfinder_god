@@ -42,7 +42,7 @@ data class DiceUiState(
     val targetNumber: Int? = null,
     val record: RollRecord? = null,
     val history: List<RollEntry> = emptyList(),
-    val rollToken: Int = 0,
+    val rollTrigger: Int = 0,
     val error: UiText? = null,
 ) {
     val sides: Int get() = die.sides
@@ -141,7 +141,7 @@ class DiceViewModel(
         _state.value = current.copy(
             record = stamped,
             history = (listOf(entry) + current.history).take(MAX_ROLL_HISTORY),
-            rollToken = current.rollToken + 1,
+            rollTrigger = current.rollTrigger + 1,
             error = null,
         )
         audio.buttonPress()

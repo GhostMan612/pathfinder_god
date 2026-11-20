@@ -5,6 +5,7 @@
 
 package com.pathfindergod.spoke.ui.home
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -38,6 +39,7 @@ import com.pathfindergod.spoke.ui.designsystem.GodStatTile
 import com.pathfindergod.spoke.ui.designsystem.GodStatusText
 import com.pathfindergod.spoke.ui.designsystem.GodTags
 import com.pathfindergod.spoke.ui.designsystem.GodTone
+import com.pathfindergod.spoke.ui.designsystem.GodTexture
 import com.pathfindergod.spoke.ui.designsystem.Spacing
 import com.pathfindergod.spoke.ui.dice.Die
 import com.pathfindergod.spoke.ui.navigation.Destination
@@ -67,10 +69,13 @@ fun HomeDashboardScreen(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
+            // RPG floor: a procedural parchment grain behind the home column.
+            .background(GodTexture.parchmentBrush())
             .padding(Spacing.lg),
         verticalArrangement = Arrangement.spacedBy(Spacing.md),
     ) {
         HomeHeader()
+        QuickRollCard(onQuickRoll = onQuickRoll)
         PartyTurnCard(
             heroCount = roster.characters.size,
             round = combatState.currentRound,
@@ -79,7 +84,6 @@ fun HomeDashboardScreen(
             activeHp = combat.activeCombatant?.currentHp ?: 0,
             maxHp = combat.activeCombatant?.maxHp ?: 0,
         )
-        QuickRollCard(onQuickRoll = onQuickRoll)
         ActiveEncounterCard(
             label = encounterState.activeLabel,
             monsterCount = encounterState.activeMonsters.size,

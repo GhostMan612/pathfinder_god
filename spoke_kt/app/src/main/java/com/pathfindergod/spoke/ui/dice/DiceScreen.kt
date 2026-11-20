@@ -176,7 +176,7 @@ private fun Roller(
                 FilamentPit(
                     die = state.die,
                     face = state.face,
-                    rollToken = state.rollToken,
+                    rollTrigger = state.rollTrigger,
                     impact = record?.impact ?: Impact.NORMAL,
                     modifier = Modifier.size(220.dp).testTag(GodTags.DICE_PIT),
                     onImpact = onImpact,
@@ -185,7 +185,7 @@ private fun Roller(
                 DiceCanvas(
                     die = state.die,
                     face = state.face,
-                    rollToken = state.rollToken,
+                    rollTrigger = state.rollTrigger,
                     modifier = Modifier.size(180.dp).testTag(GodTags.DICE_PIT),
                     impact = record?.impact ?: Impact.NORMAL,
                     onImpact = onImpact,
@@ -216,6 +216,12 @@ private fun Roller(
                     color = TextSecondary,
                 )
             }
+            GodChip(
+                label = stringResource(R.string.dice_face_chip, state.face),
+                onClick = {},
+                testTag = GodTags.DICE_FACE,
+                modifier = Modifier.padding(top = Spacing.sm),
+            )
         }
         state.error?.let { error ->
             GodStatusText(

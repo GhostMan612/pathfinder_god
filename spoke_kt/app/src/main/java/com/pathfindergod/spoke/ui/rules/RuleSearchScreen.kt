@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import com.pathfindergod.spoke.ui.motion.StaggerIn
@@ -49,6 +50,7 @@ import com.pathfindergod.spoke.ui.designsystem.Dimens
 import com.pathfindergod.spoke.ui.designsystem.GodChip
 import com.pathfindergod.spoke.ui.designsystem.GodEmptyState
 import com.pathfindergod.spoke.ui.designsystem.GodLiveRegion
+import com.pathfindergod.spoke.ui.designsystem.GodLoadingBook
 import com.pathfindergod.spoke.ui.designsystem.GodStatusText
 import com.pathfindergod.spoke.ui.designsystem.GodTags
 import com.pathfindergod.spoke.ui.designsystem.GodTextField
@@ -108,7 +110,15 @@ fun RuleSearchScreen() {
             if (state.failed) {
                 GodStatusText(text = stringResource(R.string.rules_extract_failed))
             } else {
-                GodStatusText(text = stringResource(R.string.rules_extracting))
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    GodLoadingBook(modifier = Modifier.size(240.dp))
+                    GodStatusText(
+                        text = stringResource(R.string.rules_extracting),
+                        modifier = Modifier.padding(top = Spacing.md),
+                    )
+                }
             }
         }
     } else {
